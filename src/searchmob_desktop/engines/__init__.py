@@ -8,7 +8,12 @@ a metasearch.
 from __future__ import annotations
 
 from searchmob_desktop.engines.aggregator import EngineFn, aggregate
+from searchmob_desktop.engines.brave_api import fetch_brave_api
 from searchmob_desktop.engines.duckduckgo import fetch_duckduckgo
+from searchmob_desktop.engines.marginalia import fetch_marginalia
+from searchmob_desktop.engines.mojeek import fetch_mojeek
+from searchmob_desktop.engines.mojeek_api import fetch_mojeek_api
+from searchmob_desktop.engines.mwmbl import fetch_mwmbl
 from searchmob_desktop.engines.normalize import normalize_url
 from searchmob_desktop.engines.proxy import USER_AGENTS, make_privacy_client
 from searchmob_desktop.engines.types import EngineContext, SearchResult
@@ -20,7 +25,12 @@ __all__ = [
     "EngineFn",
     "SearchResult",
     "aggregate",
+    "fetch_brave_api",
     "fetch_duckduckgo",
+    "fetch_marginalia",
+    "fetch_mojeek",
+    "fetch_mojeek_api",
+    "fetch_mwmbl",
     "fetch_wikipedia",
     "make_privacy_client",
     "normalize_url",

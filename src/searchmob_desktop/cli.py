@@ -7,15 +7,24 @@ calls into, so both surfaces share the same library code.
 from __future__ import annotations
 
 import asyncio
+import os
 
+import httpx
 import typer
 from rich.console import Console
 from rich.table import Table
 
 from searchmob_desktop.engines import (
     EngineContext,
+    EngineFn,
+    SearchResult,
     aggregate,
+    fetch_brave_api,
     fetch_duckduckgo,
+    fetch_marginalia,
+    fetch_mojeek,
+    fetch_mojeek_api,
+    fetch_mwmbl,
     fetch_wikipedia,
 )
 from searchmob_desktop.version import __version__
@@ -27,6 +36,11 @@ app = typer.Typer(
     add_completion=False,
 )
 console = Console()
+
+# Env vars the CLI reads to enable the two BYO-key engines. Absent var means the engine is opt-in
+# off and is not appended to the engine list, so no HTTP request goes out to that upstream at all.
+_BRAVE_KEY_ENV = "SEARCHMOB_BRAVE_API_KEY"
+_MOJEEK_KEY_ENV = "SEARCHMOB_MOJEEK_API_KEY"
 
 
 def _version_callback(value: bool) -> None:
@@ -48,15 +62,52 @@ def _root(
     """Root callback so --version works at the top level."""
 
 
+def _build_engines() -> list[EngineFn]:
+    """Assemble the engine list: free engines always, BYO-key engines only when a key is set.
+
+    When `SEARCHMOB_MOJEEK_API_KEY` is present we still keep the free Mojeek HTML adapter in the
+    list. Dedup-by-URL in the aggregator already merges identical hits across the two, and the API
+    surface returns more results when its key is good, so running both is a no-op when the key is
+    valid and a useful fallback when the key has expired.
+    """
+    engines: list[EngineFn] = [
+        fetch_duckduckgo,
+        fetch_wikipedia,
+        fetch_mojeek,
+        fetch_marginalia,
+        fetch_mwmbl,
+    ]
+    brave_key = os.environ.get(_BRAVE_KEY_ENV)
+    if brave_key:
+
+        async def _brave(client: httpx.AsyncClient, ctx: EngineContext) -> list[SearchResult]:
+            return await fetch_brave_api(client, ctx, api_key=brave_key)
+
+        engines.append(_brave)
+    mojeek_key = os.environ.get(_MOJEEK_KEY_ENV)
+    if mojeek_key:
+
+        async def _mojeek_api(client: httpx.AsyncClient, ctx: EngineContext) -> list[SearchResult]:
+            return await fetch_mojeek_api(client, ctx, api_key=mojeek_key)
+
+        engines.append(_mojeek_api)
+    return engines
+
+
 @app.command()
 def search(
     query: str = typer.Argument(..., help="What to search for."),
     max_results: int = typer.Option(10, "--max-results", "-n", help="Max merged results to show."),
     timeout: float = typer.Option(5.0, "--timeout", help="Per-engine HTTP timeout, in seconds."),
 ) -> None:
-    """Run a one-shot metasearch across DuckDuckGo and Wikipedia and print the merged results."""
+    """Run a one-shot metasearch across the configured engines and print the merged results.
+
+    Free engines (no setup): DuckDuckGo, Wikipedia, Mojeek, Marginalia, Mwmbl. Bring-your-own-key
+    engines are enabled by setting `SEARCHMOB_BRAVE_API_KEY` and / or `SEARCHMOB_MOJEEK_API_KEY` in
+    the environment; with no key set the corresponding engine is silently skipped (zero HTTP).
+    """
     ctx = EngineContext(query=query, max_results=max_results, timeout_seconds=timeout)
-    results = asyncio.run(aggregate(ctx, [fetch_duckduckgo, fetch_wikipedia]))
+    results = asyncio.run(aggregate(ctx, _build_engines()))
 
     if not results:
         console.print("[yellow]No results.[/]")
