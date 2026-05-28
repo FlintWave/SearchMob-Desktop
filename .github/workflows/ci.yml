@@ -28,13 +28,16 @@ jobs:
           python-version: '3.12'
           cache: pip
 
-      - name: Install (editable, dev extras + briefcase)
+      - name: Install (editable, all extras + briefcase)
+        # Pull in the gui and storage extras too so mypy can see PySide6 + sqlcipher3 stubs;
+        # without them, the GUI and SQLCipher-backed history modules trip "Cannot find
+        # implementation or library stub" errors that mypy treats as fatal.
         # Briefcase is a build-time dep, not a runtime dep, but we install it in CI so the
         # smoke check below can validate [tool.briefcase.*] parses without errors before the
         # heavier release.yml workflow runs the full packaging.
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev]"
+          pip install -e ".[dev,gui,storage]"
           pip install briefcase
 
       - name: Ruff format
