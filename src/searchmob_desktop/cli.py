@@ -407,9 +407,19 @@ def vault_clear_passphrase() -> None:
 
 @app.command()
 def gui() -> None:
-    """Launch the desktop GUI (PySide6). Placeholder until the GUI module is wired up."""
-    console.print("[yellow]gui not yet implemented[/]")
-    raise typer.Exit(code=2)
+    """Launch the desktop GUI (PySide6).
+
+    Imports of `PySide6` are deferred to inside `run_gui()` so the headless CLI never pays the
+    Qt cost on startup; this subcommand exits cleanly if the `gui` extra was not installed.
+    """
+    try:
+        from searchmob_desktop.gui import run_gui
+    except ImportError as exc:
+        console.print(
+            f"[red]GUI unavailable:[/] {exc}. Install with: pip install searchmob-desktop[gui]"
+        )
+        raise typer.Exit(code=2) from exc
+    raise typer.Exit(code=run_gui())
 
 
 def main() -> None:
