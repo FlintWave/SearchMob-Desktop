@@ -133,19 +133,31 @@ requires = [
 [tool.briefcase.app.searchmob_desktop.linux]
 requires = []
 
-# Debian / Ubuntu .deb runtime deps for PySide6, lifted from Briefcase's PySide6 bootstrap. Build-
-# time deps stay empty; the GitHub runner already has the compiler/toolchain Briefcase needs.
-[tool.briefcase.app.searchmob_desktop.linux.system.debian]
-system_requires = []
-system_runtime_requires = [
+# Linux target ships as an AppImage: one portable binary that runs on any modern distro
+# without coupling to the runner's system Python (Briefcase's `linux system` format
+# refuses to build when setup-python's Python does not match the host's system Python,
+# which is the common case on GitHub runners). AppImage builds inside a manylinux
+# container so the system_requires below are installed INSIDE that container, not on
+# the host runner.
+[tool.briefcase.app.searchmob_desktop.linux.appimage]
+manylinux = "manylinux_2_28"
+system_requires = [
     "libgl1",
-    "libqt6dbus6",
-    "libqt6gui6",
+    "libegl1",
+    "libdbus-1-3",
+    "libxkbcommon0",
+    "libxkbcommon-x11-0",
     "libxcb-cursor0",
     "libxcb-icccm4",
+    "libxcb-image0",
     "libxcb-keysyms1",
+    "libxcb-randr0",
+    "libxcb-render-util0",
     "libxcb-shape0",
-    "libxkbcommon-x11-0",
+    "libxcb-sync1",
+    "libxcb-xfixes0",
+    "libxcb-xinerama0",
+    "libxcb-xkb1",
 ]
 
 [tool.briefcase.app.searchmob_desktop.windows]

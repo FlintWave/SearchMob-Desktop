@@ -39,16 +39,19 @@ jobs:
       matrix:
         include:
           - os: ubuntu-latest
-            label: linux-deb
+            label: linux-appimage
             platform: linux
-            artifact_glob: 'dist/*.deb'
+            briefcase_format: appimage
+            artifact_glob: 'dist/*.AppImage'
           - os: macos-latest
             label: macos-dmg
             platform: macOS
+            briefcase_format: ''
             artifact_glob: 'dist/*.dmg'
           - os: windows-latest
             label: windows-msi
             platform: windows
+            briefcase_format: ''
             artifact_glob: 'dist/*.msi'
     steps:
       - name: Checkout
@@ -67,20 +70,16 @@ jobs:
           pip install briefcase
           pip install -e ".[gui]"
 
-      # Briefcase wants the system Qt deps for a Linux build; the Ubuntu runner has them.
-      - name: Install Linux build deps
-        if: matrix.platform == 'linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libxcb-cursor0 libxcb-icccm4 libxcb-keysyms1 \
-            libxcb-shape0 libxkbcommon-x11-0 libqt6dbus6 libqt6gui6 libgl1
+      # Briefcase's AppImage builds run inside a manylinux container via Docker; the runner needs
+      # Docker available (it is by default on ubuntu-latest). No further host apt deps needed
+      # because AppImage's runtime libs are bundled into the image.
 
       # --adhoc-sign produces a buildable-but-unsigned artifact on macOS/Windows. On Linux the
-      # flag is accepted but ignored (signing is not part of the .deb format here).
+      # AppImage format ignores the flag.
       - name: Briefcase package
         shell: bash
         run: |
-          briefcase package ${{ matrix.platform }} --adhoc-sign
+          briefcase package ${{ matrix.platform }} ${{ matrix.briefcase_format }} --adhoc-sign
 
       - name: Upload installer artifact
         uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
