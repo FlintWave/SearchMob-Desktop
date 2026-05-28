@@ -27,6 +27,7 @@ from searchmob_desktop.engines import (
     fetch_mwmbl,
     fetch_wikipedia,
 )
+from searchmob_desktop.server import serve as _serve_local_server
 from searchmob_desktop.version import __version__
 
 app = typer.Typer(
@@ -127,15 +128,26 @@ def search(
 def serve(
     host: str = typer.Option("127.0.0.1", help="Bind host. 127.0.0.1 is loopback-only."),
     port: int = typer.Option(8787, help="Bind port."),
+    timeout: float = typer.Option(5.0, "--timeout", help="Per-engine HTTP timeout, in seconds."),
+    max_results: int = typer.Option(
+        10, "--max-results", "-n", help="Max merged results returned per query."
+    ),
 ) -> None:
     """Start the local HTTP server so a browser can use SearchMob as its search engine.
 
-    Placeholder until the Starlette/Uvicorn server module is wired up.
+    Routes mirror the Android Ktor server: `/`, `/search`, `/api/search`, `/healthz`,
+    `/opensearch.xml`, and `/suggest`. Loopback-only by default; pass `--host 0.0.0.0` to expose
+    on the LAN once Phase 7 lands. Engine selection (and BYO key handling) reuses `_build_engines`
+    so the served metasearch matches `searchmob-desktop search` exactly.
     """
-    console.print(
-        f"[yellow]serve not yet implemented; would bind[/] http://{host}:{port}/",
+    console.print(f"[cyan]SearchMob Desktop[/] serving on http://{host}:{port}/")
+    _serve_local_server(
+        _build_engines(),
+        host=host,
+        port=port,
+        max_results=max_results,
+        timeout_seconds=timeout,
     )
-    raise typer.Exit(code=2)
 
 
 @app.command()
