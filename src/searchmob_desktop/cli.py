@@ -9,6 +9,8 @@ from __future__ import annotations
 import asyncio
 import getpass
 import os
+import threading
+import time
 
 import httpx
 import typer
@@ -23,6 +25,7 @@ from searchmob_desktop.data import (
 )
 from searchmob_desktop.data.crypto.keyring_kek import KeyringKekStore
 from searchmob_desktop.data.crypto.wrap import KeyringDekWrapper
+from searchmob_desktop.data.history import InMemoryHistoryStore
 from searchmob_desktop.engines import (
     EngineContext,
     EngineFn,
@@ -36,7 +39,21 @@ from searchmob_desktop.engines import (
     fetch_mwmbl,
     fetch_wikipedia,
 )
+from searchmob_desktop.engines.proxy import make_privacy_client
+from searchmob_desktop.prefs import JsonPreferencesStore
 from searchmob_desktop.server import serve as _serve_local_server
+from searchmob_desktop.suggest import (
+    CompositeSuggestionsProvider,
+    HistorySuggestionsProvider,
+    UpstreamSuggestionsProvider,
+)
+from searchmob_desktop.update import (
+    RELEASES_PAGE_URL,
+    UpdateInfo,
+    VersionTag,
+    check_if_due,
+    fetch_latest,
+)
 from searchmob_desktop.version import __version__
 
 app = typer.Typer(
@@ -150,13 +167,119 @@ def serve(
     so the served metasearch matches `searchmob-desktop search` exactly.
     """
     console.print(f"[cyan]SearchMob Desktop[/] serving on http://{host}:{port}/")
+
+    prefs_store = JsonPreferencesStore()
+    prefs = prefs_store.load()
+    history_store = InMemoryHistoryStore()
+    history_store.set_enabled(prefs.history_enabled)
+
+    # Live read on every suggest call so a future settings UI toggle takes effect without
+    # restarting the server. Today the toggle flips by editing prefs.json + restarting,
+    # but the contract is forward-compatible.
+    def _upstream_enabled() -> bool:
+        try:
+            return prefs_store.load().upstream_suggestions_enabled
+        except OSError:
+            return False
+
+    composite = CompositeSuggestionsProvider(
+        history=HistorySuggestionsProvider(history_store),
+        upstream=UpstreamSuggestionsProvider(lambda: make_privacy_client(2.0)),
+        upstream_enabled=_upstream_enabled,
+    )
+
+    _run_update_check_in_background(prefs_store)
+
     _serve_local_server(
         _build_engines(),
         host=host,
         port=port,
+        suggestions_provider=composite,
         max_results=max_results,
         timeout_seconds=timeout,
     )
+
+
+def _current_version_code() -> int:
+    parsed = VersionTag.parse(__version__)
+    return parsed.to_version_code() if parsed else 0
+
+
+def _run_update_check_in_background(prefs_store: JsonPreferencesStore) -> None:
+    """Fire-and-forget the throttled GitHub update check on a thread.
+
+    Never blocks server startup, never crashes the CLI: a bare `except Exception` swallows
+    anything bubbling out (network, serialization, prefs IO). Prints an update banner via
+    `console` if a newer release is found; otherwise stays silent.
+    """
+
+    def _do() -> None:
+        try:
+            prefs = prefs_store.load()
+            now_ms = int(time.time() * 1000)
+            info, stamped = asyncio.run(
+                check_if_due(
+                    prefs,
+                    _current_version_code(),
+                    now_ms=now_ms,
+                    client_factory=lambda: make_privacy_client(4.0),
+                )
+            )
+            if stamped != prefs.last_update_check_ms:
+                prefs_store.save(prefs.with_update_check_stamped(stamped))
+            if info is not None:
+                _print_update_available(info)
+        except Exception:
+            return
+
+    threading.Thread(target=_do, daemon=True).start()
+
+
+def _print_update_available(info: UpdateInfo) -> None:
+    v = info.latest_version
+    console.print(
+        f"[yellow]Update available:[/] [bold]{v.year:02d}.{v.month:02d}.{v.build:02d}[/]"
+        f" -> {info.release_url}"
+    )
+
+
+update_app = typer.Typer(
+    name="update",
+    help="Check GitHub for a newer SearchMob Desktop release.",
+    no_args_is_help=True,
+)
+app.add_typer(update_app, name="update")
+
+
+@update_app.command("check")
+def update_check() -> None:
+    """Run the GitHub Releases update check now, bypassing the daily throttle.
+
+    Prints whether a newer version is available and the releases URL. Returns exit code 0 either
+    way; exit code 2 only on transport errors (so scripts can distinguish "no update" from "could
+    not reach GitHub").
+    """
+
+    async def _probe() -> UpdateInfo | None:
+        async with make_privacy_client(4.0) as client:
+            return await fetch_latest(client)
+
+    info = asyncio.run(_probe())
+    current = _current_version_code()
+    if info is None:
+        console.print(
+            f"[red]Could not reach GitHub.[/] Latest known check failed; you are running "
+            f"{__version__}. Releases page: {RELEASES_PAGE_URL}"
+        )
+        raise typer.Exit(code=2)
+    if info.is_newer_than(current):
+        _print_update_available(info)
+    else:
+        console.print(
+            f"[green]You're on the latest version[/] ({__version__}). "
+            f"Latest published: {info.latest_version.year:02d}."
+            f"{info.latest_version.month:02d}.{info.latest_version.build:02d}"
+        )
 
 
 vault_app = typer.Typer(
