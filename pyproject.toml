@@ -30,6 +30,7 @@ classifiers = [
 # Optional extras keep the headless / CLI-only install slim.
 dependencies = [
     "httpx>=0.28",
+    "beautifulsoup4>=4.12",
     "starlette>=0.45",
     "uvicorn[standard]>=0.34",
     "typer>=0.15",
@@ -44,6 +45,7 @@ storage = ["pysqlcipher3>=1.2"]
 dev = [
     "pytest>=8",
     "pytest-asyncio>=0.25",
+    "respx>=0.22",
     "ruff>=0.8",
     "mypy>=1.15",
 ]

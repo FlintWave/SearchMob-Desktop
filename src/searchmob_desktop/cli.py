@@ -6,9 +6,18 @@ calls into, so both surfaces share the same library code.
 
 from __future__ import annotations
 
+import asyncio
+
 import typer
 from rich.console import Console
+from rich.table import Table
 
+from searchmob_desktop.engines import (
+    EngineContext,
+    aggregate,
+    fetch_duckduckgo,
+    fetch_wikipedia,
+)
 from searchmob_desktop.version import __version__
 
 app = typer.Typer(
@@ -40,13 +49,27 @@ def _root(
 
 
 @app.command()
-def search(query: str = typer.Argument(..., help="What to search for.")) -> None:
-    """Run a one-shot metasearch and print the merged results.
+def search(
+    query: str = typer.Argument(..., help="What to search for."),
+    max_results: int = typer.Option(10, "--max-results", "-n", help="Max merged results to show."),
+    timeout: float = typer.Option(5.0, "--timeout", help="Per-engine HTTP timeout, in seconds."),
+) -> None:
+    """Run a one-shot metasearch across DuckDuckGo and Wikipedia and print the merged results."""
+    ctx = EngineContext(query=query, max_results=max_results, timeout_seconds=timeout)
+    results = asyncio.run(aggregate(ctx, [fetch_duckduckgo, fetch_wikipedia]))
 
-    Placeholder until the engine adapters are ported from the Android app.
-    """
-    console.print(f"[yellow]search not yet implemented; would search for:[/] {query!r}")
-    raise typer.Exit(code=2)
+    if not results:
+        console.print("[yellow]No results.[/]")
+        raise typer.Exit(code=1)
+
+    table = Table(title=f"Results for {query!r}", show_lines=False)
+    table.add_column("Rank", justify="right", style="cyan", no_wrap=True)
+    table.add_column("Title", style="bold")
+    table.add_column("URL", style="blue")
+    table.add_column("Engine", style="green")
+    for rank, item in enumerate(results, start=1):
+        table.add_row(str(rank), item.title, item.url, item.engine)
+    console.print(table)
 
 
 @app.command()
