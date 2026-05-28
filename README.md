@@ -29,12 +29,28 @@ privacy proxy, and the same store-nothing-by-default behavior.
 
 ## Install (alpha)
 
-The first published release is `26.05.00`. Native installers (`.msi`, `.dmg`, `.deb`) are produced by
-Briefcase once the GUI is wired up; until then, install from source:
+The first published release is `26.05.00`. Two install paths:
+
+### End users: native installer (recommended)
+
+Grab the installer for your OS from the [latest GitHub Release](https://github.com/FlintWave/SearchMob-Desktop/releases):
+
+- Windows: `searchmob-desktop-<version>.msi`
+- macOS: `searchmob-desktop-<version>.dmg`
+- Linux (Debian/Ubuntu): `searchmob-desktop_<version>_amd64.deb`
+
+Every release also publishes a `SHA256SUMS` file you can verify before installing.
+
+> **First release is unsigned.** The `.msi` and `.dmg` are built with `--adhoc-sign` and will
+> trigger SmartScreen / Gatekeeper warnings. Authenticode signing on Windows and Apple notarization
+> on macOS land in a follow-up release once the signing secrets are wired into CI; the SHA256SUMS
+> file is the integrity anchor for the alpha.
+
+### Developers / source install
 
 ```bash
 pipx install git+https://github.com/FlintWave/SearchMob-Desktop@main
-# or, with the GUI extra once it lands:
+# or, with the GUI extra:
 pipx install "searchmob-desktop[gui] @ git+https://github.com/FlintWave/SearchMob-Desktop@main"
 
 searchmob-desktop --version
