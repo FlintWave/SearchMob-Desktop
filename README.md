@@ -16,6 +16,8 @@ privacy proxy, and the same store-nothing-by-default behavior.
   bring-your-own Brave / Mojeek API keys. Never scrapes Google. Results are de-duplicated and merged.
 - **Privacy proxy**: no cookies, no referrer, no user/device identifier; the User-Agent is rotated
   per request.
+- **Outbound traffic disclosure**: the only outbound traffic is the searches you run, plus an
+  optional once-a-day update check to GitHub that you can turn off in settings.
 - **Local HTTP server** so any browser can use SearchMob as its default search engine. Loopback-only
   by default; opt-in network mode (`0.0.0.0`) for Tailscale or LAN use, with the same warning gate.
 - **Search-suggestions endpoint** (OpenSearch `application/x-suggestions+json`) advertised in the

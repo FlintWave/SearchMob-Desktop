@@ -24,6 +24,7 @@ Hardening carried over from the Android audit:
 
 from __future__ import annotations
 
+import inspect
 import json
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import asdict
@@ -59,7 +60,7 @@ _OPENSEARCH_CONTENT_TYPE = "application/opensearchdescription+xml"
 # the `/suggest` endpoint never hangs or fails while the user is typing. Mirrors the Kotlin
 # `SuggestionsProvider` interface in `server/suggest/` (typed as a plain callable here rather than
 # a Protocol so a stub like `lambda q, n: ["a"]` works without an explicit cast in tests).
-SuggestionsProvider = Callable[[str, int], list[str]]
+SuggestionsProvider = Callable[[str, int], list[str] | Awaitable[list[str]]]
 
 
 def _no_suggestions(_query: str, _limit: int) -> list[str]:
@@ -170,7 +171,12 @@ def build_app(
         if not query.strip():
             body = _suggestions_body("", [])
         else:
-            suggestions = list(provider(query, max_suggestions))[:max_suggestions]
+            # A provider may be sync (returns a list) or async (returns an awaitable list);
+            # accept both so a pure local source stays simple while an upstream-backed one
+            # uses async HTTP without bridging.
+            raw = provider(query, max_suggestions)
+            resolved = await raw if inspect.isawaitable(raw) else raw
+            suggestions = list(resolved)[:max_suggestions]
             body = _suggestions_body(query, suggestions)
         return Response(body, media_type=_SUGGESTIONS_CONTENT_TYPE)
 
