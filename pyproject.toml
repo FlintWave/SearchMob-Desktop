@@ -1,0 +1,86 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "searchmob-desktop"
+description = "SearchMob Desktop: private, on-device metasearch for Windows, macOS, and Linux."
+readme = "README.md"
+license = "AGPL-3.0-or-later"
+license-files = ["LICENSE"]
+authors = [{ name = "FlintWave", email = "flintwave@tuta.com" }]
+requires-python = ">=3.12"
+dynamic = ["version"]
+keywords = ["search", "metasearch", "privacy", "duckduckgo", "mojeek", "marginalia", "wikipedia"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Environment :: X11 Applications :: Qt",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: GNU Affero General Public License v3 or later (AGPLv3+)",
+    "Operating System :: MacOS",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Internet :: WWW/HTTP :: Indexing/Search",
+]
+
+# Core runtime: HTTP client + local server + CLI rendering + symmetric crypto + KDF.
+# Optional extras keep the headless / CLI-only install slim.
+dependencies = [
+    "httpx>=0.28",
+    "starlette>=0.45",
+    "uvicorn[standard]>=0.34",
+    "typer>=0.15",
+    "rich>=14",
+    "cryptography>=45",
+    "argon2-cffi>=24",
+]
+
+[project.optional-dependencies]
+gui = ["PySide6>=6.8"]
+storage = ["pysqlcipher3>=1.2"]
+dev = [
+    "pytest>=8",
+    "pytest-asyncio>=0.25",
+    "ruff>=0.8",
+    "mypy>=1.15",
+]
+
+[project.scripts]
+searchmob-desktop = "searchmob_desktop.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/FlintWave/SearchMob-Desktop"
+Repository = "https://github.com/FlintWave/SearchMob-Desktop"
+Issues = "https://github.com/FlintWave/SearchMob-Desktop/issues"
+Changelog = "https://github.com/FlintWave/SearchMob-Desktop/releases"
+
+[tool.hatch.version]
+path = "src/searchmob_desktop/version.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/searchmob_desktop"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+# Pragmatic starter ruleset: errors, undefined-name, imports, bugbears, modern-Python upgrades,
+# ruff's own catches. Tighten over time.
+select = ["E", "F", "I", "B", "UP", "RUF"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+files = ["src", "tests"]
+
+# Briefcase packaging config goes here once the GUI/server are real enough to bundle. Keeping the
+# initial scaffold lean; see ROADMAP.md.
