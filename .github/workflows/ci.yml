@@ -28,6 +28,17 @@ jobs:
           python-version: '3.12'
           cache: pip
 
+      - name: Install Qt runtime libraries (needed to import PySide6 on headless Linux)
+        # PySide6's modules dlopen libEGL + xcb plugins at import time, even when the test
+        # never constructs a QApplication. Installing just enough so the imports succeed.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libegl1 libgl1 libxkbcommon0 libxkbcommon-x11-0 \
+            libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 \
+            libxcb-randr0 libxcb-render-util0 libxcb-shape0 libxcb-sync1 \
+            libxcb-xfixes0 libxcb-xinerama0 libxcb-xkb1 libdbus-1-3
+
       - name: Install (editable, all extras + briefcase)
         # Pull in the gui and storage extras too so mypy can see PySide6 + sqlcipher3 stubs;
         # without them, the GUI and SQLCipher-backed history modules trip "Cannot find
