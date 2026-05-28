@@ -7,6 +7,7 @@ calls into, so both surfaces share the same library code.
 from __future__ import annotations
 
 import asyncio
+import getpass
 import os
 
 import httpx
@@ -14,6 +15,14 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
+from searchmob_desktop.data import (
+    ZERO_KNOWLEDGE_UNRECOVERABLE_WARNING,
+    BootstrapMetadataStore,
+    StorageBootstrap,
+    WrapMode,
+)
+from searchmob_desktop.data.crypto.keyring_kek import KeyringKekStore
+from searchmob_desktop.data.crypto.wrap import KeyringDekWrapper
 from searchmob_desktop.engines import (
     EngineContext,
     EngineFn,
@@ -148,6 +157,129 @@ def serve(
         max_results=max_results,
         timeout_seconds=timeout,
     )
+
+
+vault_app = typer.Typer(
+    name="vault",
+    help="Manage the encrypted-storage vault (OS keyring or zero-knowledge passphrase).",
+    no_args_is_help=True,
+)
+app.add_typer(vault_app, name="vault")
+
+
+def _build_storage() -> StorageBootstrap:
+    """Wire a `StorageBootstrap` against the OS keyring + the default metadata file location."""
+    metadata_store = BootstrapMetadataStore()
+    # The keyring fallback file sits next to the metadata file under the user data dir, so a user
+    # who blows away the SearchMob data dir resets the whole vault as one atomic step.
+    fallback_path = metadata_store.path.parent / "keyring-fallback.kek"
+    kek_store = KeyringKekStore(fallback_file_path=fallback_path)
+    keyring_wrapper = KeyringDekWrapper(kek_store)
+    return StorageBootstrap(
+        metadata_store=metadata_store,
+        keyring_wrapper=keyring_wrapper,
+        keyring_clearer=kek_store.clear,
+    )
+
+
+@vault_app.command("status")
+def vault_status() -> None:
+    """Print the current vault mode, whether it is unlocked, and where metadata lives."""
+    storage = _build_storage()
+    mode = storage.mode
+    if mode is None:
+        console.print("[yellow]vault: uninitialized[/] (no metadata file yet)")
+    else:
+        console.print(f"vault mode: [cyan]{mode.value}[/]")
+    # `unlock_keyring` is a no-op + safe to call before anything else; surface the result so
+    # `status` is informative for OS-mode vaults right out of the box.
+    if mode == WrapMode.OS:
+        storage.unlock_keyring()
+    state = "unlocked" if storage.is_unlocked else "locked"
+    console.print(
+        f"state: [green]{state}[/]" if storage.is_unlocked else f"state: [yellow]{state}[/]"
+    )
+    console.print(f"metadata file: {storage.metadata_store.path}")
+
+
+@vault_app.command("unlock")
+def vault_unlock() -> None:
+    """Unlock the vault. OS mode is silent; passphrase mode prompts."""
+    storage = _build_storage()
+    mode = storage.mode
+    if mode is None:
+        # First run: bootstrap implicitly so the user can start using the app right away.
+        storage.first_run()
+        console.print("[green]vault initialized in OS mode and unlocked.[/]")
+        return
+    if mode == WrapMode.OS:
+        ok = storage.unlock_keyring()
+        if ok:
+            console.print("[green]vault unlocked (OS mode).[/]")
+        else:
+            console.print("[red]vault unlock failed: keyring entry missing or unreadable.[/]")
+            raise typer.Exit(code=1)
+        return
+    # Passphrase mode.
+    passphrase = bytearray(getpass.getpass("vault passphrase: ").encode("utf-8"))
+    try:
+        ok = storage.unlock_with_passphrase(passphrase)
+    finally:
+        # Zero the local buffer so the passphrase does not linger in memory longer than needed.
+        for i in range(len(passphrase)):
+            passphrase[i] = 0
+    # Generic message either way; do not branch text on success / failure beyond pass/fail to
+    # avoid leaking timing or error-class information.
+    if ok:
+        console.print("[green]vault unlocked.[/]")
+    else:
+        console.print("[red]wrong passphrase.[/]")
+        raise typer.Exit(code=1)
+
+
+@vault_app.command("set-passphrase")
+def vault_set_passphrase() -> None:
+    """Switch to zero-knowledge mode. Prints the unrecoverable-data warning first."""
+    storage = _build_storage()
+    if storage.mode is None:
+        # Bootstrap first so there is a DEK to re-wrap.
+        storage.first_run()
+    elif storage.mode == WrapMode.OS and not storage.is_unlocked:
+        storage.unlock_keyring()
+    if not storage.is_unlocked:
+        console.print("[red]vault must be unlocked first. Run `vault unlock`.[/]")
+        raise typer.Exit(code=1)
+    console.print(f"[yellow]{ZERO_KNOWLEDGE_UNRECOVERABLE_WARNING}[/]")
+    confirm = typer.prompt("Type 'I UNDERSTAND' to continue").strip()
+    if confirm != "I UNDERSTAND":
+        console.print("aborted.")
+        raise typer.Exit(code=1)
+    p1 = bytearray(getpass.getpass("new passphrase: ").encode("utf-8"))
+    p2 = bytearray(getpass.getpass("confirm passphrase: ").encode("utf-8"))
+    try:
+        if bytes(p1) != bytes(p2):
+            console.print("[red]passphrases do not match.[/]")
+            raise typer.Exit(code=1)
+        storage.enable_zero_knowledge(p1, warning_confirmed=True)
+    finally:
+        for buf in (p1, p2):
+            for i in range(len(buf)):
+                buf[i] = 0
+    console.print("[green]zero-knowledge mode enabled.[/]")
+
+
+@vault_app.command("clear-passphrase")
+def vault_clear_passphrase() -> None:
+    """Switch back to OS-keyring mode. Requires the vault to be unlocked first."""
+    storage = _build_storage()
+    if storage.mode != WrapMode.PASSPHRASE:
+        console.print("vault is not in passphrase mode; nothing to clear.")
+        raise typer.Exit(code=1)
+    if not storage.is_unlocked:
+        console.print("[red]vault must be unlocked first. Run `vault unlock`.[/]")
+        raise typer.Exit(code=1)
+    storage.disable_zero_knowledge()
+    console.print("[green]zero-knowledge mode disabled. Vault is back to OS-keyring mode.[/]")
 
 
 @app.command()

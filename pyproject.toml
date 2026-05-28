@@ -37,11 +37,16 @@ dependencies = [
     "rich>=14",
     "cryptography>=45",
     "argon2-cffi>=24",
+    "platformdirs>=4",
+    "keyring>=25",
 ]
 
 [project.optional-dependencies]
 gui = ["PySide6>=6.8"]
-storage = ["pysqlcipher3>=1.2"]
+# pysqlcipher3 is unmaintained and fails to build on modern toolchains; sqlcipher3-binary is the
+# actively-shipped wheel of the same C binding (`sqlcipher3` module), so the import surface used
+# below is identical.
+storage = ["sqlcipher3-binary>=0.5"]
 dev = [
     "pytest>=8",
     "pytest-asyncio>=0.25",
