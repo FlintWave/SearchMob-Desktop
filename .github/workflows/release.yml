@@ -1,0 +1,129 @@
+name: release
+
+# Build Linux .deb / macOS .dmg / Windows .msi installers with Briefcase, then publish the artifacts
+# (plus SHA256SUMS) to the GitHub Release. Triggered only when a Release is published or a v* tag is
+# pushed; ordinary pushes and pull requests never reach this workflow.
+#
+# Signing status (first release): UNSIGNED.
+# - Windows: --adhoc-sign (no Authenticode signature). Future signing lives behind a
+#   WINDOWS_CODESIGN_PFX_BASE64 / WINDOWS_CODESIGN_PFX_PASSWORD secret pair.
+# - macOS: --adhoc-sign (Apple's "ad-hoc" identity, not notarized). Future notarization lives
+#   behind APPLE_ID / APPLE_APP_SPECIFIC_PASSWORD / APPLE_TEAM_ID / APPLE_CERT_* secrets.
+# - Linux: .deb is not code-signed in the Authenticode sense; downstream apt repos sign the
+#   index. The SHA256SUMS file is the integrity anchor for end users for this first release.
+#
+# Third-party actions are pinned by full commit SHA (supply-chain hardening); the trailing comment
+# is the human-readable version tag.
+
+on:
+  release:
+    types: [published]
+  push:
+    tags:
+      - 'v*'
+
+# Read-only by default; the publish job below elevates to contents: write to attach assets.
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build ${{ matrix.label }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            label: linux-deb
+            platform: linux
+            artifact_glob: 'dist/*.deb'
+          - os: macos-latest
+            label: macos-dmg
+            platform: macOS
+            artifact_glob: 'dist/*.dmg'
+          - os: windows-latest
+            label: windows-msi
+            platform: windows
+            artifact_glob: 'dist/*.msi'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install Briefcase and the project
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          pip install briefcase
+          pip install -e ".[gui]"
+
+      # Briefcase wants the system Qt deps for a Linux build; the Ubuntu runner has them.
+      - name: Install Linux build deps
+        if: matrix.platform == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxcb-cursor0 libxcb-icccm4 libxcb-keysyms1 \
+            libxcb-shape0 libxkbcommon-x11-0 libqt6dbus6 libqt6gui6 libgl1
+
+      # --adhoc-sign produces a buildable-but-unsigned artifact on macOS/Windows. On Linux the
+      # flag is accepted but ignored (signing is not part of the .deb format here).
+      - name: Briefcase package
+        shell: bash
+        run: |
+          briefcase package ${{ matrix.platform }} --adhoc-sign
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        with:
+          name: ${{ matrix.label }}
+          path: ${{ matrix.artifact_glob }}
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Publish to GitHub Release
+    needs: [build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Download all installer artifacts
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
+        with:
+          path: artifacts
+
+      - name: Stage release assets and compute SHA256SUMS
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          # Flatten the matrix output (one subdir per matrix label) into dist/.
+          find artifacts -type f \( -name '*.deb' -o -name '*.dmg' -o -name '*.msi' \) \
+            -exec cp -v {} dist/ \;
+          ( cd dist && sha256sum -- * > SHA256SUMS )
+          echo "Published artifacts:"
+          cat dist/SHA256SUMS
+
+      # Upload to the GitHub Release. fail_on_unmatched_files = true so a missing platform asset
+      # surfaces as a workflow failure (we want all three or none).
+      - name: Publish installers + SHA256SUMS to the GitHub Release
+        uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3.0.0
+        with:
+          files: |
+            dist/*.deb
+            dist/*.dmg
+            dist/*.msi
+            dist/SHA256SUMS
+          fail_on_unmatched_files: true

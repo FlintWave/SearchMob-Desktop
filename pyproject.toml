@@ -89,5 +89,64 @@ python_version = "3.12"
 strict = true
 files = ["src", "tests"]
 
-# Briefcase packaging config goes here once the GUI/server are real enough to bundle. Keeping the
-# initial scaffold lean; see ROADMAP.md.
+# Briefcase packaging. The `briefcase package <platform>` build is driven by the tables below; the
+# release workflow at .github/workflows/release.yml invokes it on the matching runner.
+#
+# Version is mirrored here (rather than read dynamically) because Briefcase resolves PEP621
+# `dynamic = ["version"]` by running the PEP517 build backend in an isolated env, which is wasteful
+# in CI. Bump both this string and src/searchmob_desktop/version.py together at release time.
+[tool.briefcase]
+project_name = "SearchMob Desktop"
+bundle = "com.flintwave"
+version = "26.05.00"
+url = "https://github.com/FlintWave/SearchMob-Desktop"
+author = "FlintWave"
+author_email = "flintwave@tuta.com"
+
+[tool.briefcase.app.searchmob_desktop]
+formal_name = "SearchMob Desktop"
+description = "Private, on-device metasearch for Windows, macOS, and Linux."
+long_description = """SearchMob Desktop is a private, on-device metasearch client that aggregates
+DuckDuckGo, Mojeek, Marginalia, Mwmbl, and Wikipedia behind a single search box. No tracking, no
+cookies, no referrer, no account. The Android edition's privacy proxy and store-nothing-by-default
+behavior carry over unchanged.
+"""
+# License (AGPL-3.0-or-later) and license_files are inherited from the PEP621 [project] table.
+icon = "src/searchmob_desktop/resources/icon"
+sources = ["src/searchmob_desktop"]
+test_sources = ["tests"]
+# Briefcase concatenates [project].dependencies onto this list (see merge_pep621_config), so we
+# only list the GUI-only Qt dep here; the rest comes from the PEP621 dependencies array above.
+# PySide6 lives in the `gui` optional-dependencies group for headless `pipx install` use, but the
+# bundled installer always ships the GUI, so it is a hard requires for Briefcase builds.
+requires = [
+    "PySide6>=6.8",
+]
+
+[tool.briefcase.app.searchmob_desktop.macOS]
+universal_build = true
+min_os_version = "13.0"
+requires = [
+    "std-nslog~=1.0.3",
+]
+
+[tool.briefcase.app.searchmob_desktop.linux]
+requires = []
+
+# Debian / Ubuntu .deb runtime deps for PySide6, lifted from Briefcase's PySide6 bootstrap. Build-
+# time deps stay empty; the GitHub runner already has the compiler/toolchain Briefcase needs.
+[tool.briefcase.app.searchmob_desktop.linux.system.debian]
+system_requires = []
+system_runtime_requires = [
+    "libgl1",
+    "libqt6dbus6",
+    "libqt6gui6",
+    "libxcb-cursor0",
+    "libxcb-icccm4",
+    "libxcb-keysyms1",
+    "libxcb-shape0",
+    "libxkbcommon-x11-0",
+]
+
+[tool.briefcase.app.searchmob_desktop.windows]
+requires = []
