@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable
 from html import escape
-from urllib.parse import urlsplit
+from urllib.parse import quote_plus, urlsplit
 
 from searchmob_desktop.engines import SearchResult
 
@@ -73,6 +73,8 @@ _PAGE_CSS = (
     ".topbar .searchbox input[type=submit]{padding:0 16px}"
     ".results{max-width:660px;margin:0 auto;padding:18px 20px 64px}"
     ".results .meta{color:var(--muted);font-size:13px;margin:2px 0 20px}"
+    ".didyoumean{font-size:15px;margin:2px 0 18px}"
+    ".didyoumean a{font-weight:600;font-style:italic}"
     ".result{margin:0 0 26px}"
     ".result .url{color:var(--url);font-size:13px;white-space:nowrap;overflow:hidden;"
     "text-overflow:ellipsis}"
@@ -178,12 +180,16 @@ def render_results_page(
     query: str,
     results: Iterable[SearchResult],
     is_safe_http_url: Callable[[str], bool],
+    correction: str | None = None,
 ) -> str:
     """The results page. Empty/blank query -> a placeholder; otherwise -> the merged results.
 
     `query` must already be the length-clamped value the JSON endpoint also echoes; this renderer
     only escapes it for HTML safety. `is_safe_http_url` is the scheme-allowlist predicate so a
     `javascript:` or `data:` URL is rendered as plain text instead of an anchor.
+
+    `correction`, when set, is a "did you mean" suggestion from the on-device corrector; it renders
+    a link that re-runs the search with the corrected query.
     """
     # Materialize once so we can both branch on emptiness and iterate.
     results_list = list(results)
@@ -206,6 +212,13 @@ def render_results_page(
     parts.append(_theme_toggle_button())
     parts.append("</div>")
     parts.append('<div class="results">')
+
+    if not blank and correction:
+        href = "/search?q=" + quote_plus(correction)
+        parts.append(
+            '<p class="didyoumean">Did you mean: '
+            f'<a href="{escape(href, quote=True)}">{escape(correction)}</a></p>'
+        )
 
     if blank:
         parts.append('<p class="empty">Enter a query to search.</p>')

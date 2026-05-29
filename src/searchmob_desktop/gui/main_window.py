@@ -9,7 +9,9 @@ the GUI thread via the worker's `finished` signal.
 
 from __future__ import annotations
 
-from PySide6.QtCore import QThreadPool
+from html import escape
+
+from PySide6.QtCore import Qt, QThreadPool
 from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import (
     QHBoxLayout,
@@ -26,6 +28,7 @@ from PySide6.QtWidgets import (
 
 from searchmob_desktop.data.history import InMemoryHistoryStore
 from searchmob_desktop.engines import EngineContext, SearchResult, aggregate
+from searchmob_desktop.engines.correct import start_background_corrector
 from searchmob_desktop.gui.about_dialog import AboutDialog
 from searchmob_desktop.gui.browser_setup_dialog import BrowserSetupDialog
 from searchmob_desktop.gui.results_view import ResultsView
@@ -55,6 +58,12 @@ class MainWindow(QMainWindow):
         self._prefs_store = prefs_store or JsonPreferencesStore()
         self._history_store = history_store or InMemoryHistoryStore()
         self._history_store.set_enabled(self._prefs_store.load().history_enabled)
+        # On-device "did you mean"; the dictionary loads off-thread so early searches just get no
+        # suggestion. The last submitted query is kept so the result handler can offer a correction.
+        self._corrector = start_background_corrector(
+            history_terms=lambda: [e.query for e in self._history_store.recent(500)]
+        )
+        self._last_query = ""
         self._server = LocalServerController(
             prefs_store=self._prefs_store,
             history_store=self._history_store,
@@ -86,6 +95,16 @@ class MainWindow(QMainWindow):
         self._status_label = QLabel("Enter a query to search.")
         self._status_label.setProperty("role", "muted")
         outer.addWidget(self._status_label)
+
+        # "Did you mean: X" banner from the on-device corrector. Hidden until a search yields a
+        # suggestion; clicking the link re-runs the search with the corrected query.
+        self._didyoumean = QLabel()
+        self._didyoumean.setObjectName("didyoumean")
+        self._didyoumean.setTextFormat(Qt.TextFormat.RichText)
+        self._didyoumean.setOpenExternalLinks(False)
+        self._didyoumean.linkActivated.connect(self._on_didyoumean_clicked)
+        self._didyoumean.hide()
+        outer.addWidget(self._didyoumean)
 
         # Results view.
         self._results = ResultsView()
@@ -126,7 +145,9 @@ class MainWindow(QMainWindow):
         query = self._query_input.text().strip()
         if not query:
             return
+        self._last_query = query
         self._status_label.setText("Searching ...")
+        self._didyoumean.hide()
         self._results.clear()
         self._search_btn.setEnabled(False)
 
@@ -155,9 +176,35 @@ class MainWindow(QMainWindow):
             return
         if not results:
             self._status_label.setText("No results found.")
+        else:
+            self._status_label.setText(f"{len(results)} results.")
+            self._results.set_results(results)
+        self._maybe_show_correction()
+
+    def _maybe_show_correction(self) -> None:
+        """Offer a 'Did you mean: X' link when the on-device corrector suggests one."""
+        suggestion = None
+        try:
+            suggestion = self._corrector.suggest(self._last_query)
+        except Exception:
+            suggestion = None
+        if suggestion is None:
+            self._didyoumean.hide()
             return
-        self._status_label.setText(f"{len(results)} results.")
-        self._results.set_results(results)
+        corrected = escape(suggestion.corrected)
+        self._didyoumean.setText(f'Did you mean: <a href="#correct">{corrected}</a>')
+        self._didyoumean.show()
+
+    def _on_didyoumean_clicked(self, _link: str) -> None:
+        suggestion = None
+        try:
+            suggestion = self._corrector.suggest(self._last_query)
+        except Exception:
+            suggestion = None
+        if suggestion is None:
+            return
+        self._query_input.setText(suggestion.corrected)
+        self._on_submit()
 
     def _on_search_failed(self, message: str) -> None:
         self._search_btn.setEnabled(True)

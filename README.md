@@ -16,6 +16,9 @@ privacy proxy, and the same store-nothing-by-default behavior.
   bring-your-own Brave / Mojeek API keys. Never scrapes Google. Results are de-duplicated and merged.
 - **Privacy proxy**: no cookies, no referrer, no user/device identifier; the User-Agent is rotated
   per request.
+- **On-device "did you mean"**: a fully offline spell / "similar sounding" corrector (phonetic +
+  edit-distance over a bundled word list, optionally augmented by your own history) suggests a
+  correction for misspelled queries. No query ever leaves the device for this.
 - **Outbound traffic disclosure**: the only outbound traffic is the searches you run, plus an
   optional once-a-day update check to GitHub that you can turn off in settings.
 - **Local HTTP server** so any browser can use SearchMob as its default search engine. Loopback-only

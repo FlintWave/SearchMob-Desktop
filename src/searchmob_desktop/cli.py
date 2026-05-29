@@ -39,6 +39,7 @@ from searchmob_desktop.engines import (
     fetch_mwmbl,
     fetch_wikipedia,
 )
+from searchmob_desktop.engines.correct import start_background_corrector
 from searchmob_desktop.engines.proxy import make_privacy_client
 from searchmob_desktop.prefs import JsonPreferencesStore
 from searchmob_desktop.server import serve as _serve_local_server
@@ -190,11 +191,19 @@ def serve(
 
     _run_update_check_in_background(prefs_store)
 
+    # On-device "did you mean" for the browser results page. The dictionary loads off-thread, so
+    # an early search before it is ready simply shows no suggestion. History terms feed the
+    # vocabulary so corrections improve for queries the user actually runs.
+    corrector = start_background_corrector(
+        history_terms=lambda: [e.query for e in history_store.recent(500)]
+    )
+
     _serve_local_server(
         _build_engines(),
         host=host,
         port=port,
         suggestions_provider=composite,
+        corrector=corrector,
         max_results=max_results,
         timeout_seconds=timeout,
     )

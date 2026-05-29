@@ -36,6 +36,7 @@ from starlette.responses import JSONResponse, PlainTextResponse, Response
 from starlette.routing import Route
 
 from searchmob_desktop.engines import EngineContext, EngineFn, SearchResult, aggregate
+from searchmob_desktop.engines.correct import SpellCorrector
 from searchmob_desktop.server.opensearch import build_descriptor
 from searchmob_desktop.server.templates import render_home_page, render_results_page
 
@@ -105,6 +106,7 @@ def build_app(
     *,
     bound_host_getter: Callable[[], str] = lambda: LOOPBACK_HOST,
     suggestions_provider: SuggestionsProvider | None = None,
+    corrector: SpellCorrector | None = None,
     max_query_length: int = MAX_QUERY_LENGTH,
     max_suggestions: int = MAX_SUGGESTIONS,
     max_results: int = 10,
@@ -139,6 +141,17 @@ def build_app(
         ctx = EngineContext(query=query, max_results=max_results, timeout_seconds=timeout_seconds)
         return await metasearch(ctx, engines)
 
+    def _correction(query: str) -> str | None:
+        # On-device "did you mean". `suggest` is fail-soft and already returns None when the
+        # corrected query equals the input, so any non-None result is a genuine suggestion.
+        if corrector is None or not query.strip():
+            return None
+        try:
+            suggestion = corrector.suggest(query)
+        except Exception:
+            return None
+        return suggestion.corrected if suggestion is not None else None
+
     async def home(_request: Request) -> Response:
         return Response(render_home_page(), media_type="text/html; charset=utf-8")
 
@@ -148,7 +161,7 @@ def build_app(
     async def search_html(request: Request) -> Response:
         query = _clamp(request.query_params.get("q"))
         results = await _run_metasearch(query)
-        body = render_results_page(query, results, is_safe_http_url)
+        body = render_results_page(query, results, is_safe_http_url, correction=_correction(query))
         return Response(body, media_type="text/html; charset=utf-8")
 
     async def search_json(request: Request) -> Response:
@@ -157,6 +170,7 @@ def build_app(
         payload = {
             "query": query,
             "results": [asdict(result) for result in results],
+            "correction": _correction(query),
         }
         return JSONResponse(payload)
 

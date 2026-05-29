@@ -28,6 +28,7 @@ def _build_client(
     port: int = 8787,
     host: str = "127.0.0.1",
     suggestions_provider: object = None,
+    corrector: object = None,
 ) -> TestClient:
     """Wire a TestClient over the Starlette app with a fake metasearch.
 
@@ -51,6 +52,7 @@ def _build_client(
         bound_port_getter=lambda: port,
         bound_host_getter=lambda: host,
         suggestions_provider=suggestions_provider,  # type: ignore[arg-type]
+        corrector=corrector,  # type: ignore[arg-type]
         metasearch=_metasearch,
     )
     return TestClient(app)
@@ -266,3 +268,45 @@ def test_suggest_uses_provided_provider() -> None:
     with _build_client() as client:
         response = client.get("/suggest", params={"q": "a"})
     assert json.loads(response.text) == ["a", []]
+
+
+class _StubCorrector:
+    """Suggests a fixed correction for one trigger query; returns None otherwise."""
+
+    def __init__(self, trigger: str, corrected: str) -> None:
+        self._trigger = trigger
+        self._corrected = corrected
+
+    def suggest(self, query: str):  # type: ignore[no-untyped-def]
+        from searchmob_desktop.engines.correct import Correction
+
+        if query.strip().lower() == self._trigger:
+            return Correction(corrected=self._corrected, confidence=0.9)
+        return None
+
+
+def test_search_html_shows_did_you_mean_link() -> None:
+    corrector = _StubCorrector("arnld swartzeneger", "arnold schwarzenegger")
+    with _build_client(corrector=corrector) as client:
+        response = client.get("/search", params={"q": "arnld swartzeneger"})
+    body = response.text
+    assert "Did you mean" in body
+    # Links to a re-run of the search with the corrected query (url-encoded).
+    assert "/search?q=arnold+schwarzenegger" in body
+    assert "arnold schwarzenegger" in body
+
+
+def test_search_json_includes_correction_field() -> None:
+    corrector = _StubCorrector("teh", "the")
+    with _build_client(corrector=corrector) as client:
+        hit = client.get("/api/search", params={"q": "teh"})
+        miss = client.get("/api/search", params={"q": "the"})
+    assert json.loads(hit.text)["correction"] == "the"
+    # No correction for a query the corrector leaves alone; the field is still present (None).
+    assert json.loads(miss.text)["correction"] is None
+
+
+def test_no_correction_without_a_corrector() -> None:
+    with _build_client() as client:
+        response = client.get("/api/search", params={"q": "anything"})
+    assert json.loads(response.text)["correction"] is None
