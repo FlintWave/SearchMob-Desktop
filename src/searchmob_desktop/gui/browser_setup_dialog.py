@@ -26,8 +26,10 @@ from PySide6.QtWidgets import (
 def _setup_urls(host: str, port: int, token: str | None = None) -> tuple[str, str, str]:
     """Return `(visit_url, search_template, suggestion_template)` for a bound `(host, port)`.
 
-    Mirrors the Android `SetupUrls`; the `{searchTerms}` placeholder is what every modern browser
-    expects, and matches what the OpenSearch descriptor advertises.
+    The templates use the `%s` search-term placeholder, which is what Firefox-family and Chromium
+    browsers expect in their "add a search engine" dialogs. (The `{searchTerms}` form is only for
+    the OpenSearch descriptor the server advertises for auto-detect; pasting it into a manual Add
+    dialog fails with "Try including %s in place of the search term".)
 
     When `token` is set (network mode), it is appended as `&token=<token>` to the search and
     suggestion templates so a browser configured off-loopback is not rejected with 403. The visit
@@ -37,8 +39,8 @@ def _setup_urls(host: str, port: int, token: str | None = None) -> tuple[str, st
     suffix = f"&token={token}" if token else ""
     return (
         f"{origin}/",
-        f"{origin}/search?q={{searchTerms}}{suffix}",
-        f"{origin}/suggest?q={{searchTerms}}{suffix}",
+        f"{origin}/search?q=%s{suffix}",
+        f"{origin}/suggest?q=%s{suffix}",
     )
 
 
@@ -69,19 +71,20 @@ class BrowserSetupDialog(QDialog):
         else:
             visit, search_template, suggest_template = _setup_urls(host, port, token)
             intro = QLabel(
-                "Make SearchMob your browser's default search engine. Open the page below "
-                "once, then add SearchMob from your browser's search settings. When the "
-                "browser asks for a search URL, paste the search template. When it asks for a "
-                "Suggestion URL (Firefox and Chromium both have this field), paste the "
-                "suggestion template so autocomplete works."
+                "Make SearchMob your browser's default search engine. The easiest way: open the "
+                "page below once, then add SearchMob from your browser's search settings (it is "
+                "offered automatically). If you add it by hand instead, paste the search template "
+                "into the URL field and the suggestion template into the Suggestion URL field. "
+                "The %s in each template is where the browser drops your search term; leave it as "
+                "it is."
             )
             intro.setWordWrap(True)
             layout.addWidget(intro)
 
             self._add_url_card(layout, "Page to visit", visit)
-            self._add_url_card(layout, "Search URL (paste with {searchTerms})", search_template)
+            self._add_url_card(layout, "Search URL (uses %s for the search term)", search_template)
             self._add_url_card(
-                layout, "Suggestion URL (paste with {searchTerms})", suggest_template
+                layout, "Suggestion URL (uses %s for the search term)", suggest_template
             )
 
             open_btn = QPushButton("Open in browser")
@@ -95,18 +98,21 @@ class BrowserSetupDialog(QDialog):
                     "Open the page above once. SearchMob advertises itself as a search "
                     "engine when you visit it.",
                     "Open your browser's search-engine settings.",
-                    "Pick SearchMob if it appears, or add a custom engine using the search "
-                    "template (keep {searchTerms} intact), then set it as default.",
+                    "Pick SearchMob if it appears (no URL to type). Otherwise add a custom "
+                    "engine and paste the search template, leaving the %s placeholder intact, "
+                    "then set it as default.",
                 ),
             )
             self._add_instructions(
                 layout,
                 "Firefox family (Firefox, LibreWolf, Mull, IronFox)",
                 (
-                    "Menu -> Settings -> Search -> Default search engine -> Add search engine.",
-                    "Name it SearchMob. Paste the Search URL into the Search string URL "
-                    "field. Paste the Suggestion URL into the Search Suggestion API field. "
-                    "Keep the {searchTerms} placeholders.",
+                    "Easiest: after visiting the page above, go to Menu -> Settings -> Search "
+                    "and SearchMob can be added directly (it carries the right URLs).",
+                    "To add it by hand: Settings -> Search -> Add search engine. Name it "
+                    "SearchMob, paste the Search URL into the Engine URL field, and the "
+                    "Suggestion URL into the Suggestions URL field. Firefox uses %s for the "
+                    "search term (not {searchTerms}); leave the %s in the templates as it is.",
                     "Save, then set SearchMob as the default search engine.",
                 ),
             )
@@ -117,7 +123,8 @@ class BrowserSetupDialog(QDialog):
                     "Settings -> Search engine -> Manage search engines and site search -> Add.",
                     "Name it SearchMob and pick a Shortcut. Paste the Search URL into the "
                     "URL field, and paste the Suggestion URL into the Suggestion URL field. "
-                    "Keep the {searchTerms} placeholders.",
+                    "Chromium uses %s for the search term; leave the %s in the templates as "
+                    "it is.",
                     "Save, then activate SearchMob as the default search engine.",
                 ),
             )
@@ -126,8 +133,8 @@ class BrowserSetupDialog(QDialog):
                 "Other browsers (manual)",
                 (
                     "In your browser's search-engine settings, add a custom engine.",
-                    "Paste the search template as the query URL. Keep the {searchTerms} "
-                    "placeholder intact.",
+                    "Paste the search template as the query URL, leaving the %s placeholder "
+                    "intact (most browsers use %s for the search term).",
                     "Set the new engine as your default.",
                 ),
             )

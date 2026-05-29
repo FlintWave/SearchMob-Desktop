@@ -20,8 +20,8 @@ def test_setup_urls_appends_token_to_search_and_suggest() -> None:
     visit, search, suggest = _setup_urls("192.168.1.50", 8787, token="tok-xyz")
     # The visit URL (the open `/` route) stays token-free.
     assert visit == "http://192.168.1.50:8787/"
-    assert search == "http://192.168.1.50:8787/search?q={searchTerms}&token=tok-xyz"
-    assert suggest == "http://192.168.1.50:8787/suggest?q={searchTerms}&token=tok-xyz"
+    assert search == "http://192.168.1.50:8787/search?q=%s&token=tok-xyz"
+    assert suggest == "http://192.168.1.50:8787/suggest?q=%s&token=tok-xyz"
 
 
 def test_setup_urls_omits_token_when_loopback() -> None:
@@ -39,8 +39,8 @@ def _all_label_text(dialog: BrowserSetupDialog) -> str:
 def test_dialog_renders_token_url_in_network_mode(qapp: object) -> None:
     dialog = BrowserSetupDialog(host="192.168.1.50", port=8787, token="tok-xyz")
     text = _all_label_text(dialog)
-    assert "/search?q={searchTerms}&token=tok-xyz" in text
-    assert "/suggest?q={searchTerms}&token=tok-xyz" in text
+    assert "/search?q=%s&token=tok-xyz" in text
+    assert "/suggest?q=%s&token=tok-xyz" in text
 
 
 def test_dialog_loopback_has_no_token(qapp: object) -> None:
