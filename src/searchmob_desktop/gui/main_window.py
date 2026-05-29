@@ -12,7 +12,7 @@ from __future__ import annotations
 from html import escape
 from importlib.resources import as_file, files
 
-from PySide6.QtCore import Qt, QThreadPool
+from PySide6.QtCore import Qt, QThreadPool, QTimer
 from PySide6.QtGui import QAction, QIcon, QKeySequence
 from PySide6.QtWidgets import (
     QHBoxLayout,
@@ -191,6 +191,19 @@ class MainWindow(QMainWindow):
         # System tray: lets the app live in the tray/applet area instead of quitting on close.
         self._tray: QSystemTrayIcon | None = None
         self._setup_tray()
+
+        # First-run setup wizard: shown once, after the window is up, when not yet completed.
+        if not prefs.onboarding_completed:
+            QTimer.singleShot(0, self._show_onboarding)
+
+    def _show_onboarding(self) -> None:
+        from searchmob_desktop.gui.onboarding_dialog import OnboardingDialog
+
+        OnboardingDialog(
+            prefs_store=self._prefs_store,
+            server_controller=self._server,
+            parent=self,
+        ).exec()
 
     # --- Empty state -------------------------------------------------------------------------
 

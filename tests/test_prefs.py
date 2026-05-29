@@ -37,10 +37,12 @@ def test_round_trip_through_json(tmp_path: Path) -> None:
         last_update_check_ms=1_700_000_000_000,
         engine_enabled={"duckduckgo": True, "wikipedia": False},
         network_hostnames=("my-pc.tailnet.ts.net", "my-pc.local"),
+        onboarding_completed=True,
     )
     store.save(original)
     reloaded = store.load()
     assert reloaded == original
+    assert reloaded.onboarding_completed is True
     assert reloaded.network_access_token == "abc-DEF-123_token"
     assert reloaded.network_hostnames == ("my-pc.tailnet.ts.net", "my-pc.local")
 

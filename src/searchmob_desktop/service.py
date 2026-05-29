@@ -68,6 +68,19 @@ def is_supported() -> bool:
     return _backend() != "unsupported"
 
 
+def mechanism_label() -> str | None:
+    """A human phrase for this platform's service mechanism, or None when unsupported.
+
+    Used by the setup wizard / Settings to describe what installing the background service does in
+    platform-accurate terms.
+    """
+    return {
+        "systemd": "a systemd user service",
+        "launchd": "a launchd agent",
+        "schtasks": "a Windows scheduled task that runs at sign-in",
+    }.get(_backend())
+
+
 def server_command(host: str = "127.0.0.1", port: int = DEFAULT_PORT) -> list[str]:
     """The command a unit/agent/task runs to start the headless server.
 

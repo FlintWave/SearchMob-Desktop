@@ -3,6 +3,16 @@
 All notable changes to SearchMob Desktop are documented here. The version scheme is Ubuntu-style
 `YY.MM.VV` and releases are tagged `vYY.MM.VV`.
 
+## Unreleased
+
+### Added
+- **First-run setup wizard.** On first launch the desktop app now walks you through a short,
+  skippable guide (Welcome, privacy, making SearchMob your browser's search engine, and - where
+  available - running it as a background service), mirroring the Android onboarding. It is OS-aware:
+  the background-service step only appears on platforms that support one and names that platform's
+  actual mechanism (systemd / launchd / scheduled task). Re-runnable any time from Settings ->
+  Device setup -> "Run the setup guide again".
+
 ## 26.05.04 — 2026-05-29
 
 ### Added
