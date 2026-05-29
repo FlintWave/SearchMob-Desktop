@@ -29,6 +29,10 @@ and legal-compliance hardening pass.
 
 ### Changed
 - README updated from "scaffold" to feature-complete alpha; user-facing "lenses" → "scopes".
+- Double Metaphone is now vendored (BSD) instead of depending on the sdist-only `metaphone`
+  package, so the macOS/Windows installers build from wheels cleanly.
+- Release installers are Windows `.msi` and macOS `.dmg`; the Linux AppImage was dropped (Briefcase
+  AppImage is unreliable for PySide). Linux users install via `pipx` for now.
 
 ### Security
 - Engine responses are size-bounded (streamed, capped) so a hostile upstream can't exhaust memory;
