@@ -20,7 +20,7 @@ from dataclasses import dataclass
 
 import httpx
 
-from searchmob_desktop.engines.normalize import normalize_url
+from searchmob_desktop.engines.normalize import normalize_url, strip_tracking_params
 from searchmob_desktop.engines.proxy import make_privacy_client
 from searchmob_desktop.engines.types import EngineContext, SearchResult
 
@@ -68,7 +68,9 @@ async def aggregate(ctx: EngineContext, engines: Sequence[EngineFn]) -> list[Sea
             if existing is None:
                 buckets[key] = _Bucket(
                     title=item.title,
-                    url=item.url,
+                    # Surface a tracker-stripped URL so the link the user clicks does not carry
+                    # utm_*/fbclid/etc.; the lossy `key` above is still used only for dedup.
+                    url=strip_tracking_params(item.url),
                     snippet=item.snippet,
                     engines={item.engine},
                     score=contribution,
