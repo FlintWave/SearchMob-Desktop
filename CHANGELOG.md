@@ -3,6 +3,16 @@
 All notable changes to SearchMob Desktop are documented here. The version scheme is Ubuntu-style
 `YY.MM.VV` and releases are tagged `vYY.MM.VV`.
 
+## 26.05.03 — 2026-05-29
+
+### Fixed
+- **Desktop app now opens the GUI when launched from the app menu / installer.** The packaged app
+  runs `python -m searchmob_desktop`, whose entry point previously invoked the CLI and exited with
+  the help text, so a desktop launch showed no window. The package entry point now opens the GUI
+  when run with no arguments (and still defers to the CLI when given subcommands, so
+  `python -m searchmob_desktop search ...` keeps working). The `searchmob-desktop` console script
+  is unchanged.
+
 ## 26.05.02 — 2026-05-29
 
 ### Added

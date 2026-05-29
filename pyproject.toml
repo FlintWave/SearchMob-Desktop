@@ -107,7 +107,7 @@ follow_imports = "skip"
 [tool.briefcase]
 project_name = "SearchMob Desktop"
 bundle = "com.flintwave"
-version = "26.05.02"
+version = "26.05.03"
 url = "https://github.com/FlintWave/SearchMob-Desktop"
 author = "FlintWave"
 author_email = "flintwave@tuta.com"
