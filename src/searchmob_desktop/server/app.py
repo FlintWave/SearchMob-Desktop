@@ -36,6 +36,7 @@ from starlette.responses import JSONResponse, PlainTextResponse, Response
 from starlette.routing import Route
 
 from searchmob_desktop.engines import EngineContext, EngineFn, SearchResult, aggregate
+from searchmob_desktop.engines.rank import RankingRules, apply_ranking, host_of_url
 from searchmob_desktop.server.opensearch import build_descriptor
 from searchmob_desktop.server.templates import render_home_page, render_results_page
 
@@ -105,6 +106,7 @@ def build_app(
     *,
     bound_host_getter: Callable[[], str] = lambda: LOOPBACK_HOST,
     suggestions_provider: SuggestionsProvider | None = None,
+    ranking_rules: RankingRules | None = None,
     max_query_length: int = MAX_QUERY_LENGTH,
     max_suggestions: int = MAX_SUGGESTIONS,
     max_results: int = 10,
@@ -133,11 +135,21 @@ def build_app(
             return ""
         return raw[:max_query_length]
 
+    rules = ranking_rules if ranking_rules is not None else RankingRules()
+
     async def _run_metasearch(query: str) -> list[SearchResult]:
         if not query.strip() or not engines:
             return []
         ctx = EngineContext(query=query, max_results=max_results, timeout_seconds=timeout_seconds)
-        return await metasearch(ctx, engines)
+        results = await metasearch(ctx, engines)
+        # Apply the user's local personalization rules (block/lower/raise/pin, lens, goggles) after
+        # aggregation so the served results match the in-app results.
+        return apply_ranking(
+            results,
+            rules,
+            host_of=lambda r: host_of_url(r.url),
+            text_of=lambda r: f"{r.title} {r.snippet}",
+        )
 
     async def home(_request: Request) -> Response:
         return Response(render_home_page(), media_type="text/html; charset=utf-8")

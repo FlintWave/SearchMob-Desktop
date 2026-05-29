@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING
 from PySide6.QtCore import QObject, QThread, Signal
 
 from searchmob_desktop.data.history import InMemoryHistoryStore
+from searchmob_desktop.data.ranking_store import load_ranking_rules
 from searchmob_desktop.engines import (
     EngineContext,
     EngineFn,
@@ -137,6 +138,7 @@ class _UvicornWorker(QThread):
             bound_port_getter=lambda: self._port,
             bound_host_getter=lambda: self._host,
             suggestions_provider=composite,
+            ranking_rules=load_ranking_rules(),
         )
         config = uvicorn.Config(
             app,

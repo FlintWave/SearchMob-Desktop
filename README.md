@@ -16,6 +16,10 @@ privacy proxy, and the same store-nothing-by-default behavior.
   bring-your-own Brave / Mojeek API keys. Never scrapes Google. Results are de-duplicated and merged.
 - **Privacy proxy**: no cookies, no referrer, no user/device identifier; the User-Agent is rotated
   per request.
+- **Result personalization ("filter bubbles"), local and private**: block / lower / raise / pin
+  results by domain (right-click a result), plus lenses and imported Brave Goggles. Rules live in
+  the encrypted vault and are applied on-device to both the in-app and browser results; nothing is
+  sent upstream.
 - **Outbound traffic disclosure**: the only outbound traffic is the searches you run, plus an
   optional once-a-day update check to GitHub that you can turn off in settings.
 - **Local HTTP server** so any browser can use SearchMob as its default search engine. Loopback-only
