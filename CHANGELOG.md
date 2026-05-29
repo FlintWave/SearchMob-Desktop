@@ -3,6 +3,21 @@
 All notable changes to SearchMob Desktop are documented here. The version scheme is Ubuntu-style
 `YY.MM.VV` and releases are tagged `vYY.MM.VV`.
 
+## 26.05.02 — 2026-05-29
+
+### Added
+- **Native Linux installers**: `.deb` (Debian/Ubuntu), `.rpm` (Fedora/RHEL), and a Flatpak bundle,
+  built with Briefcase's `linux system`/`flatpak` backends. (The AppImage target, which never built
+  reliably for a PySide app, is gone.)
+- **Network-mode access token**: when the server is bound to a non-loopback address, requests from
+  other devices must carry a per-install token (loopback is exempt). The token is minted when you
+  enable network mode and baked into the browser-setup and OpenSearch URLs.
+
+### Security
+- **Host-header allowlist** on the local server (DNS-rebinding defense): only loopback, the bound
+  host, and (under a wildcard bind) IP-literal hosts are accepted.
+- Added a pinned `requirements.lock` constraints file for more reproducible builds.
+
 ## 26.05.01 — 2026-05-29
 
 A large feature release bringing the desktop app to parity with the Android app, plus a security
