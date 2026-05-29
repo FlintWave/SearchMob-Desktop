@@ -40,7 +40,7 @@ privacy proxy, and the same store-nothing-by-default behavior.
 
 ## Install (alpha)
 
-The first published release is `26.05.00`. Two install paths:
+The latest release is `26.05.01` (see [`CHANGELOG.md`](CHANGELOG.md)). Two install paths:
 
 ### End users: native installer (recommended)
 
