@@ -39,7 +39,6 @@ dependencies = [
     "argon2-cffi>=24",
     "platformdirs>=4",
     "keyring>=25",
-    "metaphone>=0.6",
 ]
 
 [project.optional-dependencies]
@@ -79,6 +78,8 @@ addopts = "-ra"
 target-version = "py312"
 line-length = 100
 src = ["src", "tests"]
+# Vendored third-party Double Metaphone (BSD); kept verbatim, not linted/formatted by us.
+extend-exclude = ["src/searchmob_desktop/engines/correct/_metaphone"]
 
 [tool.ruff.lint]
 # Pragmatic starter ruleset: errors, undefined-name, imports, bugbears, modern-Python upgrades,
@@ -89,6 +90,13 @@ select = ["E", "F", "I", "B", "UP", "RUF"]
 python_version = "3.12"
 strict = true
 files = ["src", "tests"]
+# Vendored third-party code is untyped; don't type-check it.
+exclude = ["src/searchmob_desktop/engines/correct/_metaphone/"]
+
+[[tool.mypy.overrides]]
+module = "searchmob_desktop.engines.correct._metaphone.*"
+ignore_errors = true
+follow_imports = "skip"
 
 # Briefcase packaging. The `briefcase package <platform>` build is driven by the tables below; the
 # release workflow at .github/workflows/release.yml invokes it on the matching runner.
@@ -99,7 +107,7 @@ files = ["src", "tests"]
 [tool.briefcase]
 project_name = "SearchMob Desktop"
 bundle = "com.flintwave"
-version = "26.05.00"
+version = "26.05.01"
 url = "https://github.com/FlintWave/SearchMob-Desktop"
 author = "FlintWave"
 author_email = "flintwave@tuta.com"

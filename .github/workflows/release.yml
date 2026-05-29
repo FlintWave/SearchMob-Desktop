@@ -36,13 +36,12 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
+      # Linux installer is intentionally not built here: Briefcase's AppImage backend is
+      # unreliable for PySide apps (it can't use precompiled wheels) and has never produced a
+      # working artifact for this project. Linux users install via pipx (see README). Reinstating a
+      # Linux package (Flatpak or system .deb/.rpm) is tracked as a follow-up.
       matrix:
         include:
-          - os: ubuntu-latest
-            label: linux-appimage
-            platform: linux
-            briefcase_format: appimage
-            artifact_glob: 'dist/*.AppImage'
           - os: macos-latest
             label: macos-dmg
             platform: macOS
@@ -70,12 +69,7 @@ jobs:
           pip install briefcase
           pip install -e ".[gui]"
 
-      # Briefcase's AppImage builds run inside a manylinux container via Docker; the runner needs
-      # Docker available (it is by default on ubuntu-latest). No further host apt deps needed
-      # because AppImage's runtime libs are bundled into the image.
-
-      # --adhoc-sign produces a buildable-but-unsigned artifact on macOS/Windows. On Linux the
-      # AppImage format ignores the flag.
+      # --adhoc-sign produces a buildable-but-unsigned artifact on macOS/Windows.
       - name: Briefcase package
         shell: bash
         run: |

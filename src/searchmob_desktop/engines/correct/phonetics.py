@@ -8,9 +8,10 @@ can be proposed as corrections even when their spelling differs substantially (e
 
 from __future__ import annotations
 
-# The `metaphone` package (v0.6) ships no type stubs / py.typed marker, so under strict mypy this
-# import is untyped. We narrow the suppression to this one line rather than relaxing project config.
-from metaphone import doublemetaphone  # type: ignore[import-untyped]
+# Double Metaphone is vendored under `_metaphone` (the upstream `metaphone` package is sdist-only,
+# which Briefcase's macOS/AppImage packaging rejects). The vendored code is untyped; mypy treats it
+# as `Any` via the per-module override in pyproject.
+from searchmob_desktop.engines.correct._metaphone import doublemetaphone
 
 
 def phonetic_codes(term: str) -> list[str]:

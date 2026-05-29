@@ -48,7 +48,8 @@ Grab the installer for your OS from the [latest GitHub Release](https://github.c
 
 - Windows: `searchmob-desktop-<version>.msi`
 - macOS: `searchmob-desktop-<version>.dmg`
-- Linux (any modern distro): `SearchMob_Desktop-<version>-x86_64.AppImage` (one portable binary, `chmod +x` and run)
+- Linux: install via `pipx` (below). A native Linux package (Flatpak or `.deb`/`.rpm`) is planned;
+  the AppImage build proved unreliable for a PySide app and was dropped.
 
 Every release also publishes a `SHA256SUMS` file you can verify before installing.
 
