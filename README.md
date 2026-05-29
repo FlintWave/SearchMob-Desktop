@@ -7,10 +7,11 @@
 [SearchMob for Android](https://github.com/FlintWave/SearchMob) with the same engines, the same
 privacy proxy, and the same store-nothing-by-default behavior.
 
-> **Status:** scaffold. The CLI is wired up but the metasearch, local HTTP server, encrypted storage,
-> suggestions endpoint, and GUI are placeholders. Track progress in [`ROADMAP.md`](ROADMAP.md).
+> **Status:** alpha, feature-complete. Metasearch, the local HTTP server, encrypted storage, the
+> suggestions endpoint, on-device correction, result personalization, network mode, and the PySide6
+> GUI are all implemented. Track the roadmap in [`ROADMAP.md`](ROADMAP.md).
 
-## What it will do (parity with the Android app)
+## What it does (parity with the Android app)
 
 - **Metasearch** against DuckDuckGo, Mojeek, Marginalia, Mwmbl, and Wikipedia, plus optional
   bring-your-own Brave / Mojeek / Kagi API keys. Never scrapes Google. Results are de-duplicated and
@@ -23,9 +24,9 @@ privacy proxy, and the same store-nothing-by-default behavior.
   edit-distance over a bundled word list, optionally augmented by your own history) suggests a
   correction for misspelled queries. No query ever leaves the device for this.
 - **Result personalization ("filter bubbles"), local and private**: block / lower / raise / pin
-  results by domain (right-click a result), plus lenses and imported Brave Goggles. Rules live in
-  the encrypted vault and are applied on-device to both the in-app and browser results; nothing is
-  sent upstream.
+  results by domain (right-click a result), plus saved **scopes** (domain/keyword filters, with
+  ready-to-use samples) and imported Brave Goggles-format rules. Rules live in the encrypted vault
+  and are applied on-device to both the in-app and browser results; nothing is sent upstream.
 - **Outbound traffic disclosure**: the only outbound traffic is the searches you run, plus an
   optional once-a-day update check to GitHub that you can turn off in settings.
 - **Local HTTP server** so any browser can use SearchMob as its default search engine. Loopback-only
@@ -90,6 +91,18 @@ and build each feature on its own branch with green CI before merging. Please al
 ## Credits
 
 App icon: <a href="https://www.flaticon.com/free-icons/search" title="search icons">Search icons created by Freepik - Flaticon</a>.
+
+The bundled correction dictionary derives from [hermitdave/FrequencyWords](https://github.com/hermitdave/FrequencyWords)
+(word frequencies, CC BY-SA 4.0, from the OpenSubtitles corpus) and public-domain name lists; see
+[`src/searchmob_desktop/resources/dict/NOTICE`](src/searchmob_desktop/resources/dict/NOTICE).
+
+## Trademarks
+
+SearchMob is not affiliated with, endorsed by, or sponsored by DuckDuckGo, Mojeek, Marginalia,
+Mwmbl, Wikipedia, Brave, Kagi, Google, or Tailscale. All product names, logos, and brands are the
+property of their respective owners and are used here only to identify the services SearchMob
+interoperates with. The "Goggles" rule format is Brave's; "Brave" and "Goggles" are trademarks of
+Brave Software, Inc.
 
 ## License
 
