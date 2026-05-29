@@ -30,6 +30,12 @@ All notable changes to SearchMob Desktop are documented here. The version scheme
   a green outline with a checkmark that fades out over it, so the confirmation does not interrupt.
 
 ### Fixed
+- **Fixed a crash when using "Check for updates" (and other background actions).** Background
+  workers (the update check, in-app searches) are `QRunnable`s whose signal carrier was only held by
+  a local variable; once the handler returned, Python could garbage-collect the worker while its
+  pool thread was still running, so the cross-thread result delivery hit freed memory and the app
+  vanished - most reliably when the button was clicked rapidly. Workers are now retained until their
+  result is delivered, and the "Check now" button is disabled while a check is in flight.
 - **Result links are now stripped of tracking parameters before you click them.** The tracker
   list (`utm_*`, `fbclid`, `gclid`, `mc_cid`, `igshid`, `ref`, ...) was only applied to the dedup
   key; the displayed link kept the raw upstream URL. The aggregator now surfaces a cleaned URL, so

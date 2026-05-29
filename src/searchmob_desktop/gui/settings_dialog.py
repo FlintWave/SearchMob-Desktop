@@ -717,14 +717,18 @@ class SettingsDialog(QDialog):
         layout.addWidget(cb)
         layout.addWidget(sub)
 
-        check_now = QPushButton("Check now")
-        check_now.clicked.connect(self._on_check_now)
-        layout.addWidget(check_now)
+        self._check_now_btn = QPushButton("Check now")
+        self._check_now_btn.clicked.connect(self._on_check_now)
+        layout.addWidget(self._check_now_btn)
         layout.addStretch(1)
         return tab
 
     def _on_check_now(self) -> None:
         from searchmob_desktop.update import VersionTag
+
+        # One check at a time: disabling the button stops rapid clicks from stacking concurrent
+        # workers (and duplicate result dialogs). Re-enabled when the check finishes or fails.
+        self._check_now_btn.setEnabled(False)
 
         async def _probe() -> UpdateInfo | None:
             async with make_privacy_client(4.0) as client:
@@ -733,6 +737,7 @@ class SettingsDialog(QDialog):
         worker: AsyncWorker[UpdateInfo | None] = AsyncWorker(_probe)
 
         def _on_finished(info_obj: object) -> None:
+            self._check_now_btn.setEnabled(True)
             stamped = replace(self._prefs, last_update_check_ms=int(time.time() * 1000))
             self._save(stamped)
             if not isinstance(info_obj, UpdateInfo):
@@ -761,11 +766,12 @@ class SettingsDialog(QDialog):
                 )
 
         def _on_failed(message: str) -> None:
+            self._check_now_btn.setEnabled(True)
             QMessageBox.warning(self, "Update check failed", message)
 
         worker.signals.finished.connect(_on_finished)
         worker.signals.failed.connect(_on_failed)
-        self._pool.start(worker)
+        worker.start(self._pool)
 
     # --- Network -----------------------------------------------------------------------------
 

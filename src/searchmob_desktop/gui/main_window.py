@@ -299,7 +299,7 @@ class MainWindow(QMainWindow):
             self._history_store.add(query)
         except Exception:
             pass
-        self._pool.start(worker)
+        worker.start(self._pool)
 
     def _on_results_ready(self, results: object) -> None:
         self._search_btn.setEnabled(True)
