@@ -3,8 +3,9 @@
 All notable changes to SearchMob Desktop are documented here. The version scheme is Ubuntu-style
 `YY.MM.VV` and releases are tagged `vYY.MM.VV`.
 
-## Unreleased
+## 26.05.04 — 2026-05-29
 
+### Added
 - **Run SearchMob as a background service (Linux, macOS, Windows).** Settings -> Device setup ->
   "Run in the background" installs a per-user service that runs the local search server headless, so
   the browser can use SearchMob even when the app window is closed: a systemd user unit on Linux, a
