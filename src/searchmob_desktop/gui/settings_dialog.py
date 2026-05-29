@@ -692,6 +692,22 @@ class SettingsDialog(QDialog):
         cb.toggled.connect(_on_toggled)
         layout.addWidget(cb)
         layout.addWidget(sub)
+
+        summary_cb = QCheckBox("Show a Wikipedia summary for some searches")
+        summary_cb.setChecked(self._prefs.summary_enabled)
+        summary_sub = QLabel(
+            "On by default. For entity-like queries, shows a short summary card above results from "
+            "the related Wikipedia article. Adds at most one extra request to Wikipedia (already a "
+            "search engine here) through the privacy proxy."
+        )
+        summary_sub.setWordWrap(True)
+        summary_sub.setProperty("role", "muted")
+        summary_cb.toggled.connect(
+            lambda checked: self._save(replace(self._prefs, summary_enabled=checked))
+        )
+        layout.addWidget(summary_cb)
+        layout.addWidget(summary_sub)
+
         layout.addStretch(1)
         return tab
 

@@ -34,6 +34,7 @@ from searchmob_desktop.engines import (
     make_privacy_client,
 )
 from searchmob_desktop.engines.correct import start_background_corrector
+from searchmob_desktop.engines.wiki_summary import summary_for_query
 from searchmob_desktop.gui.engines_catalog import ENGINE_CATALOG, is_engine_enabled
 from searchmob_desktop.prefs import JsonPreferencesStore, UserPreferences
 from searchmob_desktop.server import (
@@ -153,6 +154,9 @@ class _UvicornWorker(QThread):
             # restart; the saver persists in-browser edits back to the encrypted vault.
             ranking_rules_provider=load_ranking_rules,
             ranking_rules_saver=save_ranking_rules,
+            summary_provider=(
+                summary_for_query if self._prefs_store.load().summary_enabled else None
+            ),
             access_token=self._access_token,
             allowed_hosts=self._allowed_hosts,
         )

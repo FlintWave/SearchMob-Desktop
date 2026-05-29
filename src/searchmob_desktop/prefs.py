@@ -63,6 +63,9 @@ class UserPreferences:
     # own hostname is allowed automatically; this is for names that machine cannot self-detect.
     network_hostnames: tuple[str, ...] = ()
     upstream_suggestions_enabled: bool = False
+    # Show a contextual Wikipedia summary box above results for entity-like queries. Adds at most
+    # one extra outbound call per search to Wikipedia (which is already a search engine here).
+    summary_enabled: bool = True
     update_check_enabled: bool = True
     last_update_check_ms: int = 0
     # Set once the first-run setup wizard has been completed or skipped, so it never reappears.
