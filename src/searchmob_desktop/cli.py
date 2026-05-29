@@ -43,6 +43,7 @@ from searchmob_desktop.engines import (
 from searchmob_desktop.engines.correct import start_background_corrector
 from searchmob_desktop.engines.proxy import make_privacy_client
 from searchmob_desktop.prefs import JsonPreferencesStore
+from searchmob_desktop.server import is_loopback_host
 from searchmob_desktop.server import serve as _serve_local_server
 from searchmob_desktop.suggest import (
     CompositeSuggestionsProvider,
@@ -183,6 +184,9 @@ def serve(
         history=HistorySuggestionsProvider(history_store),
         upstream=UpstreamSuggestionsProvider(lambda: make_privacy_client(2.0)),
         upstream_enabled=_upstream_enabled,
+        # Privacy guard: when bound to a network-reachable address, do not serve the owner's
+        # local history as autocomplete to other devices on the network.
+        local_enabled=lambda: is_loopback_host(host),
     )
 
     _run_update_check_in_background(prefs_store)

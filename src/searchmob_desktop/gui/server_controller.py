@@ -36,7 +36,7 @@ from searchmob_desktop.engines import (
 from searchmob_desktop.engines.correct import start_background_corrector
 from searchmob_desktop.gui.engines_catalog import ENGINE_CATALOG, is_engine_enabled
 from searchmob_desktop.prefs import JsonPreferencesStore, UserPreferences
-from searchmob_desktop.server import LOOPBACK_HOST, build_app
+from searchmob_desktop.server import LOOPBACK_HOST, build_app, is_loopback_host
 from searchmob_desktop.suggest import (
     CompositeSuggestionsProvider,
     HistorySuggestionsProvider,
@@ -124,6 +124,9 @@ class _UvicornWorker(QThread):
             history=HistorySuggestionsProvider(self._history_store),
             upstream=UpstreamSuggestionsProvider(lambda: make_privacy_client(2.0)),
             upstream_enabled=_upstream_enabled,
+            # Privacy guard: in network mode (non-loopback bind) the owner's history is not served
+            # as autocomplete to other devices on the network.
+            local_enabled=lambda: is_loopback_host(self._host),
         )
 
         # On-device "did you mean" for the served results page; dictionary loads off-thread.
