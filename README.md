@@ -13,7 +13,10 @@ privacy proxy, and the same store-nothing-by-default behavior.
 ## What it will do (parity with the Android app)
 
 - **Metasearch** against DuckDuckGo, Mojeek, Marginalia, Mwmbl, and Wikipedia, plus optional
-  bring-your-own Brave / Mojeek API keys. Never scrapes Google. Results are de-duplicated and merged.
+  bring-your-own Brave / Mojeek / Kagi API keys. Never scrapes Google. Results are de-duplicated and
+  merged. BYO keys are read from the encrypted vault (saved in Settings) or, failing that, the
+  `SEARCHMOB_BRAVE_API_KEY`, `SEARCHMOB_MOJEEK_API_KEY`, and `SEARCHMOB_KAGI_API_KEY` environment
+  variables.
 - **Privacy proxy**: no cookies, no referrer, no user/device identifier; the User-Agent is rotated
   per request.
 - **On-device "did you mean"**: a fully offline spell / "similar sounding" corrector (phonetic +
