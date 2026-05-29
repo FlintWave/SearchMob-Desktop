@@ -36,11 +36,24 @@ def test_round_trip_through_json(tmp_path: Path) -> None:
         update_check_enabled=False,
         last_update_check_ms=1_700_000_000_000,
         engine_enabled={"duckduckgo": True, "wikipedia": False},
+        network_hostnames=("my-pc.tailnet.ts.net", "my-pc.local"),
     )
     store.save(original)
     reloaded = store.load()
     assert reloaded == original
     assert reloaded.network_access_token == "abc-DEF-123_token"
+    assert reloaded.network_hostnames == ("my-pc.tailnet.ts.net", "my-pc.local")
+
+
+def test_network_hostnames_default_empty_and_coerce_to_lowercase_tuple(tmp_path: Path) -> None:
+    """Missing field defaults to (); a JSON list is coerced to a lowercased, trimmed tuple."""
+    assert UserPreferences().network_hostnames == ()
+    path = tmp_path / "prefs.json"
+    path.write_text(
+        json.dumps({"network_hostnames": ["My-PC.local", "  ", "TAIL.ts.net "]}), encoding="utf-8"
+    )
+    loaded = JsonPreferencesStore(path).load()
+    assert loaded.network_hostnames == ("my-pc.local", "tail.ts.net")
 
 
 def test_network_access_token_defaults_empty_for_old_prefs(tmp_path: Path) -> None:

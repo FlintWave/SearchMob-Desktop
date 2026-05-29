@@ -5,6 +5,14 @@ All notable changes to SearchMob Desktop are documented here. The version scheme
 
 ## Unreleased
 
+### Added
+- **Use a hostname instead of an IP for browser setup.** The setup URLs now show `localhost` for
+  the normal loopback case. In network mode you can add trusted hostnames (Settings -> Network),
+  e.g. a Tailscale MagicDNS or mDNS `<host>.local` name, and the server accepts them in the
+  Host-header allowlist; the machine's own hostname is accepted automatically. Reaching the server
+  by IP still works. The browser-setup launcher also now includes the network access token when
+  opened from the main window (previously only the Settings entry did).
+
 ### Changed
 - **Copying a URL in the browser-setup wizard no longer pops a modal.** Instead the field flashes
   a green outline with a checkmark that fades out over it, so the confirmation does not interrupt.

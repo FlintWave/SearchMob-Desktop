@@ -8,6 +8,8 @@ open while the rest of the GUI runs.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 from PySide6.QtCore import QEasingCurve, QPropertyAnimation, Qt, QUrl
 from PySide6.QtGui import QClipboard, QDesktopServices, QGuiApplication
 from PySide6.QtWidgets import (
@@ -42,6 +44,28 @@ def _setup_urls(host: str, port: int, token: str | None = None) -> tuple[str, st
         f"{origin}/search?q=%s{suffix}",
         f"{origin}/suggest?q=%s{suffix}",
     )
+
+
+def choose_setup_host(
+    *,
+    network_enabled: bool,
+    configured_hostnames: Sequence[str] = (),
+    local_names: Sequence[str] = (),
+) -> str:
+    """Pick the host to show in the setup URLs.
+
+    Loopback (the common case): use `localhost`, which every browser resolves to the loopback
+    address and which the server's Host allowlist accepts. In network mode, prefer a configured
+    hostname (e.g. a Tailscale MagicDNS name), then the machine's own detected name, so other
+    devices reach the server by a friendly name; fall back to the loopback IP if neither is known.
+    """
+    if not network_enabled:
+        return "localhost"
+    for name in (*configured_hostnames, *local_names):
+        cleaned = name.strip()
+        if cleaned:
+            return cleaned
+    return "127.0.0.1"
 
 
 class BrowserSetupDialog(QDialog):

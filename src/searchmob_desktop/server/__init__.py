@@ -21,6 +21,7 @@ from searchmob_desktop.server.app import (
     host_header_allowed,
     is_loopback_host,
     is_safe_http_url,
+    local_hostnames,
     requires_token,
 )
 from searchmob_desktop.server.runner import serve
@@ -35,6 +36,7 @@ __all__ = [
     "host_header_allowed",
     "is_loopback_host",
     "is_safe_http_url",
+    "local_hostnames",
     "requires_token",
     "serve",
 ]

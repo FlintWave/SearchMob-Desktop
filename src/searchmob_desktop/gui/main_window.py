@@ -430,9 +430,24 @@ class MainWindow(QMainWindow):
         dialog.exec()
 
     def _on_open_browser_setup(self) -> None:
-        host = "127.0.0.1"
-        port: int | None = 8787 if self._server.is_running else None
-        BrowserSetupDialog(host=host, port=port, parent=self).exec()
+        from searchmob_desktop.gui.browser_setup_dialog import choose_setup_host
+        from searchmob_desktop.server import local_hostnames
+
+        prefs = self._prefs_store.load()
+        running = self._server.is_running
+        port: int | None = 8787 if running else None
+        host = choose_setup_host(
+            network_enabled=prefs.network_access_enabled,
+            configured_hostnames=prefs.network_hostnames,
+            local_names=sorted(local_hostnames()),
+        )
+        # Network mode gates the query routes, so the setup URLs must carry the token.
+        token = (
+            prefs.network_access_token or None
+            if (prefs.network_access_enabled and prefs.network_access_token)
+            else None
+        )
+        BrowserSetupDialog(host=host, port=port, parent=self, token=token).exec()
 
     def _on_open_history(self) -> None:
         HistoryDialog(self._history_store, parent=self).exec()

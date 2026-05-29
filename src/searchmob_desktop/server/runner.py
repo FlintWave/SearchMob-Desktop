@@ -41,6 +41,7 @@ def serve(
     max_results: int = 10,
     timeout_seconds: float = 5.0,
     access_token: str | None = None,
+    allowed_hosts: frozenset[str] = frozenset(),
 ) -> None:
     """Build the app and run uvicorn synchronously, blocking until the server stops.
 
@@ -63,6 +64,7 @@ def serve(
         max_results=max_results,
         timeout_seconds=timeout_seconds,
         access_token=access_token,
+        allowed_hosts=allowed_hosts,
     )
     config = uvicorn.Config(
         app,

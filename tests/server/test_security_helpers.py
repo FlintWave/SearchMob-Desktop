@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import xml.etree.ElementTree as ET
 
-from searchmob_desktop.server import host_header_allowed, requires_token
+from searchmob_desktop.server import host_header_allowed, local_hostnames, requires_token
 from searchmob_desktop.server.opensearch import build_descriptor
 
 _OPENSEARCH_NS = "http://a9.com/-/spec/opensearch/1.1/"
@@ -43,6 +43,25 @@ def test_host_header_allowed_empty_header_is_permitted() -> None:
     # HTTP/1.0 and some probes omit Host; an empty value cannot carry a rebinding target.
     assert host_header_allowed("", "192.168.1.50")
     assert host_header_allowed("   ", "192.168.1.50")
+
+
+def test_host_header_allowed_accepts_configured_trusted_hostnames() -> None:
+    trusted = frozenset({"my-pc.tailnet.ts.net", "my-pc.local"})
+    # A configured trusted name is accepted (with or without a port), under any bind.
+    assert host_header_allowed("my-pc.tailnet.ts.net", "0.0.0.0", trusted)
+    assert host_header_allowed("my-pc.local:8787", "192.168.1.50", trusted)
+    # A name not in the trusted set is still rejected.
+    assert not host_header_allowed("evil.com", "0.0.0.0", trusted)
+    # Without the trusted set, the same friendly name is rejected (regression guard).
+    assert not host_header_allowed("my-pc.local", "0.0.0.0")
+
+
+def test_local_hostnames_are_lowercased_and_nonempty() -> None:
+    names = local_hostnames()
+    # Best-effort: may be empty on an odd host, but whatever is returned is lowercased and clean.
+    for name in names:
+        assert name == name.strip().lower()
+        assert name
 
 
 def test_requires_token_only_for_nonloopback_with_token() -> None:

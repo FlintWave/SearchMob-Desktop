@@ -816,6 +816,24 @@ class SettingsDialog(QDialog):
         layout.addWidget(cb)
         layout.addWidget(sub)
 
+        # Trusted hostnames: extra names the server accepts in the Host header so a browser on
+        # another device can reach SearchMob by name (e.g. a Tailscale MagicDNS name) instead of
+        # an IP. The machine's own hostname is always accepted; this covers names it cannot detect.
+        hostnames_label = QLabel("Trusted hostnames (network mode)")
+        layout.addWidget(hostnames_label)
+        self._hostnames_input = QLineEdit()
+        self._hostnames_input.setText(", ".join(self._prefs.network_hostnames))
+        self._hostnames_input.setPlaceholderText("e.g. my-pc.tailnet.ts.net, my-pc.local")
+        self._hostnames_input.editingFinished.connect(self._save_network_hostnames)
+        layout.addWidget(self._hostnames_input)
+        hostnames_help = QLabel(
+            "Comma-separated. Add a name only if it resolves to this machine on the other device "
+            "(Tailscale MagicDNS or mDNS). Reaching the server by IP always works without this."
+        )
+        hostnames_help.setWordWrap(True)
+        hostnames_help.setProperty("role", "muted")
+        layout.addWidget(hostnames_help)
+
         info = QLabel(
             "When on, restart the local server from the main window so the new bind address "
             "takes effect."
@@ -825,6 +843,14 @@ class SettingsDialog(QDialog):
         layout.addWidget(info)
         layout.addStretch(1)
         return tab
+
+    def _save_network_hostnames(self) -> None:
+        """Parse the comma-separated hostnames field into a normalized tuple and persist it."""
+        raw = self._hostnames_input.text()
+        parsed = tuple(part.strip().lower() for part in raw.split(",") if part.strip())
+        if parsed == self._prefs.network_hostnames:
+            return
+        self._save(replace(self._prefs, network_hostnames=parsed))
 
     # --- Device setup ------------------------------------------------------------------------
 
@@ -849,13 +875,17 @@ class SettingsDialog(QDialog):
         return tab
 
     def _open_browser_setup(self) -> None:
-        from searchmob_desktop.server import LOOPBACK_HOST
+        from searchmob_desktop.gui.browser_setup_dialog import choose_setup_host
+        from searchmob_desktop.server import local_hostnames
 
-        host = LOOPBACK_HOST
         port: int | None = None
         token: str | None = None
+        host = choose_setup_host(
+            network_enabled=self._prefs.network_access_enabled,
+            configured_hostnames=self._prefs.network_hostnames,
+            local_names=sorted(local_hostnames()),
+        )
         if self._server_controller is not None and self._server_controller.is_running:
-            host = "127.0.0.1"
             port = 8787  # default; the controller does not expose the live port today
             # In network mode the query routes are token-gated, so the setup URLs must carry the
             # token or a browser added off-loopback would be rejected. Loopback stays token-free.
