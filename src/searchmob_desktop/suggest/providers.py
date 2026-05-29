@@ -135,8 +135,13 @@ class UpstreamSuggestionsProvider:
 class CompositeSuggestionsProvider:
     """Local-first merge of history + (opt-in) upstream suggestions.
 
-    `upstream_enabled` is a callable, NOT a captured boolean, so a settings
+    `upstream_enabled` and `local_enabled` are callables, NOT captured booleans, so a settings
     toggle takes effect on the next keystroke without restarting the server.
+
+    `local_enabled` is the network-mode privacy guard: when the local server is reachable by other
+    devices (network mode on), the owner's saved search history must NOT be served as autocomplete
+    to those clients, so callers pass `local_enabled = lambda: not network_access_enabled`. It
+    defaults to always-on for loopback-only use. Mirrors the Android `localEnabled` gate.
     """
 
     def __init__(
@@ -145,20 +150,26 @@ class CompositeSuggestionsProvider:
         upstream: Callable[[str, int], Awaitable[list[str]]],
         upstream_enabled: Callable[[], bool],
         *,
+        local_enabled: Callable[[], bool] = lambda: True,
         max_total: int = MAX_SUGGESTIONS,
     ) -> None:
         self._history = history
         self._upstream = upstream
         self._upstream_enabled = upstream_enabled
+        self._local_enabled = local_enabled
         self._max_total = max_total
 
     async def __call__(self, query: str, limit: int) -> list[str]:
         cap = min(limit, self._max_total)
         if cap <= 0:
             return []
-        try:
-            local = await self._history(query, cap)
-        except Exception:
+        if self._local_enabled():
+            try:
+                local = await self._history(query, cap)
+            except Exception:
+                local = []
+        else:
+            # Network mode: do not expose the owner's history to network clients.
             local = []
         local_clean = [item for item in local if isinstance(item, str)]
 

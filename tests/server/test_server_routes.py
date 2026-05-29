@@ -348,3 +348,17 @@ def test_no_correction_without_a_corrector() -> None:
     with _build_client() as client:
         response = client.get("/api/search", params={"q": "anything"})
     assert json.loads(response.text)["correction"] is None
+
+
+def test_is_loopback_host_classifies_addresses() -> None:
+    from searchmob_desktop.server import is_loopback_host
+
+    assert is_loopback_host("127.0.0.1")
+    assert is_loopback_host("127.5.5.5")
+    assert is_loopback_host("localhost")
+    assert is_loopback_host("::1")
+    assert is_loopback_host(" LocalHost ")
+    # Network-reachable binds are not loopback -> the history-suggestion guard engages.
+    assert not is_loopback_host("0.0.0.0")
+    assert not is_loopback_host("192.168.1.10")
+    assert not is_loopback_host("::")

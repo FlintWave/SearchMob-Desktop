@@ -73,6 +73,16 @@ def _no_suggestions(_query: str, _limit: int) -> list[str]:
     return []
 
 
+def is_loopback_host(host: str) -> bool:
+    """True when `host` is a loopback address (only this machine can reach the server).
+
+    Used as the network-mode privacy gate: when the server binds a non-loopback address (e.g.
+    `0.0.0.0` for LAN/Tailscale), local search-history suggestions must not be served to clients.
+    """
+    h = host.strip().lower()
+    return h in {"localhost", "::1"} or h.startswith("127.")
+
+
 def is_safe_http_url(url: str) -> bool:
     """True only when `url` parses and uses an http or https scheme.
 

@@ -48,7 +48,9 @@ shared design decisions land in the same order.
   feasible (Windows code-signing cert, Apple notarization). CLI-only install via `pipx` continues to
   work in parallel.
 
-## Phase 7 — Network mode
+## Phase 7 — Network mode (done)
 
 - The same Tailscale/LAN opt-in toggle and warning gate as the Android app. Server rebinds when the
-  preference changes.
+  preference changes, and binds per the saved preference at launch.
+- Privacy guard: when the server binds a non-loopback address (network mode), the `/suggest`
+  endpoint stops serving the owner's local search history to other devices on the network.

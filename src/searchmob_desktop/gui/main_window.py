@@ -78,8 +78,9 @@ class MainWindow(QMainWindow):
         self._tray_hint_shown = False
 
         self._prefs_store = prefs_store or JsonPreferencesStore()
+        prefs = self._prefs_store.load()
         self._history_store = history_store or InMemoryHistoryStore()
-        self._history_store.set_enabled(self._prefs_store.load().history_enabled)
+        self._history_store.set_enabled(prefs.history_enabled)
         # Result-ranking rules (block/lower/raise/pin, lenses, goggles), loaded once and applied to
         # every result list. `_raw_results` keeps the pre-ranking list so a rule change re-ranks
         # without re-searching.
@@ -91,10 +92,12 @@ class MainWindow(QMainWindow):
             history_terms=lambda: [e.query for e in self._history_store.recent(500)]
         )
         self._last_query = ""
+        # Bind per the saved network-mode preference so a profile with network mode on listens on
+        # the LAN from launch (the Settings toggle still rebinds on the next server restart).
         self._server = LocalServerController(
             prefs_store=self._prefs_store,
             history_store=self._history_store,
-            host=LOOPBACK_HOST,
+            host="0.0.0.0" if prefs.network_access_enabled else LOOPBACK_HOST,
             port=8787,
         )
         self._server.serverStarted.connect(self._on_server_started)
