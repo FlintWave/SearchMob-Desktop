@@ -33,6 +33,7 @@ from searchmob_desktop.data.history import InMemoryHistoryStore
 from searchmob_desktop.engines import EngineContext, SearchResult, aggregate
 from searchmob_desktop.gui.about_dialog import AboutDialog
 from searchmob_desktop.gui.browser_setup_dialog import BrowserSetupDialog
+from searchmob_desktop.gui.history_dialog import HistoryDialog
 from searchmob_desktop.gui.results_view import ResultsView
 from searchmob_desktop.gui.server_controller import (
     LocalServerController,
@@ -137,6 +138,10 @@ class MainWindow(QMainWindow):
         browser_action = QAction("Browser setup", self)
         browser_action.triggered.connect(self._on_open_browser_setup)
         toolbar.addAction(browser_action)
+
+        history_action = QAction("History", self)
+        history_action.triggered.connect(self._on_open_history)
+        toolbar.addAction(history_action)
 
         settings_action = QAction("Settings", self)
         settings_action.setShortcut(QKeySequence.StandardKey.Preferences)
@@ -337,6 +342,9 @@ class MainWindow(QMainWindow):
         host = "127.0.0.1"
         port: int | None = 8787 if self._server.is_running else None
         BrowserSetupDialog(host=host, port=port, parent=self).exec()
+
+    def _on_open_history(self) -> None:
+        HistoryDialog(self._history_store, parent=self).exec()
 
     def _on_open_about(self) -> None:
         AboutDialog(self).exec()
