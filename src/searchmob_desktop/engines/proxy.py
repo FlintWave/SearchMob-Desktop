@@ -22,6 +22,11 @@ from typing import Final
 
 import httpx
 
+# Hard cap on a single engine response body. Upstream engines return at most a few hundred KiB of
+# HTML/JSON; this bounds memory so a hostile or compromised upstream (or a redirect target) cannot
+# OOM the app by streaming an unbounded body. Reads abort past this and fail soft.
+MAX_RESPONSE_BYTES: Final = 8 * 1024 * 1024
+
 USER_AGENTS: Final[tuple[str, ...]] = (
     # Chrome on Windows
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -60,4 +65,34 @@ def make_privacy_client(timeout: float = 5.0) -> httpx.AsyncClient:
         follow_redirects=True,
         timeout=httpx.Timeout(timeout),
         event_hooks={"request": [_privacy_request_hook]},
+        # Ignore HTTP(S)_PROXY / NO_PROXY / SSLKEYLOGFILE from the environment so a hostile env
+        # cannot silently route or log the user's search traffic.
+        trust_env=False,
     )
+
+
+async def fetch_bounded(
+    client: httpx.AsyncClient,
+    method: str,
+    url: str,
+    *,
+    headers: dict[str, str] | None = None,
+    json: object | None = None,
+    max_bytes: int = MAX_RESPONSE_BYTES,
+) -> bytes | None:
+    """Stream a request and return the body, or `None` if it exceeds `max_bytes` (or errors).
+
+    Raises `httpx.HTTPError` for transport/status problems so adapters keep their existing
+    fail-soft `except httpx.HTTPError` handling; returns `None` when the body is too large so an
+    unbounded response can never be fully buffered into memory.
+    """
+    async with client.stream(method, url, headers=headers, json=json) as response:
+        response.raise_for_status()
+        chunks: list[bytes] = []
+        total = 0
+        async for chunk in response.aiter_bytes():
+            total += len(chunk)
+            if total > max_bytes:
+                return None
+            chunks.append(chunk)
+        return b"".join(chunks)

@@ -14,6 +14,7 @@ from urllib.parse import urlencode
 import httpx
 from bs4 import BeautifulSoup, Tag
 
+from searchmob_desktop.engines.proxy import fetch_bounded
 from searchmob_desktop.engines.types import EngineContext, SearchResult
 
 _ENGINE_ID = "mojeek"
@@ -23,9 +24,10 @@ _ENDPOINT = "https://www.mojeek.com/search"
 async def fetch_mojeek(client: httpx.AsyncClient, ctx: EngineContext) -> list[SearchResult]:
     """Fetch one Mojeek HTML results page and parse it. Returns `[]` on any failure."""
     try:
-        response = await client.get(f"{_ENDPOINT}?{urlencode({'q': ctx.query})}")
-        response.raise_for_status()
-        return _parse(response.text, ctx.max_results)
+        body = await fetch_bounded(client, "GET", f"{_ENDPOINT}?{urlencode({'q': ctx.query})}")
+        if body is None:
+            return []
+        return _parse(body.decode("utf-8", errors="replace"), ctx.max_results)
     except (httpx.HTTPError, ValueError):
         return []
     except Exception:

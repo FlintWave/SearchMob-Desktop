@@ -26,6 +26,8 @@ from typing import Any, Protocol
 
 import platformdirs
 
+from searchmob_desktop.fsperms import restrict_dir, restrict_file
+
 __all__ = [
     "JsonPreferencesStore",
     "PreferencesStore",
@@ -98,10 +100,14 @@ class JsonPreferencesStore:
 
     def save(self, prefs: UserPreferences) -> None:
         self._path.parent.mkdir(parents=True, exist_ok=True)
+        restrict_dir(self._path.parent)
         tmp = self._path.with_suffix(self._path.suffix + ".tmp")
         payload = json.dumps(asdict(prefs), indent=2, sort_keys=True)
         tmp.write_text(payload, encoding="utf-8")
         os.replace(tmp, self._path)
+        # Owner-only: prefs are not secret, but leaking the user's engine/network/update choices to
+        # other local accounts is needless. Best-effort (no-op where chmod is unsupported).
+        restrict_file(self._path)
 
 
 def _from_dict(data: dict[str, Any]) -> UserPreferences:

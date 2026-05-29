@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import gzip
 import importlib.resources as resources
+import io
 import threading
 from collections.abc import Callable
 
@@ -20,6 +21,10 @@ from searchmob_desktop.engines.correct.dictionary import Dictionary
 
 _RESOURCE_PACKAGE = "searchmob_desktop.resources.dict"
 _RESOURCE_NAME = "words.txt.gz"
+
+# Upper bound on the decompressed dictionary size. The bundled asset is a few MiB; this caps memory
+# so a tampered/swapped asset (or a future caller-supplied path) cannot gzip-bomb the loader.
+_MAX_DECOMPRESSED_BYTES = 64 * 1024 * 1024
 
 
 class AssetDictionaryLoader:
@@ -54,7 +59,13 @@ class AssetDictionaryLoader:
 
     def _read_weights(self) -> dict[str, int]:
         raw = self._read_asset_bytes()
-        text = gzip.decompress(raw).decode("utf-8")
+        # Bounded decompression: read at most the cap (+1 to detect overflow) so a malicious or
+        # corrupt gzip cannot expand without limit into memory.
+        with gzip.GzipFile(fileobj=io.BytesIO(raw)) as gz:
+            data = gz.read(_MAX_DECOMPRESSED_BYTES + 1)
+        if len(data) > _MAX_DECOMPRESSED_BYTES:
+            raise ValueError("correction dictionary exceeds the maximum decompressed size")
+        text = data.decode("utf-8")
         weights: dict[str, int] = {}
         for line in text.splitlines():
             if not line:

@@ -230,9 +230,11 @@ def render_results_page(
             parts.append('<div class="result">')
             parts.append(f'<div class="url">{escape(_display_url(result.url))}</div>')
             if is_safe_http_url(result.url):
+                # rel=noreferrer backs up the Referrer-Policy header so the query (in the loopback
+                # URL) never leaks to the destination; noopener severs window.opener.
                 parts.append(
-                    f'<a href="{escape(result.url, quote=True)}" class="title">'
-                    f"{escape(result.title)}</a>"
+                    f'<a href="{escape(result.url, quote=True)}" class="title" '
+                    f'rel="noopener noreferrer">{escape(result.title)}</a>'
                 )
             else:
                 parts.append(f'<span class="title">{escape(result.title)}</span>')
