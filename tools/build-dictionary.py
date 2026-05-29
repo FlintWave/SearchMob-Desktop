@@ -21,7 +21,9 @@ import sys
 import urllib.request
 from pathlib import Path
 
-WORDS_URL = "https://raw.githubusercontent.com/hermitdave/FrequencyWords/master/content/2018/en/en_50k.txt"
+WORDS_URL = (
+    "https://raw.githubusercontent.com/hermitdave/FrequencyWords/master/content/2018/en/en_50k.txt"
+)
 FIRST_NAMES_URL = "https://raw.githubusercontent.com/dominictarr/random-name/master/first-names.txt"
 SURNAMES_URL = "https://raw.githubusercontent.com/dominictarr/random-name/master/names.txt"
 
@@ -34,7 +36,7 @@ OUT = Path("src/searchmob_desktop/resources/dict/words.txt.gz")
 
 
 def fetch(url: str) -> str:
-    with urllib.request.urlopen(url, timeout=60) as r:  # noqa: S310 (trusted, documented URLs)
+    with urllib.request.urlopen(url, timeout=60) as r:
         return r.read().decode("utf-8", "replace")
 
 
