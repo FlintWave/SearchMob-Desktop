@@ -9,16 +9,21 @@ the GUI thread via the worker's `finished` signal.
 
 from __future__ import annotations
 
-from PySide6.QtCore import QThreadPool
-from PySide6.QtGui import QAction, QKeySequence
+from importlib.resources import as_file, files
+
+from PySide6.QtCore import Qt, QThreadPool
+from PySide6.QtGui import QAction, QIcon, QKeySequence
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QMainWindow,
+    QMenu,
     QMessageBox,
     QPushButton,
+    QStackedWidget,
     QStatusBar,
+    QSystemTrayIcon,
     QToolBar,
     QVBoxLayout,
     QWidget,
@@ -41,6 +46,16 @@ from searchmob_desktop.prefs import JsonPreferencesStore
 from searchmob_desktop.server import LOOPBACK_HOST
 
 
+def app_icon() -> QIcon:
+    """The app launcher icon, loaded from the bundled resources (empty QIcon if unavailable)."""
+    try:
+        resource = files("searchmob_desktop.resources").joinpath("icon.png")
+        with as_file(resource) as path:
+            return QIcon(str(path))
+    except (FileNotFoundError, ModuleNotFoundError, OSError):
+        return QIcon()
+
+
 class MainWindow(QMainWindow):
     """Top-level shell."""
 
@@ -51,7 +66,12 @@ class MainWindow(QMainWindow):
     ) -> None:
         super().__init__()
         self.setWindowTitle("SearchMob Desktop")
-        self.resize(960, 720)
+        self.setWindowIcon(app_icon())
+        self.resize(980, 760)
+        self.setMinimumSize(520, 420)
+        # Set by the tray "Quit" action so closeEvent really exits instead of hiding to tray.
+        self._really_quit = False
+        self._tray_hint_shown = False
 
         self._prefs_store = prefs_store or JsonPreferencesStore()
         self._history_store = history_store or InMemoryHistoryStore()
@@ -70,14 +90,20 @@ class MainWindow(QMainWindow):
 
         central = QWidget(self)
         outer = QVBoxLayout(central)
-        outer.setSpacing(8)
+        outer.setContentsMargins(20, 16, 20, 12)
+        outer.setSpacing(12)
 
-        # Search bar row.
+        # Search bar row: a roomy field with a prominent accent-filled action button.
         search_row = QHBoxLayout()
+        search_row.setSpacing(10)
         self._query_input = QLineEdit()
-        self._query_input.setPlaceholderText("Search the web")
+        self._query_input.setPlaceholderText("Search the web privately")
+        self._query_input.setClearButtonEnabled(True)
         self._query_input.returnPressed.connect(self._on_submit)
         self._search_btn = QPushButton("Search")
+        self._search_btn.setProperty("role", "primary")
+        self._search_btn.setDefault(True)
+        self._search_btn.setMinimumWidth(110)
         self._search_btn.clicked.connect(self._on_submit)
         search_row.addWidget(self._query_input, stretch=1)
         search_row.addWidget(self._search_btn)
@@ -88,9 +114,15 @@ class MainWindow(QMainWindow):
         self._status_label.setProperty("role", "muted")
         outer.addWidget(self._status_label)
 
-        # Results view.
+        # Body swaps between a friendly empty state and the results list so the window never shows a
+        # bare void before the first search.
+        self._body = QStackedWidget()
+        self._empty_state = self._build_empty_state()
         self._results = ResultsView()
-        outer.addWidget(self._results, stretch=1)
+        self._body.addWidget(self._empty_state)
+        self._body.addWidget(self._results)
+        self._body.setCurrentWidget(self._empty_state)
+        outer.addWidget(self._body, stretch=1)
 
         self.setCentralWidget(central)
 
@@ -125,6 +157,89 @@ class MainWindow(QMainWindow):
         self.setStatusBar(status)
         status.showMessage("Server stopped.")
 
+        # System tray: lets the app live in the tray/applet area instead of quitting on close.
+        self._tray: QSystemTrayIcon | None = None
+        self._setup_tray()
+
+    # --- Empty state -------------------------------------------------------------------------
+
+    def _build_empty_state(self) -> QWidget:
+        """A centered placeholder shown before the first search and when a search finds nothing."""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.setSpacing(8)
+
+        icon = app_icon()
+        if not icon.isNull():
+            badge = QLabel()
+            badge.setPixmap(icon.pixmap(72, 72))
+            badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            layout.addWidget(badge)
+
+        heading = QLabel("Search the web privately")
+        heading.setProperty("role", "heading")
+        heading.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(heading)
+
+        subtitle = QLabel(
+            "Results are aggregated across engines on this device. Nothing is stored by default."
+        )
+        subtitle.setProperty("role", "muted")
+        subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        subtitle.setWordWrap(True)
+        layout.addWidget(subtitle)
+        return widget
+
+    # --- Tray --------------------------------------------------------------------------------
+
+    def _setup_tray(self) -> None:
+        """Create the tray icon and its menu, if the host OS exposes a system tray."""
+        if not QSystemTrayIcon.isSystemTrayAvailable():
+            return
+
+        tray = QSystemTrayIcon(app_icon(), self)
+        tray.setToolTip("SearchMob Desktop")
+
+        menu = QMenu(self)
+        self._tray_show_action = QAction("Show window", self)
+        self._tray_show_action.triggered.connect(self._show_from_tray)
+        menu.addAction(self._tray_show_action)
+
+        self._tray_server_action = QAction("Start server", self)
+        self._tray_server_action.triggered.connect(self._on_toggle_server)
+        menu.addAction(self._tray_server_action)
+
+        menu.addSeparator()
+        quit_action = QAction("Quit SearchMob", self)
+        quit_action.triggered.connect(self._quit_from_tray)
+        menu.addAction(quit_action)
+
+        tray.setContextMenu(menu)
+        tray.activated.connect(self._on_tray_activated)
+        tray.show()
+        self._tray = tray
+
+    def _on_tray_activated(self, reason: QSystemTrayIcon.ActivationReason) -> None:
+        # A left-click (Trigger) or double-click toggles the window's visibility.
+        if reason in (
+            QSystemTrayIcon.ActivationReason.Trigger,
+            QSystemTrayIcon.ActivationReason.DoubleClick,
+        ):
+            if self.isVisible() and not self.isMinimized():
+                self.hide()
+            else:
+                self._show_from_tray()
+
+    def _show_from_tray(self) -> None:
+        self.showNormal()
+        self.raise_()
+        self.activateWindow()
+
+    def _quit_from_tray(self) -> None:
+        self._really_quit = True
+        self.close()
+
     # --- Search ------------------------------------------------------------------------------
 
     def _on_submit(self) -> None:
@@ -157,16 +272,20 @@ class MainWindow(QMainWindow):
         self._search_btn.setEnabled(True)
         if not isinstance(results, list):
             self._status_label.setText("Search failed: unexpected result type.")
+            self._body.setCurrentWidget(self._empty_state)
             return
         if not results:
             self._status_label.setText("No results found.")
+            self._body.setCurrentWidget(self._empty_state)
             return
         self._status_label.setText(f"{len(results)} results.")
         self._results.set_results(results)
+        self._body.setCurrentWidget(self._results)
 
     def _on_search_failed(self, message: str) -> None:
         self._search_btn.setEnabled(True)
         self._status_label.setText(f"Search failed: {message}")
+        self._body.setCurrentWidget(self._empty_state)
 
     # --- Server ------------------------------------------------------------------------------
 
@@ -180,14 +299,22 @@ class MainWindow(QMainWindow):
         self._toggle_server_action.setText("Stop server")
         bound = self._server.bound_url or f"http://127.0.0.1:{port}/"
         self.statusBar().showMessage(f"Server running at {bound}")
+        if self._tray is not None:
+            self._tray_server_action.setText("Stop server")
+            self._tray.setToolTip(f"SearchMob Desktop - {bound}")
 
     def _on_server_stopped(self) -> None:
         self._toggle_server_action.setText("Start server")
         self.statusBar().showMessage("Server stopped.")
+        if self._tray is not None:
+            self._tray_server_action.setText("Start server")
+            self._tray.setToolTip("SearchMob Desktop")
 
     def _on_server_error(self, message: str) -> None:
         self._toggle_server_action.setText("Start server")
         self.statusBar().showMessage("Server error.")
+        if self._tray is not None:
+            self._tray_server_action.setText("Start server")
         QMessageBox.warning(self, "Server error", message)
 
     # --- Dialogs -----------------------------------------------------------------------------
@@ -225,10 +352,28 @@ class MainWindow(QMainWindow):
     # --- Lifecycle ---------------------------------------------------------------------------
 
     def closeEvent(self, event):  # type: ignore[no-untyped-def]
-        # Best-effort: stop the server thread so the process can exit cleanly. If uvicorn is
-        # mid-request, the 2-second `wait()` in the controller's stop() is the upper bound.
+        # When a tray is available, closing the window hides it to the tray instead of quitting,
+        # so the local server keeps running and the app stays a click away. The tray's "Quit"
+        # action sets `_really_quit` to perform a real shutdown.
+        if self._tray is not None and not self._really_quit:
+            event.ignore()
+            self.hide()
+            if not self._tray_hint_shown:
+                self._tray_hint_shown = True
+                self._tray.showMessage(
+                    "SearchMob is still running",
+                    "The app stays in the tray. Use the tray menu to quit.",
+                    app_icon(),
+                    4000,
+                )
+            return
+
+        # Real shutdown. Best-effort: stop the server thread so the process can exit cleanly. If
+        # uvicorn is mid-request, the 2-second wait() in the controller's stop() is the upper bound.
         try:
             self._server.stop()
         except Exception:
             pass
+        if self._tray is not None:
+            self._tray.hide()
         super().closeEvent(event)

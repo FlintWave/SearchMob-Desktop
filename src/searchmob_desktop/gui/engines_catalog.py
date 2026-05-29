@@ -27,6 +27,7 @@ ENGINE_CATALOG: tuple[EngineEntry, ...] = (
     EngineEntry(id="mwmbl", display_name="Mwmbl", requires_api_key=False),
     EngineEntry(id="brave", display_name="Brave Search API", requires_api_key=True),
     EngineEntry(id="mojeek-api", display_name="Mojeek API", requires_api_key=True),
+    EngineEntry(id="kagi-api", display_name="Kagi (API)", requires_api_key=True),
 )
 
 
