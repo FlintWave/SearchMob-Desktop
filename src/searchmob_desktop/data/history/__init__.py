@@ -11,7 +11,10 @@ from searchmob_desktop.data.history.history import (
     HistoryStore,
 )
 from searchmob_desktop.data.history.in_memory_store import InMemoryHistoryStore
-from searchmob_desktop.data.history.sqlcipher_store import SqlCipherHistoryStore
+from searchmob_desktop.data.history.sqlcipher_store import (
+    SqlCipherHistoryStore,
+    sqlcipher_available,
+)
 
 __all__ = [
     "DEFAULT_HISTORY_TTL_MS",
@@ -19,4 +22,5 @@ __all__ = [
     "HistoryStore",
     "InMemoryHistoryStore",
     "SqlCipherHistoryStore",
+    "sqlcipher_available",
 ]
