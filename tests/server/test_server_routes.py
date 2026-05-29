@@ -30,6 +30,8 @@ def _build_client(
     suggestions_provider: object = None,
     corrector: object = None,
     ranking_rules: object = None,
+    access_token: str | None = None,
+    host_allowlist_enabled: bool = False,
 ) -> TestClient:
     """Wire a TestClient over the Starlette app with a fake metasearch.
 
@@ -37,6 +39,10 @@ def _build_client(
     instead it calls each `engines` entry directly with a dummy client and concatenates the
     returned lists in order. That keeps these tests hermetic while still exercising the route's
     handoff to the engine functions.
+
+    The Host-header allowlist defaults OFF here: TestClient sends `Host: testserver`, which the
+    allowlist would (correctly) reject, and these route-shape tests are not about that gate. The
+    dedicated allowlist tests build their own app with it enabled and drive the `Host` header.
     """
 
     async def _metasearch(
@@ -56,6 +62,8 @@ def _build_client(
         corrector=corrector,  # type: ignore[arg-type]
         ranking_rules=ranking_rules,  # type: ignore[arg-type]
         metasearch=_metasearch,
+        access_token=access_token,
+        host_allowlist_enabled=host_allowlist_enabled,
     )
     return TestClient(app)
 
@@ -362,6 +370,108 @@ def test_is_loopback_host_classifies_addresses() -> None:
     assert not is_loopback_host("0.0.0.0")
     assert not is_loopback_host("192.168.1.10")
     assert not is_loopback_host("::")
+
+
+def test_host_allowlist_accepts_loopback_and_bound_host() -> None:
+    with _build_client(host="192.168.1.50", host_allowlist_enabled=True) as client:
+        # Loopback names are always allowed.
+        assert client.get("/healthz", headers={"Host": "localhost:8787"}).status_code == 200
+        assert client.get("/healthz", headers={"Host": "127.0.0.1:8787"}).status_code == 200
+        # The bound host itself is allowed.
+        assert client.get("/healthz", headers={"Host": "192.168.1.50:8787"}).status_code == 200
+
+
+def test_host_allowlist_rejects_foreign_dns_name() -> None:
+    with _build_client(host="192.168.1.50", host_allowlist_enabled=True) as client:
+        # A DNS-rebinding Host that is neither loopback, the bound host, nor an IP literal: blocked.
+        resp = client.get("/healthz", headers={"Host": "evil.com"})
+    assert resp.status_code == 400
+
+
+def test_host_allowlist_wildcard_bind_allows_ip_literals() -> None:
+    with _build_client(host="0.0.0.0", host_allowlist_enabled=True) as client:
+        # When bound to a wildcard, any IP literal (a real LAN/Tailscale client) is allowed...
+        assert client.get("/healthz", headers={"Host": "10.0.0.7:8787"}).status_code == 200
+        assert client.get("/healthz", headers={"Host": "[fe80::1]:8787"}).status_code == 200
+        # ...but a foreign DNS name is still rejected.
+        assert client.get("/healthz", headers={"Host": "attacker.example"}).status_code == 400
+
+
+def test_host_allowlist_can_be_disabled() -> None:
+    app = build_app(
+        [],
+        bound_port_getter=lambda: 8787,
+        bound_host_getter=lambda: "192.168.1.50",
+        host_allowlist_enabled=False,
+    )
+    with TestClient(app) as client:
+        # With the allowlist off, even a foreign Host passes through.
+        assert client.get("/healthz", headers={"Host": "evil.com"}).status_code == 200
+
+
+def test_token_gate_loopback_client_never_needs_token() -> None:
+    # A loopback client is exempt even with a token configured: the query routes work with no
+    # `token` param at all. We pin the simulated client address to loopback explicitly.
+    app = build_app(
+        [], bound_port_getter=lambda: 8787, access_token="s3cret", host_allowlist_enabled=False
+    )
+    with TestClient(app, client=("127.0.0.1", 5000)) as client:
+        assert client.get("/api/search", params={"q": "x"}).status_code == 200
+        assert client.get("/suggest", params={"q": "x"}).status_code == 200
+        # Open routes are never gated, even off-loopback.
+        assert client.get("/").status_code == 200
+        assert client.get("/opensearch.xml").status_code == 200
+        assert client.get("/healthz").status_code == 200
+
+
+def test_token_gate_remote_client_requires_correct_token() -> None:
+    # Simulate a non-loopback client. The Host allowlist is disabled so the only gate under test is
+    # the token gate. Without a token -> 403; with the wrong token -> 403; with the right one -> ok.
+    app = build_app(
+        [],
+        bound_port_getter=lambda: 8787,
+        bound_host_getter=lambda: "0.0.0.0",
+        access_token="right-token",
+        host_allowlist_enabled=False,
+    )
+    with TestClient(app, client=("192.168.1.77", 6000)) as client:
+        assert client.get("/api/search", params={"q": "x"}).status_code == 403
+        assert client.get("/api/search", params={"q": "x", "token": "wrong"}).status_code == 403
+        assert (
+            client.get("/api/search", params={"q": "x", "token": "right-token"}).status_code == 200
+        )
+        assert client.get("/suggest", params={"q": "x", "token": "right-token"}).status_code == 200
+        # Open routes remain reachable so the browser can still fetch the descriptor.
+        assert client.get("/opensearch.xml").status_code == 200
+        assert client.get("/healthz").status_code == 200
+
+
+def test_token_gate_no_token_configured_means_no_enforcement() -> None:
+    app = build_app(
+        [], bound_port_getter=lambda: 8787, access_token=None, host_allowlist_enabled=False
+    )
+    with TestClient(app) as client:
+        assert client.get("/api/search", params={"q": "x"}).status_code == 200
+
+
+def test_descriptor_includes_token_when_configured() -> None:
+    # The descriptor route is open, so it returns even off-loopback; build_app bakes the token.
+    with _build_client(host="192.168.1.50", port=8787, access_token="tok-123") as client:
+        body = client.get("/opensearch.xml").text
+    root = ET.fromstring(body)
+    urls = root.findall(f"{{{_OPENSEARCH_NS}}}Url")
+    templates = {url.attrib["type"]: url.attrib["template"] for url in urls}
+    # ElementTree un-escapes &amp; back to & when reading the attribute value.
+    assert templates["text/html"].endswith("/search?q={searchTerms}&token=tok-123")
+    assert templates["application/x-suggestions+json"].endswith(
+        "/suggest?q={searchTerms}&token=tok-123"
+    )
+
+
+def test_descriptor_omits_token_when_none() -> None:
+    with _build_client(host="127.0.0.1", port=8787) as client:
+        body = client.get("/opensearch.xml").text
+    assert "token=" not in body
 
 
 def test_security_headers_present_on_responses() -> None:

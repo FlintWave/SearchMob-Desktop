@@ -53,6 +53,10 @@ class UserPreferences:
     theme: str = "system"
     history_enabled: bool = False
     network_access_enabled: bool = False
+    # Shared secret appended as a `?token=` query param to gate the search/suggest routes when the
+    # server is reachable off-loopback. Empty means "not yet generated"; it is minted lazily the
+    # first time network access is turned on and then reused so re-enabling keeps the same token.
+    network_access_token: str = ""
     upstream_suggestions_enabled: bool = False
     update_check_enabled: bool = True
     last_update_check_ms: int = 0
