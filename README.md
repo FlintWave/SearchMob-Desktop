@@ -52,12 +52,33 @@ Grab the installer for your OS from the [latest GitHub Release](https://github.c
   (Fedora/RHEL), or the `.flatpak` bundle. (The AppImage target was dropped — Briefcase's AppImage
   is unreliable for PySide.) You can also install via `pipx` (below).
 
-Every release also publishes a `SHA256SUMS` file you can verify before installing.
-
 > **Installers are unsigned.** The `.msi` and `.dmg` are ad-hoc signed and will trigger SmartScreen
 > / Gatekeeper warnings; Authenticode signing (Windows) and Apple notarization (macOS) are planned
 > once the signing secrets are wired into CI. Verify any download against the published
-> `SHA256SUMS` before installing.
+> `SHA256SUMS` (below) before installing.
+
+### Verify your download
+
+Every release ships a `SHA256SUMS` file listing the checksum of each installer (download it from
+the same [release page](https://github.com/FlintWave/SearchMob-Desktop/releases) into the same
+folder as your installer). The filenames in it match the release assets exactly. To check:
+
+```bash
+# Linux
+sha256sum --ignore-missing -c SHA256SUMS
+
+# macOS
+shasum -a 256 -c SHA256SUMS   # add --ignore-missing on coreutils' gsha256sum
+```
+
+```powershell
+# Windows (PowerShell): compare the printed hash to the matching line in SHA256SUMS
+(Get-FileHash .\SearchMob.Desktop-<version>.msi -Algorithm SHA256).Hash
+```
+
+`--ignore-missing` checks only the file(s) you actually downloaded. An `OK` line means the download
+is intact. (This guards against corruption and tampering in transit; it is not a substitute for the
+code-signing that is still to come.)
 
 ### Developers / source install
 
