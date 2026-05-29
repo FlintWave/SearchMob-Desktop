@@ -142,20 +142,69 @@ requires = [
 [tool.briefcase.app.searchmob_desktop.linux]
 requires = []
 
-# Linux target ships as an AppImage: one portable binary that runs on any modern distro
-# without coupling to the runner's system Python (Briefcase's `linux system` format
-# refuses to build when setup-python's Python does not match the host's system Python,
-# which is the common case on GitHub runners). AppImage builds inside a manylinux
-# container so the system_requires below are installed INSIDE that container, not on
-# the host runner.
-[tool.briefcase.app.searchmob_desktop.linux.appimage]
-manylinux = "manylinux_2_28"
-# PySide6's wheel bundles its own Qt libs, and the manylinux_2_28 image is RPM-based
-# (AlmaLinux/yum), so installing distro-named Qt packages would (a) duplicate what is
-# already bundled and (b) fail with the Debian-style names we would naturally reach for.
-# Leave system_requires empty; gcc/make/pkgconfig from Briefcase's default template
-# are enough to package the precompiled wheel into the AppImage.
-system_requires = []
+# Linux ships native packages built with Briefcase's `linux system` backend inside a per-distro
+# Docker container (`--target`), which avoids coupling to the runner's system Python. We build a
+# `.deb` (Debian/Ubuntu target), an `.rpm` (Fedora target), and a Flatpak. The previous AppImage
+# target was dropped: Briefcase's AppImage support is unreliable for PySide and never built here.
+#
+# Briefcase merges per-distro config: `linux.debian` applies to the .deb (Ubuntu's vendor base is
+# Debian) and `linux.rhel` to the .rpm (Fedora's vendor base is RHEL). PySide6 bundles its own Qt
+# .so files but they still dynamically link the system X11/GL/xcb stack, so we declare those as the
+# package's runtime dependencies (present on any desktop, but declared for correctness).
+[tool.briefcase.app.searchmob_desktop.linux.debian]
+system_runtime_requires = [
+    "libegl1",
+    "libgl1",
+    "libglib2.0-0",
+    "libdbus-1-3",
+    "libfontconfig1",
+    "libfreetype6",
+    "libxext6",
+    "libxrender1",
+    "libxkbcommon0",
+    "libxkbcommon-x11-0",
+    "libxcb1",
+    "libxcb-cursor0",
+    "libxcb-icccm4",
+    "libxcb-image0",
+    "libxcb-keysyms1",
+    "libxcb-randr0",
+    "libxcb-render0",
+    "libxcb-render-util0",
+    "libxcb-shape0",
+    "libxcb-shm0",
+    "libxcb-sync1",
+    "libxcb-xfixes0",
+    "libxcb-xinerama0",
+    "libxcb-xkb1",
+]
+
+[tool.briefcase.app.searchmob_desktop.linux.rhel]
+system_runtime_requires = [
+    "mesa-libEGL",
+    "mesa-libGL",
+    "glib2",
+    "dbus-libs",
+    "fontconfig",
+    "freetype",
+    "libXext",
+    "libXrender",
+    "libxkbcommon",
+    "libxkbcommon-x11",
+    "libxcb",
+    "xcb-util-cursor",
+    "xcb-util-wm",
+    "xcb-util-image",
+    "xcb-util-keysyms",
+    "xcb-util-renderutil",
+]
+
+# Flatpak: the freedesktop runtime/SDK provide Python + the GUI stack. Built with flatpak-builder
+# (installed in CI). The runtime version tracks a current freedesktop release.
+[tool.briefcase.app.searchmob_desktop.linux.flatpak]
+flatpak_runtime = "org.freedesktop.Platform"
+flatpak_runtime_version = "23.08"
+flatpak_sdk = "org.freedesktop.Sdk"
 
 [tool.briefcase.app.searchmob_desktop.windows]
 requires = []

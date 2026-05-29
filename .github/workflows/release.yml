@@ -36,22 +36,35 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
-      # Linux installer is intentionally not built here: Briefcase's AppImage backend is
-      # unreliable for PySide apps (it can't use precompiled wheels) and has never produced a
-      # working artifact for this project. Linux users install via pipx (see README). Reinstating a
-      # Linux package (Flatpak or system .deb/.rpm) is tracked as a follow-up.
+      # `package_args` is everything after `briefcase package`. Linux uses the `system` backend
+      # inside a per-distro Docker container (--target), which sidesteps the runner's system-Python
+      # mismatch that made native Linux builds fail before. deb/rpm/dmg/msi are required; the
+      # Flatpak leg is marked experimental (continue-on-error) until it has proven stable in CI.
       matrix:
         include:
           - os: macos-latest
             label: macos-dmg
-            platform: macOS
-            briefcase_format: ''
+            package_args: 'macOS --adhoc-sign'
             artifact_glob: 'dist/*.dmg'
           - os: windows-latest
             label: windows-msi
-            platform: windows
-            briefcase_format: ''
+            package_args: 'windows --adhoc-sign'
             artifact_glob: 'dist/*.msi'
+          - os: ubuntu-latest
+            label: linux-deb
+            package_args: 'linux system -p deb --target ubuntu:24.04'
+            artifact_glob: 'dist/*.deb'
+          - os: ubuntu-latest
+            label: linux-rpm
+            package_args: 'linux system -p rpm --target fedora:41'
+            artifact_glob: 'dist/*.rpm'
+          - os: ubuntu-latest
+            label: linux-flatpak
+            package_args: 'linux flatpak'
+            artifact_glob: 'dist/*.flatpak'
+            flatpak: true
+            experimental: true
+    continue-on-error: ${{ matrix.experimental || false }}
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -69,11 +82,21 @@ jobs:
           pip install briefcase
           pip install -e ".[gui]"
 
-      # --adhoc-sign produces a buildable-but-unsigned artifact on macOS/Windows.
+      # Flatpak needs flatpak-builder plus the freedesktop runtime/SDK on the runner.
+      - name: Set up Flatpak toolchain
+        if: matrix.flatpak
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y flatpak flatpak-builder
+          flatpak remote-add --if-not-exists --user flathub https://flathub.org/repo/flathub.flatpakrepo
+          flatpak install --user -y flathub org.freedesktop.Platform//23.08 org.freedesktop.Sdk//23.08
+
+      # --adhoc-sign produces a buildable-but-unsigned artifact on macOS/Windows; Linux ignores it.
       - name: Briefcase package
         shell: bash
         run: |
-          briefcase package ${{ matrix.platform }} ${{ matrix.briefcase_format }} --adhoc-sign
+          briefcase package ${{ matrix.package_args }}
 
       - name: Upload installer artifact
         uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
@@ -103,19 +126,29 @@ jobs:
           set -euo pipefail
           mkdir -p dist
           # Flatten the matrix output (one subdir per matrix label) into dist/.
-          find artifacts -type f \( -name '*.dmg' -o -name '*.msi' \) \
+          find artifacts -type f \
+            \( -name '*.dmg' -o -name '*.msi' -o -name '*.deb' -o -name '*.rpm' -o -name '*.flatpak' \) \
             -exec cp -v {} dist/ \;
+          # Require the four confident installers; the Flatpak leg is experimental and may be absent.
+          for ext in dmg msi deb rpm; do
+            if ! ls dist/*."$ext" >/dev/null 2>&1; then
+              echo "::error::missing required installer: *.$ext"; exit 1
+            fi
+          done
           ( cd dist && sha256sum -- * > SHA256SUMS )
           echo "Published artifacts:"
           cat dist/SHA256SUMS
 
-      # Upload to the GitHub Release. fail_on_unmatched_files = true so a missing platform asset
-      # surfaces as a workflow failure (we want both the macOS and Windows installers, or none).
+      # Required installers were enforced above; fail_on_unmatched_files is false so a missing
+      # (experimental) Flatpak does not block publishing the rest.
       - name: Publish installers + SHA256SUMS to the GitHub Release
         uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3.0.0
         with:
           files: |
             dist/*.dmg
             dist/*.msi
+            dist/*.deb
+            dist/*.rpm
+            dist/*.flatpak
             dist/SHA256SUMS
-          fail_on_unmatched_files: true
+          fail_on_unmatched_files: false
