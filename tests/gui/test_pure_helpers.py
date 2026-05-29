@@ -76,8 +76,10 @@ def test_build_engines_from_prefs_honors_disabled_engine() -> None:
     assert len(engines) == len(baseline) - 1
 
 
-def test_setup_urls_uses_search_terms_placeholder() -> None:
+def test_setup_urls_uses_percent_s_placeholder() -> None:
+    # The wizard templates use %s, the placeholder Firefox-family and Chromium "add a search
+    # engine" dialogs expect. ({searchTerms} is only for the server's OpenSearch descriptor.)
     visit, search, suggest = _setup_urls("127.0.0.1", 8787)
     assert visit == "http://127.0.0.1:8787/"
-    assert search == "http://127.0.0.1:8787/search?q={searchTerms}"
-    assert suggest == "http://127.0.0.1:8787/suggest?q={searchTerms}"
+    assert search == "http://127.0.0.1:8787/search?q=%s"
+    assert suggest == "http://127.0.0.1:8787/suggest?q=%s"

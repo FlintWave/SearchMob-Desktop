@@ -9,6 +9,13 @@ All notable changes to SearchMob Desktop are documented here. The version scheme
 - **Copying a URL in the browser-setup wizard no longer pops a modal.** Instead the field flashes
   a green outline with a checkmark that fades out over it, so the confirmation does not interrupt.
 
+### Fixed
+- **Browser-setup wizard now uses the `%s` search-term placeholder** that Firefox-family and
+  Chromium "add a search engine" dialogs expect. Pasting the old `{searchTerms}` form into
+  LibreWolf/Firefox failed with "Try including %s in place of the search term". The `{searchTerms}`
+  form is still served in the OpenSearch descriptor for the easier auto-detect path, which the
+  wizard now recommends first.
+
 ## 26.05.03 — 2026-05-29
 
 ### Fixed
