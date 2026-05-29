@@ -32,6 +32,7 @@ from searchmob_desktop.engines import (
     fetch_wikipedia,
     make_privacy_client,
 )
+from searchmob_desktop.engines.correct import start_background_corrector
 from searchmob_desktop.gui.engines_catalog import ENGINE_CATALOG, is_engine_enabled
 from searchmob_desktop.prefs import JsonPreferencesStore, UserPreferences
 from searchmob_desktop.server import LOOPBACK_HOST, build_app
@@ -124,11 +125,17 @@ class _UvicornWorker(QThread):
             upstream_enabled=_upstream_enabled,
         )
 
+        # On-device "did you mean" for the served results page; dictionary loads off-thread.
+        corrector = start_background_corrector(
+            history_terms=lambda: [e.query for e in self._history_store.recent(500)]
+        )
+
         app = build_app(
             self._engines,
             bound_port_getter=lambda: self._port,
             bound_host_getter=lambda: self._host,
             suggestions_provider=composite,
+            corrector=corrector,
         )
         config = uvicorn.Config(
             app,
