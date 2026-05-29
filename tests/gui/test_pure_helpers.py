@@ -8,7 +8,7 @@ pytest.importorskip("PySide6")
 
 
 from searchmob_desktop.engines import EngineFn
-from searchmob_desktop.gui.browser_setup_dialog import _setup_urls
+from searchmob_desktop.gui.browser_setup_dialog import _setup_urls, choose_setup_host
 from searchmob_desktop.gui.engines_catalog import (
     ENGINE_CATALOG,
     is_engine_enabled,
@@ -83,3 +83,32 @@ def test_setup_urls_uses_percent_s_placeholder() -> None:
     assert visit == "http://127.0.0.1:8787/"
     assert search == "http://127.0.0.1:8787/search?q=%s"
     assert suggest == "http://127.0.0.1:8787/suggest?q=%s"
+
+
+def test_choose_setup_host_loopback_uses_localhost() -> None:
+    # Loopback (the common case): localhost, which browsers resolve and the allowlist accepts.
+    assert choose_setup_host(network_enabled=False) == "localhost"
+    # Configured names are ignored in loopback mode.
+    assert choose_setup_host(network_enabled=False, configured_hostnames=("my-pc.local",)) == (
+        "localhost"
+    )
+
+
+def test_choose_setup_host_network_prefers_configured_then_local_then_ip() -> None:
+    # A configured hostname wins.
+    assert (
+        choose_setup_host(
+            network_enabled=True,
+            configured_hostnames=("my-pc.ts.net",),
+            local_names=("avonlea.local",),
+        )
+        == "my-pc.ts.net"
+    )
+    # Else the machine's own detected name.
+    assert (
+        choose_setup_host(network_enabled=True, local_names=("avonlea.local",)) == "avonlea.local"
+    )
+    # Else fall back to the loopback IP (no regression from the old behavior).
+    assert choose_setup_host(network_enabled=True) == "127.0.0.1"
+    # Blank/whitespace entries are skipped.
+    assert choose_setup_host(network_enabled=True, configured_hostnames=("  ", "")) == "127.0.0.1"

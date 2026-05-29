@@ -36,7 +36,12 @@ from searchmob_desktop.engines import (
 from searchmob_desktop.engines.correct import start_background_corrector
 from searchmob_desktop.gui.engines_catalog import ENGINE_CATALOG, is_engine_enabled
 from searchmob_desktop.prefs import JsonPreferencesStore, UserPreferences
-from searchmob_desktop.server import LOOPBACK_HOST, build_app, is_loopback_host
+from searchmob_desktop.server import (
+    LOOPBACK_HOST,
+    build_app,
+    is_loopback_host,
+    local_hostnames,
+)
 from searchmob_desktop.suggest import (
     CompositeSuggestionsProvider,
     HistorySuggestionsProvider,
@@ -100,6 +105,7 @@ class _UvicornWorker(QThread):
         prefs_store: JsonPreferencesStore,
         history_store: HistoryStore,
         access_token: str | None = None,
+        allowed_hosts: frozenset[str] = frozenset(),
     ) -> None:
         super().__init__()
         self._engines = engines
@@ -108,6 +114,7 @@ class _UvicornWorker(QThread):
         self._prefs_store = prefs_store
         self._history_store = history_store
         self._access_token = access_token
+        self._allowed_hosts = allowed_hosts
         self._server: object | None = None  # uvicorn.Server, deferred import
         self._ready = threading.Event()
 
@@ -144,6 +151,7 @@ class _UvicornWorker(QThread):
             corrector=corrector,
             ranking_rules=load_ranking_rules(),
             access_token=self._access_token,
+            allowed_hosts=self._allowed_hosts,
         )
         config = uvicorn.Config(
             app,
@@ -235,6 +243,10 @@ class LocalServerController(QObject):
         access_token = (
             None if is_loopback_host(self._host) else (prefs.network_access_token or None)
         )
+        # Trusted hostnames the Host-header allowlist accepts: the machine's own name(s) plus any
+        # the user configured (e.g. a Tailscale MagicDNS name), so a browser can reach the server
+        # by a friendly name in network mode.
+        allowed_hosts = local_hostnames() | frozenset(prefs.network_hostnames)
         worker = _UvicornWorker(
             engines=engines,
             host=self._host,
@@ -242,6 +254,7 @@ class LocalServerController(QObject):
             prefs_store=self._prefs_store,
             history_store=self._history_store,
             access_token=access_token,
+            allowed_hosts=allowed_hosts,
         )
         worker.started_ok.connect(self.serverStarted)
         worker.failed.connect(self.serverError)

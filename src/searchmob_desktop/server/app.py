@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import inspect
 import json
+import socket
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import asdict
 from ipaddress import ip_address
@@ -102,15 +103,17 @@ class _SecurityHeadersMiddleware(BaseHTTPMiddleware):
         bound_host_getter: Callable[[], str],
         access_token: str | None,
         host_allowlist_enabled: bool,
+        allowed_hosts: frozenset[str] = frozenset(),
     ) -> None:
         super().__init__(app)
         self._bound_host_getter = bound_host_getter
         self._access_token = access_token
         self._host_allowlist_enabled = host_allowlist_enabled
+        self._allowed_hosts = allowed_hosts
 
     async def dispatch(self, request: Request, call_next):  # type: ignore[no-untyped-def]
         if self._host_allowlist_enabled and not host_header_allowed(
-            request.headers.get("host", ""), self._bound_host_getter()
+            request.headers.get("host", ""), self._bound_host_getter(), self._allowed_hosts
         ):
             return PlainTextResponse("Bad Request: host not allowed", status_code=400)
 
@@ -169,14 +172,37 @@ def _is_ip_literal(host: str) -> bool:
     return True
 
 
-def host_header_allowed(host_header: str, bound_host: str) -> bool:
+def local_hostnames() -> frozenset[str]:
+    """This machine's own hostname(s), lowercased, for the Host-header allowlist.
+
+    Returns the bare hostname and, when it has no dot, the `<host>.local` mDNS form. Best-effort:
+    an OS without a resolvable name yields an empty set. These are inherently "this machine" so
+    allowing them does not widen the DNS-rebind surface (an attacker's foreign domain still fails).
+    """
+    names: set[str] = set()
+    try:
+        host = socket.gethostname().strip().lower()
+    except OSError:
+        host = ""
+    if host:
+        names.add(host)
+        if "." not in host:
+            names.add(f"{host}.local")
+    return frozenset(names)
+
+
+def host_header_allowed(
+    host_header: str, bound_host: str, extra_allowed_hosts: frozenset[str] = frozenset()
+) -> bool:
     """Decide whether a request's `Host` header is acceptable (DNS-rebind defense).
 
     Always allow the loopback names (`localhost`, `127.0.0.0/8`, `::1`) and the host the server is
     actually bound to. When bound to a wildcard address (`0.0.0.0` / `::`), additionally allow any
     `Host` that is an IP literal, since a LAN/Tailscale client legitimately reaches the server by
-    its IP. A foreign DNS name (e.g. a `evil.com` used in a rebinding attack) is rejected because it
-    is neither loopback, the bound host, nor an IP literal.
+    its IP. `extra_allowed_hosts` is an explicit set of trusted hostnames (the machine's own name
+    plus any the user configured, e.g. a Tailscale MagicDNS name) that are also accepted. A foreign
+    DNS name (e.g. an `evil.com` used in a rebinding attack) is rejected because it is none of
+    these.
 
     An empty `Host` header is allowed: HTTP/1.0 and some health-probe clients omit it, and it cannot
     carry a rebinding target.
@@ -188,6 +214,8 @@ def host_header_allowed(host_header: str, bound_host: str) -> bool:
         return True
     bound = bound_host.strip().lower()
     if name == bound:
+        return True
+    if name in extra_allowed_hosts:
         return True
     # A wildcard bind has no single canonical hostname; accept any IP literal so LAN clients that
     # connect by address work, while still rejecting arbitrary DNS names.
@@ -252,6 +280,7 @@ def build_app(
     metasearch: _MetasearchFn = aggregate,
     access_token: str | None = None,
     host_allowlist_enabled: bool = True,
+    allowed_hosts: frozenset[str] = frozenset(),
 ) -> Starlette:
     """Build the Starlette application that serves the SearchMob HTTP routes.
 
@@ -270,6 +299,10 @@ def build_app(
     same token is baked into the OpenSearch descriptor so a browser configured off-loopback works.
     `None`/empty means loopback-only (no enforcement). `host_allowlist_enabled` defaults to True;
     set it False in tests that need to drive arbitrary `Host` headers through the app.
+
+    `allowed_hosts` is an explicit set of trusted hostnames the Host-header allowlist accepts in
+    addition to loopback / the bound host / IP literals, so a browser can reach the server by a
+    friendly name (the machine's own hostname, or a configured Tailscale/mDNS name) in network mode.
     """
     provider: SuggestionsProvider = (
         suggestions_provider if suggestions_provider is not None else _no_suggestions
@@ -363,6 +396,7 @@ def build_app(
             bound_host_getter=bound_host_getter,
             access_token=access_token,
             host_allowlist_enabled=host_allowlist_enabled,
+            allowed_hosts=allowed_hosts,
         )
     ]
     return Starlette(routes=routes, middleware=middleware)

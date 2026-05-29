@@ -57,6 +57,11 @@ class UserPreferences:
     # server is reachable off-loopback. Empty means "not yet generated"; it is minted lazily the
     # first time network access is turned on and then reused so re-enabling keeps the same token.
     network_access_token: str = ""
+    # Extra hostnames (besides loopback names and IP literals) that the server's Host-header
+    # allowlist accepts, so a browser can reach SearchMob by a friendly name in network mode, e.g.
+    # a Tailscale MagicDNS name or an mDNS `<host>.local`. Lowercased, no scheme/port. The machine's
+    # own hostname is allowed automatically; this is for names that machine cannot self-detect.
+    network_hostnames: tuple[str, ...] = ()
     upstream_suggestions_enabled: bool = False
     update_check_enabled: bool = True
     last_update_check_ms: int = 0
@@ -125,6 +130,12 @@ def _from_dict(data: dict[str, Any]) -> UserPreferences:
         if key == "engine_enabled":
             if isinstance(value, dict):
                 filtered[key] = {str(k): bool(v) for k, v in value.items()}
+            continue
+        if key == "network_hostnames":
+            if isinstance(value, (list, tuple)):
+                filtered[key] = tuple(
+                    str(item).strip().lower() for item in value if str(item).strip()
+                )
             continue
         filtered[key] = value
     return UserPreferences(**filtered)
