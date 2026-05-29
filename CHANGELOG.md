@@ -3,6 +3,12 @@
 All notable changes to SearchMob Desktop are documented here. The version scheme is Ubuntu-style
 `YY.MM.VV` and releases are tagged `vYY.MM.VV`.
 
+## Unreleased
+
+### Changed
+- **Copying a URL in the browser-setup wizard no longer pops a modal.** Instead the field flashes
+  a green outline with a checkmark that fades out over it, so the confirmation does not interrupt.
+
 ## 26.05.03 — 2026-05-29
 
 ### Fixed

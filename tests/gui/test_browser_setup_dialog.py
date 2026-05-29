@@ -10,7 +10,8 @@ import pytest
 
 pytest.importorskip("PySide6")
 
-from PySide6.QtWidgets import QLabel
+from PySide6.QtGui import QGuiApplication
+from PySide6.QtWidgets import QLabel, QMessageBox
 
 from searchmob_desktop.gui.browser_setup_dialog import BrowserSetupDialog, _setup_urls
 
@@ -46,3 +47,29 @@ def test_dialog_loopback_has_no_token(qapp: object) -> None:
     dialog = BrowserSetupDialog(host="127.0.0.1", port=8787)
     text = _all_label_text(dialog)
     assert "token=" not in text
+
+
+def test_copy_flashes_inline_instead_of_modal(
+    qapp: object, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Copying confirms with a green outline + fading checkmark, never a modal dialog."""
+    modal: dict[str, bool] = {}
+    monkeypatch.setattr(QMessageBox, "information", lambda *a, **k: modal.setdefault("shown", True))
+
+    dialog = BrowserSetupDialog(host="127.0.0.1", port=8787)
+    url_fields = [w for w in dialog.findChildren(QLabel) if w.property("role") == "url"]
+    assert url_fields, "expected at least one URL field"
+    field = url_fields[0]
+
+    dialog._copy("http://127.0.0.1:8787/", field)
+
+    # The value reached the clipboard.
+    clipboard = QGuiApplication.clipboard()
+    assert clipboard is not None
+    assert clipboard.text() == "http://127.0.0.1:8787/"
+    # No modal dialog was shown.
+    assert "shown" not in modal
+    # A checkmark badge was floated over the field, and the field got the green outline.
+    badges = [w for w in field.findChildren(QLabel) if w.text() == "✓"]
+    assert badges, "expected a checkmark badge over the field"
+    assert dialog._COPIED_GREEN in field.styleSheet()
