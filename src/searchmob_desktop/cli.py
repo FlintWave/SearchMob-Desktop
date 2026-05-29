@@ -25,7 +25,7 @@ from searchmob_desktop.data.api_keys import read_vault_api_keys, resolve_api_key
 from searchmob_desktop.data.crypto.keyring_kek import KeyringKekStore
 from searchmob_desktop.data.crypto.wrap import KeyringDekWrapper
 from searchmob_desktop.data.history_factory import build_history_store
-from searchmob_desktop.data.ranking_store import load_ranking_rules
+from searchmob_desktop.data.ranking_store import load_ranking_rules, save_ranking_rules
 from searchmob_desktop.engines import (
     EngineContext,
     EngineFn,
@@ -208,7 +208,10 @@ def serve(
         port=port,
         suggestions_provider=composite,
         corrector=corrector,
-        ranking_rules=load_ranking_rules(),
+        # Live provider + saver so the served personalization controls read and persist rules
+        # without a restart (the server gates the edit routes loopback-only).
+        ranking_rules_provider=load_ranking_rules,
+        ranking_rules_saver=save_ranking_rules,
         max_results=max_results,
         timeout_seconds=timeout,
         access_token=access_token,

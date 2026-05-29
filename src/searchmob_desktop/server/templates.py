@@ -17,6 +17,16 @@ from html import escape
 from urllib.parse import quote_plus, urlsplit
 
 from searchmob_desktop.engines import SearchResult
+from searchmob_desktop.engines.rank import RankingRules, RankRule, host_of_url
+
+# The per-result domain actions offered in the served UI, in display order. Mirrors the in-app
+# right-click menu (block / lower / raise / pin); "Reset" maps to NORMAL (removes the rule).
+_RANK_ACTIONS: tuple[tuple[RankRule, str], ...] = (
+    (RankRule.BLOCK, "Block"),
+    (RankRule.LOWER, "Lower"),
+    (RankRule.RAISE, "Raise"),
+    (RankRule.PIN, "Pin"),
+)
 
 # Self-contained stylesheet: no external fonts / CDNs / runtime fetches. Light defaults plus a
 # `prefers-color-scheme: dark` media query; a `[data-theme]` attribute on the root overrides both
@@ -84,6 +94,17 @@ _PAGE_CSS = (
     ".chip{background:var(--chip-bg);color:var(--chip-fg);font-size:11px;padding:2px 9px;"
     "border-radius:10px}"
     ".empty{color:var(--muted);text-align:center;padding:48px 0}"
+    ".scopebar{display:flex;align-items:center;gap:8px;margin:0 0 18px;font-size:13px;"
+    "color:var(--muted)}"
+    ".scopebar select{font-size:13px;padding:3px 6px;border:1px solid var(--border);"
+    "border-radius:6px;background:var(--card);color:var(--fg)}"
+    ".rank{display:flex;flex-wrap:wrap;gap:6px;margin-top:5px;align-items:center}"
+    ".rank form{display:inline;margin:0}"
+    ".rank .state{font-size:11px;color:var(--muted);margin-right:2px}"
+    ".rank button{font-size:11px;padding:2px 9px;border:1px solid var(--border);border-radius:10px;"
+    "background:var(--card);color:var(--muted);cursor:pointer}"
+    ".rank button:hover{border-color:var(--accent);color:var(--fg)}"
+    ".rank button.on{background:var(--accent);color:#fff;border-color:var(--accent)}"
     "@media (max-width:560px){.topbar .logo{display:none}}"
 )
 
@@ -176,11 +197,59 @@ def render_home_page() -> str:
     return f"<!DOCTYPE html><html>{head}{body}</html>"
 
 
+def _scope_bar(rules: RankingRules) -> str:
+    """A scope (lens) selector. Renders only when the profile has at least one lens defined."""
+    if not rules.lenses:
+        return ""
+    options = ['<option value="">No scope</option>']
+    for lens in rules.lenses:
+        selected = " selected" if lens.name == rules.active_lens else ""
+        options.append(
+            f'<option value="{escape(lens.name, quote=True)}"{selected}>'
+            f"{escape(lens.name)}</option>"
+        )
+    # onchange auto-submits when JS is on; the noscript button covers the JS-off case.
+    return (
+        '<form class="scopebar" action="/scope" method="post">'
+        "<label>Scope:</label>"
+        '<select name="lens" onchange="this.form.submit()">' + "".join(options) + "</select>"
+        '<noscript><button type="submit">Apply</button></noscript>'
+        "</form>"
+    )
+
+
+def _rank_controls(url: str, rules: RankingRules) -> str:
+    """Per-result domain controls (block / lower / raise / pin / reset) as a single POST form."""
+    domain = host_of_url(url)
+    if not domain:
+        return ""
+    current = rules.domain_rules.get(domain)
+    safe_domain = escape(domain, quote=True)
+    parts = [
+        '<form class="rank" action="/rules/domain" method="post">',
+        f'<span class="state">{escape(domain)}</span>',
+        f'<input type="hidden" name="domain" value="{safe_domain}">',
+    ]
+    for rule, label in _RANK_ACTIONS:
+        on = " on" if current is rule else ""
+        parts.append(
+            f'<button class="btn{on}" type="submit" name="action" value="{rule.value}">'
+            f"{label}</button>"
+        )
+    # Offer a reset only when a rule is currently set, so the row stays compact otherwise.
+    if current is not None:
+        parts.append('<button type="submit" name="action" value="NORMAL">Reset</button>')
+    parts.append("</form>")
+    return "".join(parts)
+
+
 def render_results_page(
     query: str,
     results: Iterable[SearchResult],
     is_safe_http_url: Callable[[str], bool],
     correction: str | None = None,
+    rules: RankingRules | None = None,
+    editable: bool = False,
 ) -> str:
     """The results page. Empty/blank query -> a placeholder; otherwise -> the merged results.
 
@@ -190,7 +259,13 @@ def render_results_page(
 
     `correction`, when set, is a "did you mean" suggestion from the on-device corrector; it renders
     a link that re-runs the search with the corrected query.
+
+    `rules` is the active personalization profile (used to show the current scope and per-domain
+    rule states). `editable` enables the in-page controls (scope selector, per-result block/lower/
+    raise/pin); the server passes it True only for the loopback owner, so a network visitor sees a
+    read-only page.
     """
+    active_rules = rules if rules is not None else RankingRules()
     # Materialize once so we can both branch on emptiness and iterate.
     results_list = list(results)
     blank = not query.strip()
@@ -226,6 +301,8 @@ def render_results_page(
         parts.append(f'<p class="empty">No results for “{safe_query}”.</p>')
     else:
         parts.append(f'<p class="meta">Results for “{safe_query}”</p>')
+        if editable:
+            parts.append(_scope_bar(active_rules))
         for result in results_list:
             parts.append('<div class="result">')
             parts.append(f'<div class="url">{escape(_display_url(result.url))}</div>')
@@ -247,6 +324,8 @@ def render_results_page(
                     if name:
                         parts.append(f'<span class="chip">{escape(name)}</span>')
                 parts.append("</div>")
+            if editable:
+                parts.append(_rank_controls(result.url, active_rules))
             parts.append("</div>")
 
     parts.append("</div>")

@@ -11,7 +11,7 @@ is deferred to Phase 7 (network mode) where the bound-port publish path needs to
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 
 import uvicorn
 
@@ -36,6 +36,8 @@ def serve(
     suggestions_provider: SuggestionsProvider | None = None,
     corrector: SpellCorrector | None = None,
     ranking_rules: RankingRules | None = None,
+    ranking_rules_provider: Callable[[], RankingRules] | None = None,
+    ranking_rules_saver: Callable[[RankingRules], bool] | None = None,
     max_query_length: int = MAX_QUERY_LENGTH,
     max_suggestions: int = MAX_SUGGESTIONS,
     max_results: int = 10,
@@ -59,6 +61,8 @@ def serve(
         suggestions_provider=suggestions_provider,
         corrector=corrector,
         ranking_rules=ranking_rules,
+        ranking_rules_provider=ranking_rules_provider,
+        ranking_rules_saver=ranking_rules_saver,
         max_query_length=max_query_length,
         max_suggestions=max_suggestions,
         max_results=max_results,

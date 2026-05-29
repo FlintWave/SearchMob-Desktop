@@ -19,7 +19,7 @@ from PySide6.QtCore import QObject, QThread, Signal
 
 from searchmob_desktop.data.api_keys import read_vault_api_keys, resolve_api_key
 from searchmob_desktop.data.history import HistoryStore, InMemoryHistoryStore
-from searchmob_desktop.data.ranking_store import load_ranking_rules
+from searchmob_desktop.data.ranking_store import load_ranking_rules, save_ranking_rules
 from searchmob_desktop.engines import (
     EngineFn,
     bind_api_key,
@@ -149,7 +149,10 @@ class _UvicornWorker(QThread):
             bound_host_getter=lambda: self._host,
             suggestions_provider=composite,
             corrector=corrector,
-            ranking_rules=load_ranking_rules(),
+            # Read rules per request so edits from the served UI or in-app settings apply without a
+            # restart; the saver persists in-browser edits back to the encrypted vault.
+            ranking_rules_provider=load_ranking_rules,
+            ranking_rules_saver=save_ranking_rules,
             access_token=self._access_token,
             allowed_hosts=self._allowed_hosts,
         )
