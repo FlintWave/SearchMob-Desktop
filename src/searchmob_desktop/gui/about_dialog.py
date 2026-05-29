@@ -129,10 +129,19 @@ class AboutDialog(QDialog):
         attribution_label = QLabel("Search icons created by Freepik - Flaticon")
         attribution_label.setProperty("role", "muted")
         attribution_label.setWordWrap(True)
+        trademark_label = QLabel(
+            "SearchMob is not affiliated with, endorsed by, or sponsored by DuckDuckGo, Mojeek, "
+            "Marginalia, Mwmbl, Wikipedia, Brave, Kagi, Google, or Tailscale. All product names, "
+            "logos, and brands are the property of their respective owners and are used only to "
+            "identify the services SearchMob interoperates with."
+        )
+        trademark_label.setProperty("role", "muted")
+        trademark_label.setWordWrap(True)
         layout.addWidget(version_label)
         layout.addWidget(license_label)
         layout.addWidget(copyright_label)
         layout.addWidget(attribution_label)
+        layout.addWidget(trademark_label)
 
         buttons = QHBoxLayout()
         repo_btn = QPushButton("View source on GitHub")

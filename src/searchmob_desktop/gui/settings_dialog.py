@@ -432,6 +432,14 @@ class SettingsDialog(QDialog):
         brave_row.addWidget(brave_clear)
         brave_row.addStretch(1)
         layout.addLayout(brave_row)
+        brave_caveat = QLabel(
+            "Note: Brave's Search API terms prohibit storing or caching results. If you enable "
+            "search history with a Brave key, Brave results may be saved locally — that is your "
+            "responsibility under Brave's terms."
+        )
+        brave_caveat.setWordWrap(True)
+        brave_caveat.setProperty("role", "muted")
+        layout.addWidget(brave_caveat)
 
         self._mojeek_status = QLabel(self._key_status_text("Mojeek", _MOJEEK_KEY))
         self._mojeek_input = QLineEdit()
