@@ -11,13 +11,14 @@ is deferred to Phase 7 (network mode) where the bound-port publish path needs to
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Awaitable, Callable, Sequence
 
 import uvicorn
 
 from searchmob_desktop.engines import EngineFn
 from searchmob_desktop.engines.correct import SpellCorrector
 from searchmob_desktop.engines.rank import RankingRules
+from searchmob_desktop.engines.wiki_summary import SummaryBox
 from searchmob_desktop.server.app import (
     DEFAULT_PORT,
     LOOPBACK_HOST,
@@ -38,6 +39,7 @@ def serve(
     ranking_rules: RankingRules | None = None,
     ranking_rules_provider: Callable[[], RankingRules] | None = None,
     ranking_rules_saver: Callable[[RankingRules], bool] | None = None,
+    summary_provider: Callable[[str], Awaitable[SummaryBox | None]] | None = None,
     max_query_length: int = MAX_QUERY_LENGTH,
     max_suggestions: int = MAX_SUGGESTIONS,
     max_results: int = 10,
@@ -63,6 +65,7 @@ def serve(
         ranking_rules=ranking_rules,
         ranking_rules_provider=ranking_rules_provider,
         ranking_rules_saver=ranking_rules_saver,
+        summary_provider=summary_provider,
         max_query_length=max_query_length,
         max_suggestions=max_suggestions,
         max_results=max_results,

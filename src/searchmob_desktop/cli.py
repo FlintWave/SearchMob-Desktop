@@ -42,6 +42,7 @@ from searchmob_desktop.engines import (
 )
 from searchmob_desktop.engines.correct import start_background_corrector
 from searchmob_desktop.engines.proxy import make_privacy_client
+from searchmob_desktop.engines.wiki_summary import summary_for_query
 from searchmob_desktop.prefs import JsonPreferencesStore
 from searchmob_desktop.server import is_loopback_host
 from searchmob_desktop.server import serve as _serve_local_server
@@ -212,6 +213,7 @@ def serve(
         # without a restart (the server gates the edit routes loopback-only).
         ranking_rules_provider=load_ranking_rules,
         ranking_rules_saver=save_ranking_rules,
+        summary_provider=summary_for_query if prefs.summary_enabled else None,
         max_results=max_results,
         timeout_seconds=timeout,
         access_token=access_token,

@@ -24,6 +24,7 @@ Hardening carried over from the Android audit:
 
 from __future__ import annotations
 
+import asyncio
 import inspect
 import json
 import socket
@@ -48,6 +49,7 @@ from starlette.types import ASGIApp
 from searchmob_desktop.engines import EngineContext, EngineFn, SearchResult, aggregate
 from searchmob_desktop.engines.correct import SpellCorrector
 from searchmob_desktop.engines.rank import RankingRules, RankRule, apply_ranking, host_of_url
+from searchmob_desktop.engines.wiki_summary import SummaryBox
 from searchmob_desktop.server.opensearch import build_descriptor
 from searchmob_desktop.server.templates import render_home_page, render_results_page
 
@@ -297,6 +299,7 @@ def build_app(
     ranking_rules: RankingRules | None = None,
     ranking_rules_provider: Callable[[], RankingRules] | None = None,
     ranking_rules_saver: Callable[[RankingRules], bool] | None = None,
+    summary_provider: Callable[[str], Awaitable[SummaryBox | None]] | None = None,
     max_query_length: int = MAX_QUERY_LENGTH,
     max_suggestions: int = MAX_SUGGESTIONS,
     max_results: int = 10,
@@ -385,9 +388,21 @@ def build_app(
         client_host = request.client.host if request.client is not None else ""
         return ranking_rules_saver is not None and is_loopback_host(client_host)
 
+    async def _maybe_summary(query: str) -> SummaryBox | None:
+        if summary_provider is None or not query.strip():
+            return None
+        try:
+            return await summary_provider(query)
+        except Exception:
+            return None
+
     async def search_html(request: Request) -> Response:
         query = _clamp(request.query_params.get("q"))
+        # Fetch the contextual summary concurrently with the metasearch so the box never adds
+        # latency to the results path.
+        summary_task = asyncio.ensure_future(_maybe_summary(query))
         results = await _run_metasearch(query)
+        summary = await summary_task
         body = render_results_page(
             query,
             results,
@@ -395,6 +410,7 @@ def build_app(
             correction=_correction(query),
             rules=rules_provider(),
             editable=_is_owner(request),
+            summary=summary,
         )
         return Response(body, media_type="text/html; charset=utf-8")
 

@@ -18,6 +18,7 @@ from urllib.parse import quote_plus, urlsplit
 
 from searchmob_desktop.engines import SearchResult
 from searchmob_desktop.engines.rank import RankingRules, RankRule, host_of_url
+from searchmob_desktop.engines.wiki_summary import SummaryBox
 
 # The per-result domain actions offered in the served UI, in display order. Mirrors the in-app
 # right-click menu (block / lower / raise / pin); "Reset" maps to NORMAL (removes the rule).
@@ -94,6 +95,16 @@ _PAGE_CSS = (
     ".chip{background:var(--chip-bg);color:var(--chip-fg);font-size:11px;padding:2px 9px;"
     "border-radius:10px}"
     ".empty{color:var(--muted);text-align:center;padding:48px 0}"
+    ".summary{display:flex;gap:14px;border:1px solid var(--border);border-radius:12px;"
+    "background:var(--card);padding:14px 16px;margin:0 0 22px;box-shadow:var(--shadow)}"
+    ".summary .body{flex:1;min-width:0}"
+    ".summary .stitle{font-size:17px;font-weight:600;margin:0}"
+    ".summary .stitle a{color:var(--fg)}"
+    ".summary .sdesc{color:var(--muted);font-size:12px;margin:1px 0 6px}"
+    ".summary .sextract{font-size:14px;margin:0 0 6px;line-height:1.45}"
+    ".summary .ssource{font-size:12px}"
+    ".summary img{width:84px;height:84px;object-fit:cover;border-radius:8px;flex:none}"
+    "@media (max-width:560px){.summary img{display:none}}"
     ".scopebar{display:flex;align-items:center;gap:8px;margin:0 0 18px;font-size:13px;"
     "color:var(--muted)}"
     ".scopebar select{font-size:13px;padding:3px 6px;border:1px solid var(--border);"
@@ -243,6 +254,30 @@ def _rank_controls(url: str, rules: RankingRules) -> str:
     return "".join(parts)
 
 
+def _summary_box(summary: SummaryBox, is_safe_http_url: Callable[[str], bool]) -> str:
+    """A knowledge-panel-style Wikipedia summary card shown above the results."""
+    title_html = escape(summary.title)
+    if summary.url and is_safe_http_url(summary.url):
+        title_html = (
+            f'<a href="{escape(summary.url, quote=True)}" rel="noopener noreferrer">'
+            f"{escape(summary.title)}</a>"
+        )
+    parts = ['<div class="summary">']
+    # The thumbnail loads from Wikimedia; it is decorative, so only render http(s) sources.
+    if summary.thumbnail_url and is_safe_http_url(summary.thumbnail_url):
+        parts.append(
+            f'<img src="{escape(summary.thumbnail_url, quote=True)}" alt="" loading="lazy">'
+        )
+    parts.append('<div class="body">')
+    parts.append(f'<p class="stitle">{title_html}</p>')
+    if summary.description:
+        parts.append(f'<p class="sdesc">{escape(summary.description)}</p>')
+    parts.append(f'<p class="sextract">{escape(summary.extract)}</p>')
+    parts.append('<p class="ssource meta">From Wikipedia</p>')
+    parts.append("</div></div>")
+    return "".join(parts)
+
+
 def render_results_page(
     query: str,
     results: Iterable[SearchResult],
@@ -250,6 +285,7 @@ def render_results_page(
     correction: str | None = None,
     rules: RankingRules | None = None,
     editable: bool = False,
+    summary: SummaryBox | None = None,
 ) -> str:
     """The results page. Empty/blank query -> a placeholder; otherwise -> the merged results.
 
@@ -294,6 +330,9 @@ def render_results_page(
             '<p class="didyoumean">Did you mean: '
             f'<a href="{escape(href, quote=True)}">{escape(correction)}</a></p>'
         )
+
+    if not blank and summary is not None:
+        parts.append(_summary_box(summary, is_safe_http_url))
 
     if blank:
         parts.append('<p class="empty">Enter a query to search.</p>')
