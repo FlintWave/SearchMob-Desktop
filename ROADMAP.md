@@ -1,56 +1,43 @@
 # SearchMob Desktop roadmap
 
-The desktop port targets parity with the Android app. Phase ordering mirrors the Android phases so
-shared design decisions land in the same order.
+The desktop port reached parity with the Android app and is shipped (see
+[`CHANGELOG.md`](CHANGELOG.md)). This file records the build phases (all complete) and the remaining
+future work.
 
-## Phase 0 — scaffold (this commit)
+## Shipped
 
-- Project layout (`src/searchmob_desktop/`), `pyproject.toml`, license, security policy, conduct,
-  contributing guide, CI (lint + tests), Dependabot.
-- Typer CLI shell with placeholder `search`, `serve`, `gui` subcommands; `--version` works.
-- Smoke tests in `tests/`.
+All of the original parity phases are done and released:
 
-## Phase 1 — metasearch engine adapters and privacy proxy
+- **Phase 0 — scaffold.** Project layout, `pyproject.toml`, CI (lint + tests), Dependabot, Typer CLI.
+- **Phase 1 — engine adapters + privacy proxy.** Shared async `httpx` client (cookies off, `Referer`
+  / forwarding headers stripped, rotated User-Agent, bounded response reads); adapters for
+  DuckDuckGo, Mojeek, Marginalia, Mwmbl, Wikipedia, plus BYO-key Brave / Mojeek / Kagi; RRF
+  aggregator with normalized-URL dedup, bounded concurrency, and fail-soft per-engine errors.
+- **Phase 2 — local HTTP server (Starlette + Uvicorn).** `/`, `/search`, `/api/search`, `/healthz`,
+  `/opensearch.xml`, `/suggest`; HTML escaping + URL scheme allowlist; query-length cap; security
+  headers; loopback-only by default.
+- **Phase 3 — encrypted storage.** AES-GCM prefs, Argon2id passphrase KDF, SQLCipher history;
+  store-nothing default, opt-in history, optional zero-knowledge passphrase, OS keyring.
+- **Phase 4 — settings, suggestions, update check.** Persistent settings; local + opt-in upstream
+  suggestions; throttled, opt-out GitHub update check.
+- **Phase 5 — GUI (PySide6).** Modern light/dark window, settings dialog, About/privacy view,
+  history viewer, server controls, minimize-to-tray.
+- **Phase 6 — native installers (Briefcase).** Windows `.msi`, macOS `.dmg`, and Linux `.deb` /
+  `.rpm` / Flatpak, published to GitHub Releases with `SHA256SUMS`.
+- **Phase 7 — network mode.** Opt-in LAN/Tailscale binding with a warning gate; the `/suggest`
+  endpoint never serves local history to network clients; non-loopback access requires a token.
 
-- Port the engine adapter pattern from the Android app: a shared async `httpx` client with cookies
-  off, `Referer` and forwarding headers stripped, and a rotated User-Agent.
-- One adapter per engine (DuckDuckGo, Mojeek, Marginalia, Mwmbl, Wikipedia) plus the BYO key
-  variants for Brave and Mojeek.
-- Aggregator with reciprocal-rank fusion, normalized-URL dedup, bounded concurrency, timeouts, and
-  fail-soft per-engine errors.
+Beyond the original phases, parity work also shipped: the Kagi API engine, in-app history view with
+JSON export/import and a 30-day TTL, on-device "did you mean" correction, result personalization
+(domain rules, scopes with samples, Brave Goggles), a security-hardening pass (bounded responses,
+security headers, Host-header allowlist, input caps, owner-only file permissions), and the
+trademark / licensing fixes.
 
-## Phase 2 — local HTTP server (Starlette + Uvicorn)
+## Future
 
-- `/`, `/search`, `/api/search`, `/healthz`, `/opensearch.xml`, `/suggest` parity with the Android
-  server. Loopback-only by default.
-- HTML-escaped result rendering with a URL scheme allowlist for `href`; query length cap; bounded
-  upstream body reads. `/suggest` returns OpenSearch suggestions JSON with the correct content type.
-
-## Phase 3 — encrypted storage
-
-- `cryptography` AES-GCM for the prefs blob; `argon2-cffi` for the passphrase KDF; SQLCipher for the
-  history database. Store-nothing default; opt-in history; optional zero-knowledge passphrase.
-
-## Phase 4 — settings, suggestions, update check
-
-- Persistent settings (theme, engines, BYO keys, network mode, suggestions toggle, update toggle).
-- Local history suggestions plus opt-in upstream (DuckDuckGo ac) through the privacy proxy.
-- Launch-time GitHub update check, on by default, throttled daily, disclosed in the About text.
-
-## Phase 5 — GUI (PySide6)
-
-- Main window with a search bar, results list, settings dialog, About + privacy view, and a
-  background indicator for the local HTTP server.
-
-## Phase 6 — Native installers (Briefcase)
-
-- `briefcase package` builds `.msi`, `.dmg`, and `.deb` from the same project. Signing where
-  feasible (Windows code-signing cert, Apple notarization). CLI-only install via `pipx` continues to
-  work in parallel.
-
-## Phase 7 — Network mode (done)
-
-- The same Tailscale/LAN opt-in toggle and warning gate as the Android app. Server rebinds when the
-  preference changes, and binds per the saved preference at launch.
-- Privacy guard: when the server binds a non-loopback address (network mode), the `/suggest`
-  endpoint stops serving the owner's local search history to other devices on the network.
+- **Code signing + notarization.** Authenticode (Windows) and Apple notarization (macOS) once the
+  signing secrets are wired into CI; today's installers are ad-hoc / unsigned.
+- **Flatpak stability + Flathub.** The Flatpak build is currently best-effort in CI; harden it and
+  consider publishing to Flathub.
+- **Network-mode rate limiting** on top of the existing access token.
+- **Lens/scope creation wizard** and richer Goggles management in the GUI.

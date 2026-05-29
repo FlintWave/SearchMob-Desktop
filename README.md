@@ -7,9 +7,9 @@
 [SearchMob for Android](https://github.com/FlintWave/SearchMob) with the same engines, the same
 privacy proxy, and the same store-nothing-by-default behavior.
 
-> **Status:** alpha, feature-complete. Metasearch, the local HTTP server, encrypted storage, the
-> suggestions endpoint, on-device correction, result personalization, network mode, and the PySide6
-> GUI are all implemented. Track the roadmap in [`ROADMAP.md`](ROADMAP.md).
+> **Status:** released. Metasearch, the local HTTP server, encrypted storage, the suggestions
+> endpoint, on-device correction, result personalization, network mode, and the PySide6 GUI are all
+> implemented and shipped in the installers. Track the roadmap in [`ROADMAP.md`](ROADMAP.md).
 
 ## What it does (parity with the Android app)
 
@@ -38,9 +38,9 @@ privacy proxy, and the same store-nothing-by-default behavior.
 - **Three surfaces**: a Qt-based GUI, a Typer CLI for headless and scripted use, and a background
   HTTP service.
 
-## Install (alpha)
+## Install
 
-The latest release is `26.05.01` (see [`CHANGELOG.md`](CHANGELOG.md)). Two install paths:
+The latest release is `26.05.02` (see [`CHANGELOG.md`](CHANGELOG.md)). Two install paths:
 
 ### End users: native installer (recommended)
 
@@ -54,10 +54,10 @@ Grab the installer for your OS from the [latest GitHub Release](https://github.c
 
 Every release also publishes a `SHA256SUMS` file you can verify before installing.
 
-> **First release is unsigned.** The `.msi` and `.dmg` are built with `--adhoc-sign` and will
-> trigger SmartScreen / Gatekeeper warnings. Authenticode signing on Windows and Apple notarization
-> on macOS land in a follow-up release once the signing secrets are wired into CI; the SHA256SUMS
-> file is the integrity anchor for the alpha.
+> **Installers are unsigned.** The `.msi` and `.dmg` are ad-hoc signed and will trigger SmartScreen
+> / Gatekeeper warnings; Authenticode signing (Windows) and Apple notarization (macOS) are planned
+> once the signing secrets are wired into CI. Verify any download against the published
+> `SHA256SUMS` before installing.
 
 ### Developers / source install
 
@@ -73,9 +73,10 @@ searchmob-desktop --help
 ## CLI
 
 ```bash
-searchmob-desktop search "privacy tools"   # one-shot metasearch (planned)
-searchmob-desktop serve                    # local HTTP server (planned)
-searchmob-desktop gui                      # launch the desktop GUI (planned)
+searchmob-desktop search "privacy tools"   # one-shot metasearch, prints a table
+searchmob-desktop serve                    # run the local HTTP server (browser integration)
+searchmob-desktop gui                      # launch the desktop GUI
+searchmob-desktop vault --help             # manage the encrypted-storage vault
 searchmob-desktop --version
 ```
 

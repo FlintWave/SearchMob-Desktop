@@ -33,6 +33,7 @@ interest:
 - The app contains no telemetry and collects no analytics or device identifiers.
 - The only outbound traffic is the searches you run, plus an optional once-a-day update check to
   GitHub that you can turn off in settings.
-- Releases are signed where the platform supports it (Windows code-signing certificate, Apple
-  notarization). Verify checksums on downloaded artifacts.
+- Release installers are currently **unsigned** (ad-hoc signed on Windows/macOS), so they trigger
+  SmartScreen / Gatekeeper warnings; Authenticode signing and Apple notarization are planned.
+  Verify any download against the published `SHA256SUMS` before installing.
 - Third-party GitHub Actions are pinned by commit SHA.
