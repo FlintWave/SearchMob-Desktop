@@ -100,3 +100,41 @@ async def test_upstream_exception_is_fail_soft() -> None:
         upstream_enabled=lambda: True,
     )
     assert await composite("x", 5) == ["only local"]
+
+
+@pytest.mark.asyncio
+async def test_network_mode_suppresses_local_history_suggestions() -> None:
+    """The privacy guard: when local_enabled() is False, the owner's history is never queried."""
+    history = _Counter(["my private search", "another"])
+    composite = CompositeSuggestionsProvider(
+        history=history,
+        upstream=_Counter(["should not appear either"]),
+        upstream_enabled=lambda: False,
+        local_enabled=lambda: False,
+    )
+    assert await composite("my", 5) == []
+    assert history.calls == 0  # history is not even consulted
+
+
+@pytest.mark.asyncio
+async def test_network_mode_still_allows_upstream_when_enabled() -> None:
+    history = _Counter(["private"])
+    composite = CompositeSuggestionsProvider(
+        history=history,
+        upstream=_Counter(["public result"]),
+        upstream_enabled=lambda: True,
+        local_enabled=lambda: False,
+    )
+    # No local history leaks, but the opt-in upstream still works.
+    assert await composite("p", 5) == ["public result"]
+    assert history.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_local_enabled_defaults_to_on() -> None:
+    composite = CompositeSuggestionsProvider(
+        history=_Counter(["local"]),
+        upstream=_Counter([]),
+        upstream_enabled=lambda: False,
+    )
+    assert await composite("l", 5) == ["local"]

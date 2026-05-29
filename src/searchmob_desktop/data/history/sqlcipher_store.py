@@ -31,7 +31,7 @@ from typing import TYPE_CHECKING
 from searchmob_desktop.data.history.history import HistoryEntry
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Iterable
 
 _log = logging.getLogger(__name__)
 
@@ -70,6 +70,7 @@ class SqlCipherHistoryStore:
         db_path: Path,
         dek_provider: Callable[[], bytes],
         sqlcipher_module: object | None = None,
+        ttl_ms: int | None = None,
     ) -> None:
         self._db_path = db_path
         self._dek_provider = dek_provider
@@ -78,6 +79,9 @@ class SqlCipherHistoryStore:
         )
         self._enabled = False
         self._conn: object | None = None  # sqlcipher3.Connection
+        # When set, entries older than this are deleted opportunistically on add/read. Default
+        # `None` (no expiry) keeps the test reference simple; the app wires the real TTL.
+        self._ttl_ms = ttl_ms
 
     @property
     def enabled(self) -> bool:
@@ -101,6 +105,7 @@ class SqlCipherHistoryStore:
             conn.execute(  # type: ignore[attr-defined]
                 "INSERT INTO history(query, timestamp_ms) VALUES(?, ?)", (query, ts)
             )
+            self._sweep(conn)
             conn.commit()  # type: ignore[attr-defined]
         except Exception as exc:
             _log.warning("history add failed: %s", exc)
@@ -110,6 +115,7 @@ class SqlCipherHistoryStore:
             return []
         try:
             conn = self._connect()
+            self._sweep(conn)
             rows = conn.execute(  # type: ignore[attr-defined]
                 "SELECT query, timestamp_ms FROM history ORDER BY timestamp_ms DESC LIMIT ?",
                 (limit,),
@@ -123,6 +129,7 @@ class SqlCipherHistoryStore:
             return []
         try:
             conn = self._connect()
+            self._sweep(conn)
             rows = conn.execute(  # type: ignore[attr-defined]
                 "SELECT query FROM history "
                 "WHERE query LIKE ? || '%' COLLATE NOCASE "
@@ -135,6 +142,57 @@ class SqlCipherHistoryStore:
             # schema mismatch must never break the typing path.
             return []
         return [row[0] for row in rows]
+
+    def export_entries(self) -> list[HistoryEntry]:
+        if not self._enabled:
+            return []
+        try:
+            conn = self._connect()
+            self._sweep(conn)
+            rows = conn.execute(  # type: ignore[attr-defined]
+                "SELECT query, timestamp_ms FROM history ORDER BY timestamp_ms DESC"
+            ).fetchall()
+        except Exception:
+            return []
+        return [HistoryEntry(query=q, timestamp_ms=ts) for (q, ts) in rows]
+
+    def import_entries(self, entries: Iterable[HistoryEntry]) -> int:
+        if not self._enabled:
+            return 0
+        added = 0
+        try:
+            conn = self._connect()
+            for entry in entries:
+                # Skip an exact duplicate so a re-import is idempotent.
+                exists = conn.execute(  # type: ignore[attr-defined]
+                    "SELECT 1 FROM history WHERE query = ? AND timestamp_ms = ? LIMIT 1",
+                    (entry.query, entry.timestamp_ms),
+                ).fetchone()
+                if exists:
+                    continue
+                conn.execute(  # type: ignore[attr-defined]
+                    "INSERT INTO history(query, timestamp_ms) VALUES(?, ?)",
+                    (entry.query, entry.timestamp_ms),
+                )
+                added += 1
+            self._sweep(conn)
+            conn.commit()  # type: ignore[attr-defined]
+        except Exception as exc:
+            _log.warning("history import failed: %s", exc)
+            return 0
+        return added
+
+    def delete(self, query: str, timestamp_ms: int) -> None:
+        if not self._db_path.exists() and self._conn is None:
+            return
+        try:
+            conn = self._connect()
+            conn.execute(  # type: ignore[attr-defined]
+                "DELETE FROM history WHERE query = ? AND timestamp_ms = ?", (query, timestamp_ms)
+            )
+            conn.commit()  # type: ignore[attr-defined]
+        except Exception as exc:
+            _log.warning("history delete failed: %s", exc)
 
     def clear(self) -> None:
         if not self._db_path.exists() and self._conn is None:
@@ -155,6 +213,13 @@ class SqlCipherHistoryStore:
         self._close()
 
     # ------------------------------------------------------------------ internal --
+
+    def _sweep(self, conn: object) -> None:
+        """Delete entries older than the TTL. No-op when `ttl_ms` is `None`. Caller commits."""
+        if self._ttl_ms is None:
+            return
+        cutoff = int(time.time() * 1000) - self._ttl_ms
+        conn.execute("DELETE FROM history WHERE timestamp_ms < ?", (cutoff,))  # type: ignore[attr-defined]
 
     def _connect(self) -> object:
         if self._conn is not None:

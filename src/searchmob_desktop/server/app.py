@@ -36,6 +36,8 @@ from starlette.responses import JSONResponse, PlainTextResponse, Response
 from starlette.routing import Route
 
 from searchmob_desktop.engines import EngineContext, EngineFn, SearchResult, aggregate
+from searchmob_desktop.engines.correct import SpellCorrector
+from searchmob_desktop.engines.rank import RankingRules, apply_ranking, host_of_url
 from searchmob_desktop.server.opensearch import build_descriptor
 from searchmob_desktop.server.templates import render_home_page, render_results_page
 
@@ -69,6 +71,16 @@ def _no_suggestions(_query: str, _limit: int) -> list[str]:
     Used when no real source is wired (Phase 2 has neither history nor an upstream autocomplete).
     """
     return []
+
+
+def is_loopback_host(host: str) -> bool:
+    """True when `host` is a loopback address (only this machine can reach the server).
+
+    Used as the network-mode privacy gate: when the server binds a non-loopback address (e.g.
+    `0.0.0.0` for LAN/Tailscale), local search-history suggestions must not be served to clients.
+    """
+    h = host.strip().lower()
+    return h in {"localhost", "::1"} or h.startswith("127.")
 
 
 def is_safe_http_url(url: str) -> bool:
@@ -105,6 +117,8 @@ def build_app(
     *,
     bound_host_getter: Callable[[], str] = lambda: LOOPBACK_HOST,
     suggestions_provider: SuggestionsProvider | None = None,
+    corrector: SpellCorrector | None = None,
+    ranking_rules: RankingRules | None = None,
     max_query_length: int = MAX_QUERY_LENGTH,
     max_suggestions: int = MAX_SUGGESTIONS,
     max_results: int = 10,
@@ -133,11 +147,32 @@ def build_app(
             return ""
         return raw[:max_query_length]
 
+    rules = ranking_rules if ranking_rules is not None else RankingRules()
+
     async def _run_metasearch(query: str) -> list[SearchResult]:
         if not query.strip() or not engines:
             return []
         ctx = EngineContext(query=query, max_results=max_results, timeout_seconds=timeout_seconds)
-        return await metasearch(ctx, engines)
+        results = await metasearch(ctx, engines)
+        # Apply the user's local personalization rules (block/lower/raise/pin, lens, goggles) after
+        # aggregation so the served results match the in-app results.
+        return apply_ranking(
+            results,
+            rules,
+            host_of=lambda r: host_of_url(r.url),
+            text_of=lambda r: f"{r.title} {r.snippet}",
+        )
+
+    def _correction(query: str) -> str | None:
+        # On-device "did you mean". `suggest` is fail-soft and already returns None when the
+        # corrected query equals the input, so any non-None result is a genuine suggestion.
+        if corrector is None or not query.strip():
+            return None
+        try:
+            suggestion = corrector.suggest(query)
+        except Exception:
+            return None
+        return suggestion.corrected if suggestion is not None else None
 
     async def home(_request: Request) -> Response:
         return Response(render_home_page(), media_type="text/html; charset=utf-8")
@@ -148,7 +183,7 @@ def build_app(
     async def search_html(request: Request) -> Response:
         query = _clamp(request.query_params.get("q"))
         results = await _run_metasearch(query)
-        body = render_results_page(query, results, is_safe_http_url)
+        body = render_results_page(query, results, is_safe_http_url, correction=_correction(query))
         return Response(body, media_type="text/html; charset=utf-8")
 
     async def search_json(request: Request) -> Response:
@@ -157,6 +192,7 @@ def build_app(
         payload = {
             "query": query,
             "results": [asdict(result) for result in results],
+            "correction": _correction(query),
         }
         return JSONResponse(payload)
 

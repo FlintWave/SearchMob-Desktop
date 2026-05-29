@@ -28,6 +28,8 @@ def _build_client(
     port: int = 8787,
     host: str = "127.0.0.1",
     suggestions_provider: object = None,
+    corrector: object = None,
+    ranking_rules: object = None,
 ) -> TestClient:
     """Wire a TestClient over the Starlette app with a fake metasearch.
 
@@ -51,6 +53,8 @@ def _build_client(
         bound_port_getter=lambda: port,
         bound_host_getter=lambda: host,
         suggestions_provider=suggestions_provider,  # type: ignore[arg-type]
+        corrector=corrector,  # type: ignore[arg-type]
+        ranking_rules=ranking_rules,  # type: ignore[arg-type]
         metasearch=_metasearch,
     )
     return TestClient(app)
@@ -266,3 +270,95 @@ def test_suggest_uses_provided_provider() -> None:
     with _build_client() as client:
         response = client.get("/suggest", params={"q": "a"})
     assert json.loads(response.text) == ["a", []]
+
+
+async def _engine_two_domains(
+    _client: httpx.AsyncClient, _ctx: EngineContext
+) -> list[SearchResult]:
+    return [
+        SearchResult(title="Good", url="https://good.example/p", snippet="", engine="x"),
+        SearchResult(title="Spam", url="https://spam.example/p", snippet="", engine="x"),
+        SearchResult(title="Other", url="https://other.example/p", snippet="", engine="x"),
+    ]
+
+
+def test_ranking_rules_block_and_pin_apply_to_served_results() -> None:
+    from searchmob_desktop.engines.rank import RankingRules, RankRule
+
+    rules = RankingRules(
+        domain_rules={"spam.example": RankRule.BLOCK, "other.example": RankRule.PIN}
+    )
+    with _build_client(engines=[_engine_two_domains], ranking_rules=rules) as client:
+        payload = client.get("/api/search", params={"q": "x"}).json()
+    urls = [r["url"] for r in payload["results"]]
+    # spam.example is dropped; other.example is pinned to the top.
+    assert "https://spam.example/p" not in urls
+    assert urls[0] == "https://other.example/p"
+    assert "https://good.example/p" in urls
+
+
+def test_no_ranking_rules_leaves_results_untouched() -> None:
+    with _build_client(engines=[_engine_two_domains]) as client:
+        payload = client.get("/api/search", params={"q": "x"}).json()
+    urls = [r["url"] for r in payload["results"]]
+    assert urls == [
+        "https://good.example/p",
+        "https://spam.example/p",
+        "https://other.example/p",
+    ]
+
+
+class _StubCorrector:
+    """Suggests a fixed correction for one trigger query; returns None otherwise."""
+
+    def __init__(self, trigger: str, corrected: str) -> None:
+        self._trigger = trigger
+        self._corrected = corrected
+
+    def suggest(self, query: str):  # type: ignore[no-untyped-def]
+        from searchmob_desktop.engines.correct import Correction
+
+        if query.strip().lower() == self._trigger:
+            return Correction(corrected=self._corrected, confidence=0.9)
+        return None
+
+
+def test_search_html_shows_did_you_mean_link() -> None:
+    corrector = _StubCorrector("arnld swartzeneger", "arnold schwarzenegger")
+    with _build_client(corrector=corrector) as client:
+        response = client.get("/search", params={"q": "arnld swartzeneger"})
+    body = response.text
+    assert "Did you mean" in body
+    # Links to a re-run of the search with the corrected query (url-encoded).
+    assert "/search?q=arnold+schwarzenegger" in body
+    assert "arnold schwarzenegger" in body
+
+
+def test_search_json_includes_correction_field() -> None:
+    corrector = _StubCorrector("teh", "the")
+    with _build_client(corrector=corrector) as client:
+        hit = client.get("/api/search", params={"q": "teh"})
+        miss = client.get("/api/search", params={"q": "the"})
+    assert json.loads(hit.text)["correction"] == "the"
+    # No correction for a query the corrector leaves alone; the field is still present (None).
+    assert json.loads(miss.text)["correction"] is None
+
+
+def test_no_correction_without_a_corrector() -> None:
+    with _build_client() as client:
+        response = client.get("/api/search", params={"q": "anything"})
+    assert json.loads(response.text)["correction"] is None
+
+
+def test_is_loopback_host_classifies_addresses() -> None:
+    from searchmob_desktop.server import is_loopback_host
+
+    assert is_loopback_host("127.0.0.1")
+    assert is_loopback_host("127.5.5.5")
+    assert is_loopback_host("localhost")
+    assert is_loopback_host("::1")
+    assert is_loopback_host(" LocalHost ")
+    # Network-reachable binds are not loopback -> the history-suggestion guard engages.
+    assert not is_loopback_host("0.0.0.0")
+    assert not is_loopback_host("192.168.1.10")
+    assert not is_loopback_host("::")
