@@ -7,10 +7,11 @@ All notable changes to SearchMob Desktop are documented here. The version scheme
 
 ### Added
 - **Contextual Wikipedia summary box.** For entity-like queries, a short knowledge-panel card from
-  the related Wikipedia article now appears above the results on the served page (the in-browser
-  surface), with the title, description, lead extract, and a link. Fail-soft and confidence-gated
-  (no box for questions, navigational input, disambiguation, or low-confidence matches); adds at
-  most one extra request to Wikipedia through the privacy proxy. Toggle in Settings -> Suggestions.
+  the related Wikipedia article now appears above the results, both **in the app** and on the
+  **served page**, with the title, description, lead extract, and a link. Fail-soft and
+  confidence-gated (no box for questions, navigational input, disambiguation, or low-confidence
+  matches); adds at most one extra request to Wikipedia through the privacy proxy. Toggle in
+  Settings -> Suggestions.
 - **First-run setup wizard.** On first launch the desktop app now walks you through a short,
   skippable guide (Welcome, privacy, making SearchMob your browser's search engine, and - where
   available - running it as a background service), mirroring the Android onboarding. It is OS-aware:

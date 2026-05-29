@@ -59,6 +59,28 @@ def test_results_ready_with_items_shows_results_and_count(qapp: object, tmp_path
     assert "2 results" in window._status_label.text()
 
 
+def test_summary_card_shown_for_summary_then_hidden(qapp: object, tmp_path: Path) -> None:
+    from searchmob_desktop.engines.wiki_summary import SummaryBox
+
+    window = _window(tmp_path)
+    box = SummaryBox(
+        title="Mount Everest",
+        description="Earth's highest mountain",
+        extract="Mount Everest is Earth's highest mountain.",
+        url="https://en.wikipedia.org/wiki/Mount_Everest",
+    )
+    results = [SearchResult(title="One", url="https://a.example/x", snippet="", engine="ddg")]
+    window._on_results_ready((results, box))
+    assert not window._summary_card.isHidden()
+    assert "Mount Everest" in window._summary_title.text()
+    assert "en.wikipedia.org/wiki/Mount_Everest" in window._summary_title.text()
+    assert window._summary_extract.text() == box.extract
+
+    # A subsequent search with no summary hides the card again.
+    window._on_results_ready((results, None))
+    assert window._summary_card.isHidden()
+
+
 def test_search_failed_shows_empty_state_and_status(qapp: object, tmp_path: Path) -> None:
     window = _window(tmp_path)
     window._on_search_failed("boom")
