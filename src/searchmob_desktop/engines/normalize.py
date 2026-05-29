@@ -45,6 +45,28 @@ def _is_tracking(key: str) -> bool:
     return any(lowered.startswith(prefix) for prefix in _TRACKING_PREFIXES)
 
 
+def strip_tracking_params(raw: str) -> str:
+    """Return `raw` with known tracking query params removed, preserving the rest for display.
+
+    Unlike `normalize_url` (which produces a lossy dedup key: lowercased host, trimmed trailing
+    slash), this keeps the URL otherwise intact - scheme/host case, path, trailing slash, and
+    fragment - so it is safe to show and click. It is applied to the URL the aggregator surfaces so
+    the link a user follows does not carry `utm_*`/`fbclid`/etc.
+    """
+    trimmed = raw.strip()
+    try:
+        parts = urlsplit(trimmed)
+    except ValueError:
+        return trimmed
+    if not parts.query:
+        return trimmed
+    kept = [
+        (k, v) for k, v in parse_qsl(parts.query, keep_blank_values=True) if not _is_tracking(k)
+    ]
+    query = urlencode(kept, doseq=True)
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, query, parts.fragment))
+
+
 def normalize_url(raw: str) -> str:
     """Return the dedup-key form of `raw`. Falls back to the stripped input on parse failure."""
     trimmed = raw.strip()

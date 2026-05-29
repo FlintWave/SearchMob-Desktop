@@ -18,6 +18,10 @@ All notable changes to SearchMob Desktop are documented here. The version scheme
   a green outline with a checkmark that fades out over it, so the confirmation does not interrupt.
 
 ### Fixed
+- **Result links are now stripped of tracking parameters before you click them.** The tracker
+  list (`utm_*`, `fbclid`, `gclid`, `mc_cid`, `igshid`, `ref`, ...) was only applied to the dedup
+  key; the displayed link kept the raw upstream URL. The aggregator now surfaces a cleaned URL, so
+  in-app, CLI, and served-page links all drop trackers (functional query params are preserved).
 - **Browser-setup wizard now uses the `%s` search-term placeholder** that Firefox-family and
   Chromium "add a search engine" dialogs expect. Pasting the old `{searchTerms}` form into
   LibreWolf/Firefox failed with "Try including %s in place of the search term". The `{searchTerms}`

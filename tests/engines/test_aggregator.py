@@ -86,3 +86,22 @@ async def test_respects_max_results() -> None:
     ctx = EngineContext(query="anything", max_results=2)
     results = await aggregate(ctx, [_fake_a, _fake_b])
     assert len(results) == 2
+
+
+@pytest.mark.asyncio
+async def test_surfaced_url_is_tracker_stripped() -> None:
+    """The clicked link must not carry trackers, even when the result is unique (no dedup)."""
+
+    async def _tracked(_client: httpx.AsyncClient, _ctx: EngineContext) -> list[SearchResult]:
+        return [
+            SearchResult(
+                title="Tracked",
+                url="https://news.example/article?utm_source=x&fbclid=y&id=7",
+                snippet="",
+                engine="t",
+            )
+        ]
+
+    ctx = EngineContext(query="anything", max_results=10)
+    results = await aggregate(ctx, [_tracked])
+    assert results[0].url == "https://news.example/article?id=7"
