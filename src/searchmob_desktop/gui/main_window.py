@@ -30,7 +30,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from searchmob_desktop.data.history import InMemoryHistoryStore
+from searchmob_desktop.data.history import HistoryStore
+from searchmob_desktop.data.history_factory import build_history_store
 from searchmob_desktop.data.ranking_store import load_ranking_rules, save_ranking_rules
 from searchmob_desktop.engines import EngineContext, SearchResult, aggregate
 from searchmob_desktop.engines.correct import start_background_corrector
@@ -66,7 +67,7 @@ class MainWindow(QMainWindow):
     def __init__(
         self,
         prefs_store: JsonPreferencesStore | None = None,
-        history_store: InMemoryHistoryStore | None = None,
+        history_store: HistoryStore | None = None,
     ) -> None:
         super().__init__()
         self.setWindowTitle("SearchMob Desktop")
@@ -79,7 +80,8 @@ class MainWindow(QMainWindow):
 
         self._prefs_store = prefs_store or JsonPreferencesStore()
         prefs = self._prefs_store.load()
-        self._history_store = history_store or InMemoryHistoryStore()
+        # Persistent encrypted history when enabled + vault available, else in-memory (per-session).
+        self._history_store = history_store or build_history_store(prefs)
         self._history_store.set_enabled(prefs.history_enabled)
         # Result-ranking rules (block/lower/raise/pin, lenses, goggles), loaded once and applied to
         # every result list. `_raw_results` keeps the pre-ranking list so a rule change re-ranks

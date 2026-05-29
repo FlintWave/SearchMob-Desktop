@@ -49,6 +49,11 @@ def _try_import_sqlcipher() -> object | None:
     return sqlcipher3  # type: ignore[no-any-return]
 
 
+def sqlcipher_available() -> bool:
+    """True when the `sqlcipher3` wheel is importable (the `storage` extra is installed)."""
+    return _try_import_sqlcipher() is not None
+
+
 class SqlCipherHistoryStore:
     """Encrypted on-disk history. OFF by default.
 

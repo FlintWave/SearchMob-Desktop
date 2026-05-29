@@ -24,7 +24,7 @@ from searchmob_desktop.data import (
 from searchmob_desktop.data.api_keys import read_vault_api_keys, resolve_api_key
 from searchmob_desktop.data.crypto.keyring_kek import KeyringKekStore
 from searchmob_desktop.data.crypto.wrap import KeyringDekWrapper
-from searchmob_desktop.data.history import InMemoryHistoryStore
+from searchmob_desktop.data.history_factory import build_history_store
 from searchmob_desktop.data.ranking_store import load_ranking_rules
 from searchmob_desktop.engines import (
     EngineContext,
@@ -168,8 +168,8 @@ def serve(
 
     prefs_store = JsonPreferencesStore()
     prefs = prefs_store.load()
-    history_store = InMemoryHistoryStore()
-    history_store.set_enabled(prefs.history_enabled)
+    # Persistent encrypted history when enabled + vault available, else in-memory (per-session).
+    history_store = build_history_store(prefs)
 
     # Live read on every suggest call so a future settings UI toggle takes effect without
     # restarting the server. Today the toggle flips by editing prefs.json + restarting,

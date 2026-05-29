@@ -33,7 +33,7 @@ from searchmob_desktop.data import (
     ZERO_KNOWLEDGE_UNRECOVERABLE_WARNING,
     BootstrapMetadataStore,
     EncryptedPreferences,
-    InMemoryHistoryStore,
+    HistoryStore,
     StorageBootstrap,
     WrapMode,
 )
@@ -85,7 +85,7 @@ class SettingsDialog(QDialog):
         self,
         prefs_store: JsonPreferencesStore,
         server_controller: LocalServerController | None = None,
-        history_store: InMemoryHistoryStore | None = None,
+        history_store: HistoryStore | None = None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)

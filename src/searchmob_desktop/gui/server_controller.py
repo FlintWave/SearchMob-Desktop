@@ -18,7 +18,7 @@ from collections.abc import Sequence
 from PySide6.QtCore import QObject, QThread, Signal
 
 from searchmob_desktop.data.api_keys import read_vault_api_keys, resolve_api_key
-from searchmob_desktop.data.history import InMemoryHistoryStore
+from searchmob_desktop.data.history import HistoryStore, InMemoryHistoryStore
 from searchmob_desktop.data.ranking_store import load_ranking_rules
 from searchmob_desktop.engines import (
     EngineFn,
@@ -98,7 +98,7 @@ class _UvicornWorker(QThread):
         host: str,
         port: int,
         prefs_store: JsonPreferencesStore,
-        history_store: InMemoryHistoryStore,
+        history_store: HistoryStore,
     ) -> None:
         super().__init__()
         self._engines = engines
@@ -190,7 +190,7 @@ class LocalServerController(QObject):
     def __init__(
         self,
         prefs_store: JsonPreferencesStore,
-        history_store: InMemoryHistoryStore | None = None,
+        history_store: HistoryStore | None = None,
         host: str = LOOPBACK_HOST,
         port: int = 8787,
     ) -> None:
