@@ -875,6 +875,10 @@ class SettingsDialog(QDialog):
         btn.clicked.connect(self._open_browser_setup)
         layout.addWidget(btn)
 
+        guide_btn = QPushButton("Run the setup guide again")
+        guide_btn.clicked.connect(self._open_onboarding)
+        layout.addWidget(guide_btn)
+
         layout.addWidget(self._build_service_section())
 
         about_btn = QPushButton("About and privacy")
@@ -955,6 +959,15 @@ class SettingsDialog(QDialog):
         if not ok:
             QMessageBox.warning(self, "Could not remove the service", message)
         self._refresh_service_status()
+
+    def _open_onboarding(self) -> None:
+        from searchmob_desktop.gui.onboarding_dialog import OnboardingDialog
+
+        OnboardingDialog(
+            prefs_store=self._prefs_store,
+            server_controller=self._server_controller,
+            parent=self,
+        ).exec()
 
     def _open_browser_setup(self) -> None:
         from searchmob_desktop.gui.browser_setup_dialog import choose_setup_host

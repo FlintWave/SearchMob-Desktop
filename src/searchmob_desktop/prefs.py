@@ -65,6 +65,8 @@ class UserPreferences:
     upstream_suggestions_enabled: bool = False
     update_check_enabled: bool = True
     last_update_check_ms: int = 0
+    # Set once the first-run setup wizard has been completed or skipped, so it never reappears.
+    onboarding_completed: bool = False
     engine_enabled: Mapping[str, bool] = field(default_factory=dict)
 
     def with_update_check_stamped(self, now_ms: int) -> UserPreferences:
