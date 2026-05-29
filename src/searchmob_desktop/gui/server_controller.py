@@ -12,20 +12,19 @@ in-memory history store is used until the user explicitly enables encrypted stor
 from __future__ import annotations
 
 import asyncio
-import os
 import threading
 from collections.abc import Sequence
-from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QObject, QThread, Signal
 
+from searchmob_desktop.data.api_keys import read_vault_api_keys, resolve_api_key
 from searchmob_desktop.data.history import InMemoryHistoryStore
 from searchmob_desktop.engines import (
-    EngineContext,
     EngineFn,
-    SearchResult,
+    bind_api_key,
     fetch_brave_api,
     fetch_duckduckgo,
+    fetch_kagi_api,
     fetch_marginalia,
     fetch_mojeek,
     fetch_mojeek_api,
@@ -42,18 +41,20 @@ from searchmob_desktop.suggest import (
     UpstreamSuggestionsProvider,
 )
 
-if TYPE_CHECKING:
-    import httpx
-
-_BRAVE_KEY_ENV = "SEARCHMOB_BRAVE_API_KEY"
-_MOJEEK_KEY_ENV = "SEARCHMOB_MOJEEK_API_KEY"
+# Fetchers for the BYO-key engines, keyed by catalog id. Each takes an `api_key` keyword.
+_KEYED_FETCHERS = {
+    "brave": fetch_brave_api,
+    "mojeek-api": fetch_mojeek_api,
+    "kagi-api": fetch_kagi_api,
+}
 
 
 def build_engines_from_prefs(prefs: UserPreferences) -> list[EngineFn]:
-    """Compose the engines list using the prefs `engine_enabled` map plus environment keys.
+    """Compose the engines list using the prefs `engine_enabled` map plus resolved BYO keys.
 
-    Free engines are filtered by the prefs map (default-on; absent entry = on). BYO-key engines
-    are filtered both by the env var (no key, no request) and by the prefs map.
+    Free engines are filtered by the prefs map (default-on; absent entry = on). BYO-key engines run
+    only when a key is resolved (from the encrypted vault first, then the matching environment
+    variable) AND the engine is enabled; with no key the engine is silently skipped (zero HTTP).
     """
     by_id: dict[str, EngineFn] = {
         "duckduckgo": fetch_duckduckgo,
@@ -64,30 +65,21 @@ def build_engines_from_prefs(prefs: UserPreferences) -> list[EngineFn]:
     }
     enabled = dict(prefs.engine_enabled) if prefs.engine_enabled else {}
     engines: list[EngineFn] = []
+    # Read the vault once; resolve every BYO key against this snapshot to avoid re-opening it.
+    vault_keys = read_vault_api_keys()
     for entry in ENGINE_CATALOG:
-        if entry.requires_api_key:
-            continue
         if not is_engine_enabled(entry.id, enabled):
             continue
-        fn = by_id.get(entry.id)
-        if fn is not None:
-            engines.append(fn)
-
-    brave_key = os.environ.get(_BRAVE_KEY_ENV)
-    if brave_key and is_engine_enabled("brave", enabled):
-
-        async def _brave(client: httpx.AsyncClient, ctx: EngineContext) -> list[SearchResult]:
-            return await fetch_brave_api(client, ctx, api_key=brave_key)
-
-        engines.append(_brave)
-
-    mojeek_key = os.environ.get(_MOJEEK_KEY_ENV)
-    if mojeek_key and is_engine_enabled("mojeek-api", enabled):
-
-        async def _mojeek_api(client: httpx.AsyncClient, ctx: EngineContext) -> list[SearchResult]:
-            return await fetch_mojeek_api(client, ctx, api_key=mojeek_key)
-
-        engines.append(_mojeek_api)
+        if not entry.requires_api_key:
+            fn = by_id.get(entry.id)
+            if fn is not None:
+                engines.append(fn)
+            continue
+        fetch = _KEYED_FETCHERS.get(entry.id)
+        key = resolve_api_key(entry.id, vault_keys)
+        if fetch is None or not key:
+            continue
+        engines.append(bind_api_key(fetch, key))
     return engines
 
 
