@@ -22,6 +22,10 @@ privacy proxy, and the same store-nothing-by-default behavior.
 - **On-device "did you mean"**: a fully offline spell / "similar sounding" corrector (phonetic +
   edit-distance over a bundled word list, optionally augmented by your own history) suggests a
   correction for misspelled queries. No query ever leaves the device for this.
+- **Result personalization ("filter bubbles"), local and private**: block / lower / raise / pin
+  results by domain (right-click a result), plus lenses and imported Brave Goggles. Rules live in
+  the encrypted vault and are applied on-device to both the in-app and browser results; nothing is
+  sent upstream.
 - **Outbound traffic disclosure**: the only outbound traffic is the searches you run, plus an
   optional once-a-day update check to GitHub that you can turn off in settings.
 - **Local HTTP server** so any browser can use SearchMob as its default search engine. Loopback-only

@@ -19,6 +19,7 @@ from PySide6.QtCore import QObject, QThread, Signal
 
 from searchmob_desktop.data.api_keys import read_vault_api_keys, resolve_api_key
 from searchmob_desktop.data.history import InMemoryHistoryStore
+from searchmob_desktop.data.ranking_store import load_ranking_rules
 from searchmob_desktop.engines import (
     EngineFn,
     bind_api_key,
@@ -136,6 +137,7 @@ class _UvicornWorker(QThread):
             bound_host_getter=lambda: self._host,
             suggestions_provider=composite,
             corrector=corrector,
+            ranking_rules=load_ranking_rules(),
         )
         config = uvicorn.Config(
             app,

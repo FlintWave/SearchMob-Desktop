@@ -31,8 +31,10 @@ from PySide6.QtWidgets import (
 )
 
 from searchmob_desktop.data.history import InMemoryHistoryStore
+from searchmob_desktop.data.ranking_store import load_ranking_rules, save_ranking_rules
 from searchmob_desktop.engines import EngineContext, SearchResult, aggregate
 from searchmob_desktop.engines.correct import start_background_corrector
+from searchmob_desktop.engines.rank import RankRule, apply_ranking, host_of_url
 from searchmob_desktop.gui.about_dialog import AboutDialog
 from searchmob_desktop.gui.browser_setup_dialog import BrowserSetupDialog
 from searchmob_desktop.gui.history_dialog import HistoryDialog
@@ -78,6 +80,11 @@ class MainWindow(QMainWindow):
         self._prefs_store = prefs_store or JsonPreferencesStore()
         self._history_store = history_store or InMemoryHistoryStore()
         self._history_store.set_enabled(self._prefs_store.load().history_enabled)
+        # Result-ranking rules (block/lower/raise/pin, lenses, goggles), loaded once and applied to
+        # every result list. `_raw_results` keeps the pre-ranking list so a rule change re-ranks
+        # without re-searching.
+        self._ranking_rules = load_ranking_rules()
+        self._raw_results: list[SearchResult] = []
         # On-device "did you mean"; the dictionary loads off-thread so early searches just get no
         # suggestion. The last submitted query is kept so the result handler can offer a correction.
         self._corrector = start_background_corrector(
@@ -137,6 +144,7 @@ class MainWindow(QMainWindow):
         self._body = QStackedWidget()
         self._empty_state = self._build_empty_state()
         self._results = ResultsView()
+        self._results.ruleRequested.connect(self._on_rule_requested)
         self._body.addWidget(self._empty_state)
         self._body.addWidget(self._results)
         self._body.setCurrentWidget(self._empty_state)
@@ -295,14 +303,38 @@ class MainWindow(QMainWindow):
             self._body.setCurrentWidget(self._empty_state)
             return
         if not results:
+            self._raw_results = []
             self._status_label.setText("No results found.")
             self._body.setCurrentWidget(self._empty_state)
             self._maybe_show_correction()
             return
-        self._status_label.setText(f"{len(results)} results.")
-        self._results.set_results(results)
+        self._raw_results = results
         self._body.setCurrentWidget(self._results)
+        self._apply_ranking_and_show()
         self._maybe_show_correction()
+
+    def _apply_ranking_and_show(self) -> None:
+        """Re-rank the last raw results with the current rules and update the view + status."""
+        ranked = apply_ranking(
+            self._raw_results,
+            self._ranking_rules,
+            host_of=lambda r: host_of_url(r.url),
+            text_of=lambda r: f"{r.title} {r.snippet}",
+        )
+        self._results.set_results(ranked)
+        hidden = len(self._raw_results) - len(ranked)
+        suffix = f" ({hidden} hidden by your rules)" if hidden > 0 else ""
+        self._status_label.setText(f"{len(ranked)} results{suffix}.")
+
+    def _on_rule_requested(self, domain: str, rule: RankRule) -> None:
+        """A right-click ranking action on a result domain: persist it and re-rank in place."""
+        if rule == RankRule.NORMAL:
+            self._ranking_rules = self._ranking_rules.without_domain_rule(domain)
+        else:
+            self._ranking_rules = self._ranking_rules.with_domain_rule(domain, rule)
+        save_ranking_rules(self._ranking_rules)
+        if self._raw_results:
+            self._apply_ranking_and_show()
 
     def _maybe_show_correction(self) -> None:
         """Offer a 'Did you mean: X' link when the on-device corrector suggests one."""

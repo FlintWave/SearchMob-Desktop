@@ -10,9 +10,10 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from PySide6.QtCore import QModelIndex, QPersistentModelIndex, QRectF, QSize, Qt, QUrl
+from PySide6.QtCore import QModelIndex, QPersistentModelIndex, QRectF, QSize, Qt, QUrl, Signal
 from PySide6.QtGui import (
     QColor,
+    QContextMenuEvent,
     QDesktopServices,
     QFont,
     QPainter,
@@ -22,6 +23,7 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import (
     QListView,
+    QMenu,
     QStyle,
     QStyledItemDelegate,
     QStyleOptionViewItem,
@@ -29,6 +31,7 @@ from PySide6.QtWidgets import (
 )
 
 from searchmob_desktop.engines import SearchResult
+from searchmob_desktop.engines.rank import RankRule, host_of_url
 from searchmob_desktop.gui.theme import active_palette
 
 # Custom roles so the delegate does not have to parse the visible string back into fields.
@@ -136,7 +139,14 @@ class _ResultDelegate(QStyledItemDelegate):
 
 
 class ResultsView(QListView):
-    """A `QListView` over a `QStandardItemModel` of search results."""
+    """A `QListView` over a `QStandardItemModel` of search results.
+
+    Right-clicking a result opens a menu to set a ranking rule for that result's domain; the chosen
+    `(domain, RankRule)` is emitted via `ruleRequested` for the window to persist and re-apply.
+    """
+
+    # (domain, RankRule) chosen from a result's right-click menu.
+    ruleRequested = Signal(str, RankRule)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -150,6 +160,30 @@ class ResultsView(QListView):
         self.setSpacing(4)
         self.setVerticalScrollMode(QListView.ScrollMode.ScrollPerPixel)
         self.activated.connect(self._on_activated)
+
+    def contextMenuEvent(self, event: QContextMenuEvent) -> None:
+        index = self.indexAt(event.pos())
+        if not index.isValid():
+            return
+        domain = host_of_url(str(index.data(_URL_ROLE) or ""))
+        if not domain:
+            return
+        menu = QMenu(self)
+        menu.addAction(f"Domain: {domain}").setEnabled(False)
+        menu.addSeparator()
+        # NORMAL clears any existing rule for the domain.
+        for label, rule in (
+            ("Pin to top", RankRule.PIN),
+            ("Raise", RankRule.RAISE),
+            ("Lower", RankRule.LOWER),
+            ("Block", RankRule.BLOCK),
+            ("Clear rule", RankRule.NORMAL),
+        ):
+            action = menu.addAction(label)
+            action.triggered.connect(
+                lambda _checked=False, r=rule: self.ruleRequested.emit(domain, r)
+            )
+        menu.exec(event.globalPos())
 
     def set_results(self, results: Sequence[SearchResult]) -> None:
         """Replace the model contents with `results`."""

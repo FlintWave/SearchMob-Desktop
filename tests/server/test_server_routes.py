@@ -29,6 +29,7 @@ def _build_client(
     host: str = "127.0.0.1",
     suggestions_provider: object = None,
     corrector: object = None,
+    ranking_rules: object = None,
 ) -> TestClient:
     """Wire a TestClient over the Starlette app with a fake metasearch.
 
@@ -53,6 +54,7 @@ def _build_client(
         bound_host_getter=lambda: host,
         suggestions_provider=suggestions_provider,  # type: ignore[arg-type]
         corrector=corrector,  # type: ignore[arg-type]
+        ranking_rules=ranking_rules,  # type: ignore[arg-type]
         metasearch=_metasearch,
     )
     return TestClient(app)
@@ -268,6 +270,42 @@ def test_suggest_uses_provided_provider() -> None:
     with _build_client() as client:
         response = client.get("/suggest", params={"q": "a"})
     assert json.loads(response.text) == ["a", []]
+
+
+async def _engine_two_domains(
+    _client: httpx.AsyncClient, _ctx: EngineContext
+) -> list[SearchResult]:
+    return [
+        SearchResult(title="Good", url="https://good.example/p", snippet="", engine="x"),
+        SearchResult(title="Spam", url="https://spam.example/p", snippet="", engine="x"),
+        SearchResult(title="Other", url="https://other.example/p", snippet="", engine="x"),
+    ]
+
+
+def test_ranking_rules_block_and_pin_apply_to_served_results() -> None:
+    from searchmob_desktop.engines.rank import RankingRules, RankRule
+
+    rules = RankingRules(
+        domain_rules={"spam.example": RankRule.BLOCK, "other.example": RankRule.PIN}
+    )
+    with _build_client(engines=[_engine_two_domains], ranking_rules=rules) as client:
+        payload = client.get("/api/search", params={"q": "x"}).json()
+    urls = [r["url"] for r in payload["results"]]
+    # spam.example is dropped; other.example is pinned to the top.
+    assert "https://spam.example/p" not in urls
+    assert urls[0] == "https://other.example/p"
+    assert "https://good.example/p" in urls
+
+
+def test_no_ranking_rules_leaves_results_untouched() -> None:
+    with _build_client(engines=[_engine_two_domains]) as client:
+        payload = client.get("/api/search", params={"q": "x"}).json()
+    urls = [r["url"] for r in payload["results"]]
+    assert urls == [
+        "https://good.example/p",
+        "https://spam.example/p",
+        "https://other.example/p",
+    ]
 
 
 class _StubCorrector:
