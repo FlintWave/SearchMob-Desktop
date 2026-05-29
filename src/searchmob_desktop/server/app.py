@@ -28,6 +28,7 @@ import inspect
 import json
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import asdict
+from ipaddress import ip_address
 from urllib.parse import urlsplit
 
 from starlette.applications import Starlette
@@ -36,6 +37,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse, PlainTextResponse, Response
 from starlette.routing import Route
+from starlette.types import ASGIApp
 
 from searchmob_desktop.engines import EngineContext, EngineFn, SearchResult, aggregate
 from searchmob_desktop.engines.correct import SpellCorrector
@@ -76,14 +78,50 @@ def _no_suggestions(_query: str, _limit: int) -> list[str]:
 
 
 class _SecurityHeadersMiddleware(BaseHTTPMiddleware):
-    """Add conservative security headers to every response.
+    """Add conservative security headers, enforce the Host allowlist, and gate the query routes.
 
-    `Referrer-Policy: no-referrer` is the important one: without it, clicking a result would send
-    the loopback URL (which contains the query) as the Referer to the destination site, leaking the
-    query. The others are defense-in-depth, especially when the server is exposed in network mode.
+    Three concerns, kept in one middleware so they run on every request in a single pass:
+
+    * `Referrer-Policy: no-referrer` is the important header: without it, clicking a result would
+      send the loopback URL (which contains the query) as the Referer to the destination site,
+      leaking the query. The other headers are defense-in-depth, especially in network mode.
+    * Host-header allowlist (DNS-rebind defense): a request whose `Host` is neither loopback, the
+      bound host, nor an IP literal (when bound to a wildcard) is rejected with 400 before it
+      reaches any route, so a `evil.com` rebinding `Host` cannot drive the loopback origin.
+    * Network-mode token gate: when an access token is configured, a non-loopback client hitting a
+      query route (`/search`, `/api/search`, `/suggest`) without the correct `?token=` is rejected
+      with 403. Loopback clients and the open routes (`/`, `/opensearch.xml`, `/healthz`) bypass.
     """
 
+    _GATED_PATHS = frozenset({"/search", "/api/search", "/suggest"})
+
+    def __init__(
+        self,
+        app: ASGIApp,
+        *,
+        bound_host_getter: Callable[[], str],
+        access_token: str | None,
+        host_allowlist_enabled: bool,
+    ) -> None:
+        super().__init__(app)
+        self._bound_host_getter = bound_host_getter
+        self._access_token = access_token
+        self._host_allowlist_enabled = host_allowlist_enabled
+
     async def dispatch(self, request: Request, call_next):  # type: ignore[no-untyped-def]
+        if self._host_allowlist_enabled and not host_header_allowed(
+            request.headers.get("host", ""), self._bound_host_getter()
+        ):
+            return PlainTextResponse("Bad Request: host not allowed", status_code=400)
+
+        client_host = request.client.host if request.client is not None else ""
+        if (
+            request.url.path in self._GATED_PATHS
+            and requires_token(client_host, self._access_token)
+            and request.query_params.get("token") != self._access_token
+        ):
+            return PlainTextResponse("Forbidden", status_code=403)
+
         response = await call_next(request)
         response.headers.setdefault("Referrer-Policy", "no-referrer")
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
@@ -99,6 +137,76 @@ def is_loopback_host(host: str) -> bool:
     """
     h = host.strip().lower()
     return h in {"localhost", "::1"} or h.startswith("127.")
+
+
+def _hostname_only(host_header: str) -> str:
+    """Strip an optional `:port` and surrounding brackets from a `Host` header value.
+
+    Returns a lowercased bare hostname. Handles IPv6 literals (`[::1]:8787` -> `::1`), the common
+    `name:port` form, and a bare hostname. An empty/garbage value returns the empty string.
+    """
+    value = host_header.strip().lower()
+    if not value:
+        return ""
+    if value.startswith("["):
+        # Bracketed IPv6 literal, optionally followed by :port.
+        end = value.find("]")
+        if end != -1:
+            return value[1:end]
+        return value[1:]
+    # IPv4 / hostname: a single trailing :port is the only colon we strip.
+    if value.count(":") == 1:
+        return value.split(":", 1)[0]
+    return value
+
+
+def _is_ip_literal(host: str) -> bool:
+    """True when `host` parses as an IPv4 or IPv6 address literal (not a DNS name)."""
+    try:
+        ip_address(host)
+    except ValueError:
+        return False
+    return True
+
+
+def host_header_allowed(host_header: str, bound_host: str) -> bool:
+    """Decide whether a request's `Host` header is acceptable (DNS-rebind defense).
+
+    Always allow the loopback names (`localhost`, `127.0.0.0/8`, `::1`) and the host the server is
+    actually bound to. When bound to a wildcard address (`0.0.0.0` / `::`), additionally allow any
+    `Host` that is an IP literal, since a LAN/Tailscale client legitimately reaches the server by
+    its IP. A foreign DNS name (e.g. a `evil.com` used in a rebinding attack) is rejected because it
+    is neither loopback, the bound host, nor an IP literal.
+
+    An empty `Host` header is allowed: HTTP/1.0 and some health-probe clients omit it, and it cannot
+    carry a rebinding target.
+    """
+    name = _hostname_only(host_header)
+    if not name:
+        return True
+    if is_loopback_host(name):
+        return True
+    bound = bound_host.strip().lower()
+    if name == bound:
+        return True
+    # A wildcard bind has no single canonical hostname; accept any IP literal so LAN clients that
+    # connect by address work, while still rejecting arbitrary DNS names.
+    if bound in {"0.0.0.0", "::", ""} and _is_ip_literal(name):
+        return True
+    return False
+
+
+def requires_token(client_host: str, access_token: str | None) -> bool:
+    """True when a request from `client_host` must carry the access token.
+
+    Enforcement only applies when an `access_token` is configured (network mode). Loopback clients
+    are always exempt: the owner on the same machine never needs the token. Any non-loopback client
+    must present it. This is factored out as a pure function so the policy is unit-testable without
+    standing up a server or simulating a remote socket.
+    """
+    if not access_token:
+        return False
+    return not is_loopback_host(client_host)
 
 
 def is_safe_http_url(url: str) -> bool:
@@ -142,6 +250,8 @@ def build_app(
     max_results: int = 10,
     timeout_seconds: float = 5.0,
     metasearch: _MetasearchFn = aggregate,
+    access_token: str | None = None,
+    host_allowlist_enabled: bool = True,
 ) -> Starlette:
     """Build the Starlette application that serves the SearchMob HTTP routes.
 
@@ -155,6 +265,11 @@ def build_app(
     `suggestions_provider`, when provided, supplies up to `max_suggestions` strings for the
     `/suggest` endpoint. The default (`None`) wires the `NoSuggestionsProvider`-equivalent so the
     route returns `["<echoed>", []]`. Phase 3+4 will plug in history and upstream sources.
+
+    `access_token`, when set, gates the query routes for non-loopback clients (network mode); the
+    same token is baked into the OpenSearch descriptor so a browser configured off-loopback works.
+    `None`/empty means loopback-only (no enforcement). `host_allowlist_enabled` defaults to True;
+    set it False in tests that need to drive arbitrary `Host` headers through the app.
     """
     provider: SuggestionsProvider = (
         suggestions_provider if suggestions_provider is not None else _no_suggestions
@@ -215,7 +330,7 @@ def build_app(
         return JSONResponse(payload)
 
     async def opensearch_xml(_request: Request) -> Response:
-        body = build_descriptor(bound_host_getter(), bound_port_getter())
+        body = build_descriptor(bound_host_getter(), bound_port_getter(), token=access_token)
         return Response(body, media_type=_OPENSEARCH_CONTENT_TYPE)
 
     async def suggest(request: Request) -> Response:
@@ -242,4 +357,12 @@ def build_app(
         Route("/opensearch.xml", opensearch_xml, methods=["GET"]),
         Route("/suggest", suggest, methods=["GET"]),
     ]
-    return Starlette(routes=routes, middleware=[Middleware(_SecurityHeadersMiddleware)])
+    middleware = [
+        Middleware(
+            _SecurityHeadersMiddleware,
+            bound_host_getter=bound_host_getter,
+            access_token=access_token,
+            host_allowlist_enabled=host_allowlist_enabled,
+        )
+    ]
+    return Starlette(routes=routes, middleware=middleware)

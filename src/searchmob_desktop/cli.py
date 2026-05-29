@@ -198,6 +198,10 @@ def serve(
         history_terms=lambda: [e.query for e in history_store.recent(500)]
     )
 
+    # In network mode (non-loopback bind), gate the query routes with the persisted access token so
+    # only clients that know it can run searches. Loopback binds never enforce, so pass None there.
+    access_token = None if is_loopback_host(host) else (prefs.network_access_token or None)
+
     _serve_local_server(
         _build_engines(),
         host=host,
@@ -207,6 +211,7 @@ def serve(
         ranking_rules=load_ranking_rules(),
         max_results=max_results,
         timeout_seconds=timeout,
+        access_token=access_token,
     )
 
 
