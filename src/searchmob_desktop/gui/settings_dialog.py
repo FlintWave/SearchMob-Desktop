@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
     QFileDialog,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -868,11 +869,86 @@ class SettingsDialog(QDialog):
         btn.clicked.connect(self._open_browser_setup)
         layout.addWidget(btn)
 
+        layout.addWidget(self._build_service_section())
+
         about_btn = QPushButton("About and privacy")
         about_btn.clicked.connect(self._open_about)
         layout.addWidget(about_btn)
         layout.addStretch(1)
         return tab
+
+    def _build_service_section(self) -> QWidget:
+        """Controls to run the local server as a background service (Linux systemd user unit)."""
+        from searchmob_desktop import service
+
+        box = QFrame()
+        box.setFrameShape(QFrame.Shape.StyledPanel)
+        col = QVBoxLayout(box)
+
+        header = QLabel("Run in the background")
+        header_font = header.font()
+        header_font.setBold(True)
+        header.setFont(header_font)
+        col.addWidget(header)
+
+        desc = QLabel(
+            "Optionally run the local search server as a background service so your browser can "
+            "use SearchMob even when the app window is closed. The app still opens normally."
+        )
+        desc.setWordWrap(True)
+        desc.setProperty("role", "muted")
+        col.addWidget(desc)
+
+        self._service_status_label = QLabel()
+        self._service_status_label.setWordWrap(True)
+        self._service_status_label.setProperty("role", "muted")
+        col.addWidget(self._service_status_label)
+
+        row = QHBoxLayout()
+        self._service_install_btn = QPushButton("Install and start")
+        self._service_install_btn.clicked.connect(self._install_service)
+        self._service_remove_btn = QPushButton("Stop and remove")
+        self._service_remove_btn.clicked.connect(self._remove_service)
+        row.addWidget(self._service_install_btn)
+        row.addWidget(self._service_remove_btn)
+        row.addStretch(1)
+        col.addLayout(row)
+
+        supported = service.is_supported()
+        if not supported:
+            self._service_install_btn.setEnabled(False)
+            self._service_remove_btn.setEnabled(False)
+        self._refresh_service_status()
+        return box
+
+    def _refresh_service_status(self) -> None:
+        from searchmob_desktop import service
+
+        state = service.status()
+        self._service_status_label.setText(state.summary())
+        if state.supported:
+            self._service_install_btn.setText(
+                "Reinstall" if state.installed else "Install and start"
+            )
+            self._service_remove_btn.setEnabled(state.installed)
+
+    def _install_service(self) -> None:
+        from searchmob_desktop import service
+
+        # Match the service bind to the current network setting so it acts like the in-app server.
+        host = "0.0.0.0" if self._prefs.network_access_enabled else "127.0.0.1"
+        ok, message = service.install_and_enable(host=host)
+        if not ok:
+            QMessageBox.warning(self, "Could not install the service", message)
+        self._refresh_service_status()
+
+    def _remove_service(self) -> None:
+        from searchmob_desktop import service
+
+        ok, message = service.disable_and_remove()
+        if not ok:
+            QMessageBox.warning(self, "Could not remove the service", message)
+        self._refresh_service_status()
 
     def _open_browser_setup(self) -> None:
         from searchmob_desktop.gui.browser_setup_dialog import choose_setup_host

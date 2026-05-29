@@ -5,7 +5,13 @@ All notable changes to SearchMob Desktop are documented here. The version scheme
 
 ## Unreleased
 
-### Added
+- **Run SearchMob as a background service (Linux, macOS, Windows).** Settings -> Device setup ->
+  "Run in the background" installs a per-user service that runs the local search server headless, so
+  the browser can use SearchMob even when the app window is closed: a systemd user unit on Linux, a
+  launchd LaunchAgent on macOS, and a logon Scheduled Task on Windows (no admin rights needed).
+  Install / reinstall / stop-and-remove from the UI; the service binds the same address as the
+  in-app server (loopback, or the network address when network mode is on). The app still opens the
+  GUI on a normal launch; this is opt-in.
 - **Personalization controls in the browser (served UI).** The results page the browser sees now
   has the same scope/ranking tools as the app: per-result **Block / Lower / Raise / Pin** by domain
   and a **scope (lens) selector**. Edits persist to the encrypted vault and apply on the next search
