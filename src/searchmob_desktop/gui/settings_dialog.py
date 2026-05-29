@@ -37,6 +37,7 @@ from searchmob_desktop.data import (
     StorageBootstrap,
     WrapMode,
 )
+from searchmob_desktop.data.api_keys import BRAVE_KEY, KAGI_KEY, MOJEEK_KEY
 from searchmob_desktop.data.crypto.keyring_kek import KeyringKekStore
 from searchmob_desktop.data.crypto.wrap import KeyringDekWrapper
 from searchmob_desktop.engines import make_privacy_client
@@ -58,9 +59,11 @@ NETWORK_WARNING = (
     "on the network can run searches through it."
 )
 
-# Encrypted prefs keys for the two BYO API keys. Kept short so the on-disk blob stays small.
-_BRAVE_KEY = "brave_api_key"
-_MOJEEK_KEY = "mojeek_api_key"
+# Encrypted prefs keys for the BYO API keys come from `data.api_keys` so the write side here and
+# the read side in the engine builders never drift. Local aliases keep the call sites terse.
+_BRAVE_KEY = BRAVE_KEY
+_MOJEEK_KEY = MOJEEK_KEY
+_KAGI_KEY = KAGI_KEY
 
 
 def _vault_prefs_path(metadata_store: BootstrapMetadataStore) -> Path:
@@ -235,9 +238,25 @@ class SettingsDialog(QDialog):
         mojeek_row.addStretch(1)
         layout.addLayout(mojeek_row)
 
+        self._kagi_status = QLabel(self._key_status_text("Kagi", _KAGI_KEY))
+        self._kagi_input = QLineEdit()
+        self._kagi_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self._kagi_input.setPlaceholderText("Kagi API key (from kagi.com/settings/api)")
+        layout.addWidget(self._kagi_status)
+        layout.addWidget(self._kagi_input)
+        kagi_row = QHBoxLayout()
+        kagi_save = QPushButton("Save Kagi key")
+        kagi_clear = QPushButton("Clear Kagi key")
+        kagi_save.clicked.connect(lambda: self._save_api_key(_KAGI_KEY, self._kagi_input))
+        kagi_clear.clicked.connect(lambda: self._clear_api_key(_KAGI_KEY, self._kagi_input))
+        kagi_row.addWidget(kagi_save)
+        kagi_row.addWidget(kagi_clear)
+        kagi_row.addStretch(1)
+        layout.addLayout(kagi_row)
+
         note = QLabel(
-            "The CLI also reads SEARCHMOB_BRAVE_API_KEY and SEARCHMOB_MOJEEK_API_KEY from the "
-            "environment. Either source is fine."
+            "The CLI also reads SEARCHMOB_BRAVE_API_KEY, SEARCHMOB_MOJEEK_API_KEY, and "
+            "SEARCHMOB_KAGI_API_KEY from the environment. Either source is fine."
         )
         note.setWordWrap(True)
         note.setProperty("role", "muted")
