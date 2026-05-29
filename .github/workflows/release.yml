@@ -103,19 +103,18 @@ jobs:
           set -euo pipefail
           mkdir -p dist
           # Flatten the matrix output (one subdir per matrix label) into dist/.
-          find artifacts -type f \( -name '*.deb' -o -name '*.dmg' -o -name '*.msi' \) \
+          find artifacts -type f \( -name '*.dmg' -o -name '*.msi' \) \
             -exec cp -v {} dist/ \;
           ( cd dist && sha256sum -- * > SHA256SUMS )
           echo "Published artifacts:"
           cat dist/SHA256SUMS
 
       # Upload to the GitHub Release. fail_on_unmatched_files = true so a missing platform asset
-      # surfaces as a workflow failure (we want all three or none).
+      # surfaces as a workflow failure (we want both the macOS and Windows installers, or none).
       - name: Publish installers + SHA256SUMS to the GitHub Release
         uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3.0.0
         with:
           files: |
-            dist/*.deb
             dist/*.dmg
             dist/*.msi
             dist/SHA256SUMS
