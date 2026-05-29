@@ -17,11 +17,15 @@ from PySide6.QtCore import QThreadPool, Signal
 from PySide6.QtWidgets import (
     QButtonGroup,
     QCheckBox,
+    QComboBox,
     QDialog,
+    QFileDialog,
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QListWidget,
     QMessageBox,
+    QPlainTextEdit,
     QPushButton,
     QRadioButton,
     QTabWidget,
@@ -40,7 +44,13 @@ from searchmob_desktop.data import (
 from searchmob_desktop.data.api_keys import BRAVE_KEY, KAGI_KEY, MOJEEK_KEY
 from searchmob_desktop.data.crypto.keyring_kek import KeyringKekStore
 from searchmob_desktop.data.crypto.wrap import KeyringDekWrapper
+from searchmob_desktop.data.ranking_store import load_ranking_rules, save_ranking_rules
 from searchmob_desktop.engines import make_privacy_client
+from searchmob_desktop.engines.rank import (
+    DEFAULT_SAMPLE_LENSES,
+    RankingRules,
+    parse_goggles,
+)
 from searchmob_desktop.gui.browser_setup_dialog import BrowserSetupDialog
 from searchmob_desktop.gui.engines_catalog import ENGINE_CATALOG, is_engine_enabled
 from searchmob_desktop.gui.theme import DARK, LIGHT, SYSTEM
@@ -80,6 +90,7 @@ class SettingsDialog(QDialog):
 
     themeChanged = Signal(str)
     historyCleared = Signal()
+    rulesChanged = Signal()
 
     def __init__(
         self,
@@ -100,12 +111,16 @@ class SettingsDialog(QDialog):
         self._pool = QThreadPool.globalInstance()
 
         self._prefs = prefs_store.load()
+        # Working copy of the personalization rules; each edit persists to the vault and emits
+        # `rulesChanged` so the main window re-ranks the current results live.
+        self._ranking = load_ranking_rules()
 
         outer = QVBoxLayout(self)
         self._tabs = QTabWidget(self)
         self._tabs.addTab(self._build_appearance_tab(), "Appearance")
         self._tabs.addTab(self._build_engines_tab(), "Search engines")
         self._tabs.addTab(self._build_keys_tab(), "API keys")
+        self._tabs.addTab(self._build_ranking_tab(), "Result ranking")
         self._tabs.addTab(self._build_history_tab(), "Search history")
         self._tabs.addTab(self._build_suggestions_tab(), "Suggestions")
         self._tabs.addTab(self._build_updates_tab(), "Updates")
@@ -193,6 +208,202 @@ class SettingsDialog(QDialog):
         layout.addWidget(note)
         layout.addStretch(1)
         return tab
+
+    # --- Result ranking ----------------------------------------------------------------------
+
+    def _build_ranking_tab(self) -> QWidget:
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        layout.addWidget(
+            QLabel(
+                "Personalize results locally. Block / lower / raise / pin a domain by "
+                "right-clicking a result; pick a scope to focus results on a set of sites; or "
+                "import goggles (Brave Goggles format). Rules are stored in your encrypted vault "
+                "and applied on this device only."
+            )
+        )
+
+        lens_row = QHBoxLayout()
+        lens_row.addWidget(QLabel("Active scope:"))
+        self._lens_combo = QComboBox()
+        self._lens_combo.currentIndexChanged.connect(self._on_lens_selected)
+        lens_row.addWidget(self._lens_combo, stretch=1)
+        layout.addLayout(lens_row)
+
+        sample_btn = QPushButton("Add the built-in sample scopes")
+        sample_btn.clicked.connect(self._on_add_sample_lenses)
+        layout.addWidget(sample_btn)
+
+        layout.addWidget(QLabel("Domain rules"))
+        self._rules_list = QListWidget()
+        self._rule_domains: list[str] = []
+        layout.addWidget(self._rules_list, stretch=1)
+        rules_btns = QHBoxLayout()
+        remove_btn = QPushButton("Remove selected")
+        remove_btn.clicked.connect(self._on_remove_domain_rule)
+        clear_rules_btn = QPushButton("Clear all domain rules")
+        clear_rules_btn.clicked.connect(self._on_clear_domain_rules)
+        rules_btns.addWidget(remove_btn)
+        rules_btns.addWidget(clear_rules_btn)
+        rules_btns.addStretch(1)
+        layout.addLayout(rules_btns)
+
+        self._goggle_status = QLabel()
+        self._goggle_status.setProperty("role", "muted")
+        layout.addWidget(self._goggle_status)
+        self._goggle_text = QPlainTextEdit()
+        self._goggle_text.setPlaceholderText(
+            "Paste goggle rules, e.g.  $discard,site=example.com  or  $boost,site=dev.to"
+        )
+        self._goggle_text.setFixedHeight(72)
+        layout.addWidget(self._goggle_text)
+        goggle_btns = QHBoxLayout()
+        import_paste_btn = QPushButton("Import pasted goggles")
+        import_paste_btn.clicked.connect(self._on_import_goggles_pasted)
+        import_file_btn = QPushButton("Import goggles file...")
+        import_file_btn.clicked.connect(self._on_import_goggles_file)
+        clear_goggles_btn = QPushButton("Clear goggles")
+        clear_goggles_btn.clicked.connect(self._on_clear_goggles)
+        goggle_btns.addWidget(import_paste_btn)
+        goggle_btns.addWidget(import_file_btn)
+        goggle_btns.addWidget(clear_goggles_btn)
+        goggle_btns.addStretch(1)
+        layout.addLayout(goggle_btns)
+
+        io_row = QHBoxLayout()
+        export_btn = QPushButton("Export rules...")
+        export_btn.clicked.connect(self._on_export_rules)
+        import_btn = QPushButton("Import rules...")
+        import_btn.clicked.connect(self._on_import_rules)
+        io_row.addWidget(export_btn)
+        io_row.addWidget(import_btn)
+        io_row.addStretch(1)
+        layout.addLayout(io_row)
+
+        self._refresh_ranking_widgets()
+        return tab
+
+    def _save_ranking(self, rules: RankingRules) -> None:
+        if not save_ranking_rules(rules):
+            QMessageBox.warning(
+                self,
+                "Could not save ranking rules",
+                "The encrypted vault is unavailable, so the rules could not be saved. Enable "
+                "search history or save an API key first to initialize the vault.",
+            )
+            return
+        self._ranking = rules
+        self.rulesChanged.emit()
+        self._refresh_ranking_widgets()
+
+    def _refresh_ranking_widgets(self) -> None:
+        self._lens_combo.blockSignals(True)
+        self._lens_combo.clear()
+        self._lens_combo.addItem("None")
+        names = [lens.name for lens in self._ranking.lenses]
+        for name in names:
+            self._lens_combo.addItem(name)
+        active = self._ranking.active_lens
+        self._lens_combo.setCurrentIndex(names.index(active) + 1 if active in names else 0)
+        self._lens_combo.blockSignals(False)
+
+        self._rules_list.clear()
+        self._rule_domains = []
+        for domain, rule in sorted(self._ranking.domain_rules.items()):
+            self._rules_list.addItem(f"{domain}  -  {rule.value}")
+            self._rule_domains.append(domain)
+
+        count = len(self._ranking.goggles)
+        self._goggle_status.setText(
+            f"{count} goggle rule{'' if count == 1 else 's'} imported."
+            if count
+            else "No goggles imported."
+        )
+
+    def _on_lens_selected(self, index: int) -> None:
+        name = None if index <= 0 else self._lens_combo.currentText()
+        self._save_ranking(replace(self._ranking, active_lens=name))
+
+    def _on_add_sample_lenses(self) -> None:
+        existing = {lens.name for lens in self._ranking.lenses}
+        new = tuple(lens for lens in DEFAULT_SAMPLE_LENSES if lens.name not in existing)
+        if not new:
+            QMessageBox.information(self, "Sample scopes", "The sample scopes are already added.")
+            return
+        self._save_ranking(replace(self._ranking, lenses=self._ranking.lenses + new))
+        QMessageBox.information(
+            self,
+            "Sample scopes",
+            f"Added {len(new)} sample scope(s). Pick one in 'Active scope' to apply it.",
+        )
+
+    def _on_remove_domain_rule(self) -> None:
+        row = self._rules_list.currentRow()
+        if 0 <= row < len(self._rule_domains):
+            self._save_ranking(self._ranking.without_domain_rule(self._rule_domains[row]))
+
+    def _on_clear_domain_rules(self) -> None:
+        self._save_ranking(replace(self._ranking, domain_rules={}))
+
+    def _on_import_goggles_pasted(self) -> None:
+        self._import_goggles(self._goggle_text.toPlainText())
+        self._goggle_text.clear()
+
+    def _on_import_goggles_file(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Import goggles", "", "Goggle files (*.goggle *.txt);;All files (*)"
+        )
+        if not path:
+            return
+        try:
+            with open(path, encoding="utf-8") as fh:
+                text = fh.read()
+        except OSError as exc:
+            QMessageBox.warning(self, "Import failed", str(exc))
+            return
+        self._import_goggles(text)
+
+    def _import_goggles(self, text: str) -> None:
+        parsed = parse_goggles(text)
+        if not parsed:
+            QMessageBox.information(
+                self, "No goggle rules", "Nothing recognizable to import from that text."
+            )
+            return
+        self._save_ranking(replace(self._ranking, goggles=self._ranking.goggles + tuple(parsed)))
+        QMessageBox.information(self, "Goggles imported", f"Imported {len(parsed)} rule(s).")
+
+    def _on_clear_goggles(self) -> None:
+        self._save_ranking(replace(self._ranking, goggles=()))
+
+    def _on_export_rules(self) -> None:
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Export ranking rules", "searchmob-ranking.json", "JSON files (*.json)"
+        )
+        if not path:
+            return
+        try:
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write(self._ranking.to_json())
+        except OSError as exc:
+            QMessageBox.warning(self, "Export failed", str(exc))
+            return
+        QMessageBox.information(self, "Rules exported", "Your ranking rules were exported.")
+
+    def _on_import_rules(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Import ranking rules", "", "JSON files (*.json);;All files (*)"
+        )
+        if not path:
+            return
+        try:
+            with open(path, encoding="utf-8") as fh:
+                text = fh.read()
+        except OSError as exc:
+            QMessageBox.warning(self, "Import failed", str(exc))
+            return
+        self._save_ranking(RankingRules.from_json(text))
+        QMessageBox.information(self, "Rules imported", "Your ranking rules were imported.")
 
     # --- API keys ----------------------------------------------------------------------------
 

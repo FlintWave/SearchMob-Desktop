@@ -419,7 +419,14 @@ class MainWindow(QMainWindow):
                 # `QApplication.instance()` returns `QCoreApplication`; cast for the type checker.
                 apply_theme(app, theme)  # type: ignore[arg-type]
 
+        def _on_rules_changed() -> None:
+            # The ranking tab edited the vault-stored rules; reload and re-rank current results.
+            self._ranking_rules = load_ranking_rules()
+            if self._raw_results:
+                self._apply_ranking_and_show()
+
         dialog.themeChanged.connect(_on_theme_changed)
+        dialog.rulesChanged.connect(_on_rules_changed)
         dialog.exec()
 
     def _on_open_browser_setup(self) -> None:
