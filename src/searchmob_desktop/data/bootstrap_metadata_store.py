@@ -13,6 +13,7 @@ from pathlib import Path
 from platformdirs import user_data_dir
 
 from searchmob_desktop.data.bootstrap_metadata import BootstrapMetadata
+from searchmob_desktop.fsperms import restrict_dir, restrict_file
 
 FILE_NAME = "searchmob-bootstrap.json"
 APP_NAME = "SearchMob"
@@ -52,7 +53,11 @@ class BootstrapMetadataStore:
 
     def write(self, metadata: BootstrapMetadata) -> None:
         self._path.parent.mkdir(parents=True, exist_ok=True)
+        restrict_dir(self._path.parent)
         self._path.write_text(metadata.to_json(), encoding="utf-8")
+        # The metadata holds only the wrapped DEK + salt + KDF params (no plaintext key), but
+        # owner-only is still the right default for vault material.
+        restrict_file(self._path)
 
     def delete(self) -> None:
         if self._path.exists():

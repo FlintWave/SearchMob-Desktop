@@ -31,6 +31,8 @@ from dataclasses import asdict
 from urllib.parse import urlsplit
 
 from starlette.applications import Starlette
+from starlette.middleware import Middleware
+from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse, PlainTextResponse, Response
 from starlette.routing import Route
@@ -71,6 +73,22 @@ def _no_suggestions(_query: str, _limit: int) -> list[str]:
     Used when no real source is wired (Phase 2 has neither history nor an upstream autocomplete).
     """
     return []
+
+
+class _SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    """Add conservative security headers to every response.
+
+    `Referrer-Policy: no-referrer` is the important one: without it, clicking a result would send
+    the loopback URL (which contains the query) as the Referer to the destination site, leaking the
+    query. The others are defense-in-depth, especially when the server is exposed in network mode.
+    """
+
+    async def dispatch(self, request: Request, call_next):  # type: ignore[no-untyped-def]
+        response = await call_next(request)
+        response.headers.setdefault("Referrer-Policy", "no-referrer")
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("X-Frame-Options", "DENY")
+        return response
 
 
 def is_loopback_host(host: str) -> bool:
@@ -224,4 +242,4 @@ def build_app(
         Route("/opensearch.xml", opensearch_xml, methods=["GET"]),
         Route("/suggest", suggest, methods=["GET"]),
     ]
-    return Starlette(routes=routes)
+    return Starlette(routes=routes, middleware=[Middleware(_SecurityHeadersMiddleware)])

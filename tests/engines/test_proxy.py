@@ -61,3 +61,32 @@ async def test_user_agent_is_from_pool_and_rotates_over_many_requests() -> None:
             seen.add(ua)
     # With 5 UAs and 40 picks, the chance of seeing only one is ~5 * (1/5)**39, vanishing.
     assert len(seen) > 1
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_fetch_bounded_returns_none_when_body_exceeds_cap() -> None:
+    import httpx as _httpx
+
+    from searchmob_desktop.engines.proxy import fetch_bounded
+
+    respx.get("https://example.test/big").mock(
+        return_value=_httpx.Response(200, content=b"x" * 5000)
+    )
+    async with make_privacy_client() as client:
+        # Body (5000 bytes) exceeds the 1000-byte cap -> None (never fully buffered).
+        assert (
+            await fetch_bounded(client, "GET", "https://example.test/big", max_bytes=1000) is None
+        )
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_fetch_bounded_returns_body_within_cap() -> None:
+    import httpx as _httpx
+
+    from searchmob_desktop.engines.proxy import fetch_bounded
+
+    respx.get("https://example.test/ok").mock(return_value=_httpx.Response(200, content=b"hello"))
+    async with make_privacy_client() as client:
+        assert await fetch_bounded(client, "GET", "https://example.test/ok") == b"hello"

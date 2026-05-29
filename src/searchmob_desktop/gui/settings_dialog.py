@@ -8,6 +8,7 @@ vault. The network toggle gate-keeps behind the same warning text the Android di
 
 from __future__ import annotations
 
+import os
 import time
 from dataclasses import replace
 from pathlib import Path
@@ -74,6 +75,10 @@ NETWORK_WARNING = (
 _BRAVE_KEY = BRAVE_KEY
 _MOJEEK_KEY = MOJEEK_KEY
 _KAGI_KEY = KAGI_KEY
+
+# Upper bound on imported goggle / ranking-rules files. These are tiny in practice; the cap stops a
+# multi-GB file (malicious "community goggle" or a mistaken pick) from being read fully into memory.
+_MAX_IMPORT_BYTES = 4 * 1024 * 1024
 
 
 def _vault_prefs_path(metadata_store: BootstrapMetadataStore) -> Path:
@@ -355,11 +360,8 @@ class SettingsDialog(QDialog):
         )
         if not path:
             return
-        try:
-            with open(path, encoding="utf-8") as fh:
-                text = fh.read()
-        except OSError as exc:
-            QMessageBox.warning(self, "Import failed", str(exc))
+        text = self._read_capped_text(path)
+        if text is None:
             return
         self._import_goggles(text)
 
@@ -396,14 +398,25 @@ class SettingsDialog(QDialog):
         )
         if not path:
             return
-        try:
-            with open(path, encoding="utf-8") as fh:
-                text = fh.read()
-        except OSError as exc:
-            QMessageBox.warning(self, "Import failed", str(exc))
+        text = self._read_capped_text(path)
+        if text is None:
             return
         self._save_ranking(RankingRules.from_json(text))
         QMessageBox.information(self, "Rules imported", "Your ranking rules were imported.")
+
+    def _read_capped_text(self, path: str) -> str | None:
+        """Read a small import file, rejecting anything over the size cap. Warns on failure."""
+        try:
+            if os.path.getsize(path) > _MAX_IMPORT_BYTES:
+                QMessageBox.warning(
+                    self, "File too large", "That file is too large to import (limit 4 MiB)."
+                )
+                return None
+            with open(path, encoding="utf-8") as fh:
+                return fh.read(_MAX_IMPORT_BYTES + 1)
+        except OSError as exc:
+            QMessageBox.warning(self, "Import failed", str(exc))
+            return None
 
     # --- API keys ----------------------------------------------------------------------------
 

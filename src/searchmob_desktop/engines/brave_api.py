@@ -13,11 +13,13 @@ Fail-soft: any HTTP error (including 401 on a bad key), timeout, or parse failur
 
 from __future__ import annotations
 
+import json
 from typing import Any
 from urllib.parse import urlencode
 
 import httpx
 
+from searchmob_desktop.engines.proxy import fetch_bounded
 from searchmob_desktop.engines.types import EngineContext, SearchResult
 
 _ENGINE_ID = "brave"
@@ -35,9 +37,12 @@ async def fetch_brave_api(
     params = {"q": ctx.query, "count": str(ctx.max_results)}
     headers = {"Accept": "application/json", "X-Subscription-Token": api_key}
     try:
-        response = await client.get(f"{_ENDPOINT}?{urlencode(params)}", headers=headers)
-        response.raise_for_status()
-        payload: Any = response.json()
+        body = await fetch_bounded(
+            client, "GET", f"{_ENDPOINT}?{urlencode(params)}", headers=headers
+        )
+        if body is None:
+            return []
+        payload: Any = json.loads(body)
     except (httpx.HTTPError, ValueError):
         return []
     except Exception:

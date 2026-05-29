@@ -9,11 +9,13 @@ Fail-soft: any HTTP error, timeout, JSON decode failure, or unexpected shape ret
 
 from __future__ import annotations
 
+import json
 from typing import Any
 from urllib.parse import quote
 
 import httpx
 
+from searchmob_desktop.engines.proxy import fetch_bounded
 from searchmob_desktop.engines.types import EngineContext, SearchResult
 
 _ENGINE_ID = "marginalia"
@@ -23,9 +25,10 @@ _ENDPOINT = "https://api.marginalia-search.com/public/search"
 async def fetch_marginalia(client: httpx.AsyncClient, ctx: EngineContext) -> list[SearchResult]:
     """Fetch Marginalia JSON results. Returns `[]` on any failure."""
     try:
-        response = await client.get(f"{_ENDPOINT}/{quote(ctx.query, safe='')}")
-        response.raise_for_status()
-        payload: Any = response.json()
+        body = await fetch_bounded(client, "GET", f"{_ENDPOINT}/{quote(ctx.query, safe='')}")
+        if body is None:
+            return []
+        payload: Any = json.loads(body)
     except (httpx.HTTPError, ValueError):
         return []
     except Exception:

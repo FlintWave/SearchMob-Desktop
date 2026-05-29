@@ -20,11 +20,13 @@ Fail-soft: any HTTP error, timeout, JSON decode failure, or unexpected shape ret
 
 from __future__ import annotations
 
+import json
 from typing import Any
 from urllib.parse import urlencode
 
 import httpx
 
+from searchmob_desktop.engines.proxy import fetch_bounded
 from searchmob_desktop.engines.types import EngineContext, SearchResult
 
 _ENGINE_ID = "mojeek-api"
@@ -41,9 +43,10 @@ async def fetch_mojeek_api(
         return []
     params = {"q": ctx.query, "api_key": api_key, "fmt": "json", "t": str(ctx.max_results)}
     try:
-        response = await client.get(f"{_ENDPOINT}?{urlencode(params)}")
-        response.raise_for_status()
-        payload: Any = response.json()
+        body = await fetch_bounded(client, "GET", f"{_ENDPOINT}?{urlencode(params)}")
+        if body is None:
+            return []
+        payload: Any = json.loads(body)
     except (httpx.HTTPError, ValueError):
         return []
     except Exception:

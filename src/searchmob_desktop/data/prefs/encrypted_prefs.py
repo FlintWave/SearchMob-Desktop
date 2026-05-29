@@ -19,6 +19,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from searchmob_desktop.data.crypto.aes_gcm import decrypt, encrypt
+from searchmob_desktop.fsperms import restrict_dir, restrict_file
 
 
 class EncryptedPreferences:
@@ -65,7 +66,9 @@ class EncryptedPreferences:
 
     def write(self, values: dict[str, str]) -> None:
         self._path.parent.mkdir(parents=True, exist_ok=True)
+        restrict_dir(self._path.parent)
         self._path.write_bytes(self.encode(values))
+        restrict_file(self._path)
 
     def get(self, key: str) -> str | None:
         return self.read().get(key)

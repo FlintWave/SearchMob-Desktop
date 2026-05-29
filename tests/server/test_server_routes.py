@@ -362,3 +362,18 @@ def test_is_loopback_host_classifies_addresses() -> None:
     assert not is_loopback_host("0.0.0.0")
     assert not is_loopback_host("192.168.1.10")
     assert not is_loopback_host("::")
+
+
+def test_security_headers_present_on_responses() -> None:
+    with _build_client() as client:
+        r = client.get("/healthz")
+    assert r.headers.get("Referrer-Policy") == "no-referrer"
+    assert r.headers.get("X-Content-Type-Options") == "nosniff"
+    assert r.headers.get("X-Frame-Options") == "DENY"
+
+
+def test_result_anchors_carry_noreferrer() -> None:
+    with _build_client(engines=[_engine_alpha]) as client:
+        body = client.get("/search", params={"q": "x"}).text
+    # External result links must not leak the query via Referer.
+    assert 'rel="noopener noreferrer"' in body

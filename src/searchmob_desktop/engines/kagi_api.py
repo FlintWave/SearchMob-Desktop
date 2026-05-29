@@ -14,10 +14,12 @@ Fail-soft: any HTTP error (including 401 on a bad key), timeout, or parse failur
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 import httpx
 
+from searchmob_desktop.engines.proxy import fetch_bounded
 from searchmob_desktop.engines.types import EngineContext, SearchResult
 
 _ENGINE_ID = "kagi-api"
@@ -34,9 +36,12 @@ async def fetch_kagi_api(
         return []
     headers = {"Accept": "application/json", "Authorization": f"Bearer {api_key}"}
     try:
-        response = await client.post(_ENDPOINT, headers=headers, json={"query": ctx.query})
-        response.raise_for_status()
-        payload: Any = response.json()
+        body = await fetch_bounded(
+            client, "POST", _ENDPOINT, headers=headers, json={"query": ctx.query}
+        )
+        if body is None:
+            return []
+        payload: Any = json.loads(body)
     except (httpx.HTTPError, ValueError):
         return []
     except Exception:

@@ -33,6 +33,10 @@ if TYPE_CHECKING:
 
 _ENTRY_ROLE = Qt.ItemDataRole.UserRole + 1
 
+# Upper bound on an imported history JSON file (history is small; this stops a memory-exhaustion
+# import). 16 MiB comfortably holds years of queries.
+_MAX_IMPORT_BYTES = 16 * 1024 * 1024
+
 
 def _format_timestamp(timestamp_ms: int) -> str:
     """Human-readable local time for a stored entry, fail-soft to the raw value."""
@@ -179,9 +183,19 @@ class HistoryDialog(QDialog):
 
     def _parse_import_file(self, path: str) -> list[HistoryEntry] | None:
         """Parse the export JSON into entries. Returns `None` (after warning) on a bad file."""
+        import os
+
         from searchmob_desktop.data.history import HistoryEntry
 
         try:
+            # Cap the file size so a huge/malicious import can't exhaust memory.
+            if os.path.getsize(path) > _MAX_IMPORT_BYTES:
+                QMessageBox.warning(
+                    self,
+                    "File too large",
+                    "That history file is too large to import (limit 16 MiB).",
+                )
+                return None
             with open(path, encoding="utf-8") as fh:
                 raw = json.load(fh)
         except (OSError, json.JSONDecodeError) as exc:
