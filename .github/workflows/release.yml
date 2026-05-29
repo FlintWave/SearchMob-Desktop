@@ -129,6 +129,13 @@ jobs:
           find artifacts -type f \
             \( -name '*.dmg' -o -name '*.msi' -o -name '*.deb' -o -name '*.rpm' -o -name '*.flatpak' \) \
             -exec cp -v {} dist/ \;
+          # GitHub sanitizes characters outside [A-Za-z0-9._-] (spaces, '~', ...) to '.' in release
+          # asset names. Rename the staged files the same way BEFORE hashing so the names recorded
+          # in SHA256SUMS match the published asset names and `sha256sum -c` works for downloaders.
+          ( cd dist && for f in *; do
+              s=$(printf '%s' "$f" | sed 's/[^A-Za-z0-9._-]/./g')
+              if [ "$f" != "$s" ]; then mv -- "$f" "$s"; fi
+            done )
           # Require the four confident installers; the Flatpak leg is experimental and may be absent.
           for ext in dmg msi deb rpm; do
             if ! ls dist/*."$ext" >/dev/null 2>&1; then
