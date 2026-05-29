@@ -16,6 +16,7 @@ from collections.abc import Sequence
 import uvicorn
 
 from searchmob_desktop.engines import EngineFn
+from searchmob_desktop.engines.correct import SpellCorrector
 from searchmob_desktop.engines.rank import RankingRules
 from searchmob_desktop.server.app import (
     DEFAULT_PORT,
@@ -33,6 +34,7 @@ def serve(
     host: str = LOOPBACK_HOST,
     port: int = DEFAULT_PORT,
     suggestions_provider: SuggestionsProvider | None = None,
+    corrector: SpellCorrector | None = None,
     ranking_rules: RankingRules | None = None,
     max_query_length: int = MAX_QUERY_LENGTH,
     max_suggestions: int = MAX_SUGGESTIONS,
@@ -50,6 +52,7 @@ def serve(
         bound_port_getter=lambda: port,
         bound_host_getter=lambda: host,
         suggestions_provider=suggestions_provider,
+        corrector=corrector,
         ranking_rules=ranking_rules,
         max_query_length=max_query_length,
         max_suggestions=max_suggestions,

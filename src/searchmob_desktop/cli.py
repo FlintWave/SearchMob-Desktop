@@ -8,11 +8,9 @@ from __future__ import annotations
 
 import asyncio
 import getpass
-import os
 import threading
 import time
 
-import httpx
 import typer
 from rich.console import Console
 from rich.table import Table
@@ -23,6 +21,7 @@ from searchmob_desktop.data import (
     StorageBootstrap,
     WrapMode,
 )
+from searchmob_desktop.data.api_keys import read_vault_api_keys, resolve_api_key
 from searchmob_desktop.data.crypto.keyring_kek import KeyringKekStore
 from searchmob_desktop.data.crypto.wrap import KeyringDekWrapper
 from searchmob_desktop.data.history import InMemoryHistoryStore
@@ -30,16 +29,18 @@ from searchmob_desktop.data.ranking_store import load_ranking_rules
 from searchmob_desktop.engines import (
     EngineContext,
     EngineFn,
-    SearchResult,
     aggregate,
+    bind_api_key,
     fetch_brave_api,
     fetch_duckduckgo,
+    fetch_kagi_api,
     fetch_marginalia,
     fetch_mojeek,
     fetch_mojeek_api,
     fetch_mwmbl,
     fetch_wikipedia,
 )
+from searchmob_desktop.engines.correct import start_background_corrector
 from searchmob_desktop.engines.proxy import make_privacy_client
 from searchmob_desktop.prefs import JsonPreferencesStore
 from searchmob_desktop.server import serve as _serve_local_server
@@ -65,11 +66,6 @@ app = typer.Typer(
 )
 console = Console()
 
-# Env vars the CLI reads to enable the two BYO-key engines. Absent var means the engine is opt-in
-# off and is not appended to the engine list, so no HTTP request goes out to that upstream at all.
-_BRAVE_KEY_ENV = "SEARCHMOB_BRAVE_API_KEY"
-_MOJEEK_KEY_ENV = "SEARCHMOB_MOJEEK_API_KEY"
-
 
 def _version_callback(value: bool) -> None:
     if value:
@@ -91,12 +87,16 @@ def _root(
 
 
 def _build_engines() -> list[EngineFn]:
-    """Assemble the engine list: free engines always, BYO-key engines only when a key is set.
+    """Assemble the engine list: free engines always, BYO-key engines only when a key is resolved.
 
-    When `SEARCHMOB_MOJEEK_API_KEY` is present we still keep the free Mojeek HTML adapter in the
-    list. Dedup-by-URL in the aggregator already merges identical hits across the two, and the API
-    surface returns more results when its key is good, so running both is a no-op when the key is
-    valid and a useful fallback when the key has expired.
+    Each BYO key is resolved from the encrypted vault first (so a key saved in the GUI works on the
+    CLI too) and then from the matching environment variable. With no key the engine is silently
+    skipped, so no HTTP request goes out to that upstream at all.
+
+    When the Mojeek API key is present we still keep the free Mojeek HTML adapter in the list.
+    Dedup-by-URL in the aggregator already merges identical hits across the two, and the API surface
+    returns more results when its key is good, so running both is a no-op when the key is valid and
+    a useful fallback when the key has expired.
     """
     engines: list[EngineFn] = [
         fetch_duckduckgo,
@@ -105,20 +105,16 @@ def _build_engines() -> list[EngineFn]:
         fetch_marginalia,
         fetch_mwmbl,
     ]
-    brave_key = os.environ.get(_BRAVE_KEY_ENV)
-    if brave_key:
-
-        async def _brave(client: httpx.AsyncClient, ctx: EngineContext) -> list[SearchResult]:
-            return await fetch_brave_api(client, ctx, api_key=brave_key)
-
-        engines.append(_brave)
-    mojeek_key = os.environ.get(_MOJEEK_KEY_ENV)
-    if mojeek_key:
-
-        async def _mojeek_api(client: httpx.AsyncClient, ctx: EngineContext) -> list[SearchResult]:
-            return await fetch_mojeek_api(client, ctx, api_key=mojeek_key)
-
-        engines.append(_mojeek_api)
+    vault_keys = read_vault_api_keys()
+    keyed = (
+        ("brave", fetch_brave_api),
+        ("mojeek-api", fetch_mojeek_api),
+        ("kagi-api", fetch_kagi_api),
+    )
+    for engine_id, fetch in keyed:
+        key = resolve_api_key(engine_id, vault_keys)
+        if key:
+            engines.append(bind_api_key(fetch, key))
     return engines
 
 
@@ -191,11 +187,19 @@ def serve(
 
     _run_update_check_in_background(prefs_store)
 
+    # On-device "did you mean" for the browser results page. The dictionary loads off-thread, so
+    # an early search before it is ready simply shows no suggestion. History terms feed the
+    # vocabulary so corrections improve for queries the user actually runs.
+    corrector = start_background_corrector(
+        history_terms=lambda: [e.query for e in history_store.recent(500)]
+    )
+
     _serve_local_server(
         _build_engines(),
         host=host,
         port=port,
         suggestions_provider=composite,
+        corrector=corrector,
         ranking_rules=load_ranking_rules(),
         max_results=max_results,
         timeout_seconds=timeout,
