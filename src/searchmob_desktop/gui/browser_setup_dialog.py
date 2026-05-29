@@ -8,14 +8,14 @@ open while the rest of the GUI runs.
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, QUrl
+from PySide6.QtCore import QEasingCurve, QPropertyAnimation, Qt, QUrl
 from PySide6.QtGui import QClipboard, QDesktopServices, QGuiApplication
 from PySide6.QtWidgets import (
     QDialog,
     QFrame,
+    QGraphicsOpacityEffect,
     QHBoxLayout,
     QLabel,
-    QMessageBox,
     QPushButton,
     QScrollArea,
     QVBoxLayout,
@@ -187,7 +187,9 @@ class BrowserSetupDialog(QDialog):
         text_col.addWidget(url_widget)
         row.addLayout(text_col, stretch=1)
         copy_btn = QPushButton("Copy")
-        copy_btn.clicked.connect(lambda checked=False, value=url: self._copy(value))
+        copy_btn.clicked.connect(
+            lambda checked=False, value=url, field=url_widget: self._copy(value, field)
+        )
         row.addWidget(copy_btn)
         layout.addWidget(card)
 
@@ -207,10 +209,53 @@ class BrowserSetupDialog(QDialog):
             body.addWidget(step_widget)
         layout.addWidget(card)
 
-    def _copy(self, value: str) -> None:
+    def _copy(self, value: str, field: QLabel) -> None:
         clipboard: QClipboard | None = QGuiApplication.clipboard()
         if clipboard is not None:
             clipboard.setText(value)
-        # Brief toast-like confirmation; QMessageBox.information is the lowest-friction option
-        # without dragging in a custom non-modal snackbar.
-        QMessageBox.information(self, "Copied", "Copied to clipboard.")
+        # No modal: confirm inline by flashing a green outline on the field and floating a
+        # checkmark over it that fades out. Far less interruptive than a dialog.
+        self._flash_copied(field)
+
+    # Success green that reads well on both the light and dark palettes.
+    _COPIED_GREEN = "#2fae66"
+
+    def _flash_copied(self, field: QLabel) -> None:
+        """Briefly outline `field` in green and fade a checkmark over it, then restore."""
+        base_style = field.styleSheet()
+        field.setStyleSheet(
+            f"{base_style}\nborder: 2px solid {self._COPIED_GREEN}; border-radius: 6px;"
+        )
+
+        # The checkmark is parented to the field so it positions in field coordinates; it must
+        # not eat clicks meant for the selectable URL text underneath.
+        badge = QLabel("✓", field)  # ✓
+        badge.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        badge.setStyleSheet(
+            f"color: {self._COPIED_GREEN}; font-size: 22px; font-weight: bold; "
+            "background: transparent; border: none;"
+        )
+        badge.adjustSize()
+        badge.move(
+            max(0, field.width() - badge.width() - 8),
+            max(0, (field.height() - badge.height()) // 2),
+        )
+        badge.show()
+        badge.raise_()
+
+        effect = QGraphicsOpacityEffect(badge)
+        badge.setGraphicsEffect(effect)
+        # Parenting the animation to the badge keeps it alive for the run without a self ref;
+        # both are torn down together when the fade finishes.
+        anim = QPropertyAnimation(effect, b"opacity", badge)
+        anim.setDuration(900)
+        anim.setStartValue(1.0)
+        anim.setEndValue(0.0)
+        anim.setEasingCurve(QEasingCurve.Type.InCubic)
+        anim.finished.connect(lambda: self._end_flash(field, base_style, badge))
+        anim.start()
+
+    @staticmethod
+    def _end_flash(field: QLabel, base_style: str, badge: QLabel) -> None:
+        field.setStyleSheet(base_style)
+        badge.deleteLater()
