@@ -23,17 +23,22 @@ from PySide6.QtWidgets import (
 )
 
 
-def _setup_urls(host: str, port: int) -> tuple[str, str, str]:
+def _setup_urls(host: str, port: int, token: str | None = None) -> tuple[str, str, str]:
     """Return `(visit_url, search_template, suggestion_template)` for a bound `(host, port)`.
 
     Mirrors the Android `SetupUrls`; the `{searchTerms}` placeholder is what every modern browser
     expects, and matches what the OpenSearch descriptor advertises.
+
+    When `token` is set (network mode), it is appended as `&token=<token>` to the search and
+    suggestion templates so a browser configured off-loopback is not rejected with 403. The visit
+    URL stays token-free (the `/` route is open). Loopback setups pass `token=None` for clean URLs.
     """
     origin = f"http://{host}:{port}"
+    suffix = f"&token={token}" if token else ""
     return (
         f"{origin}/",
-        f"{origin}/search?q={{searchTerms}}",
-        f"{origin}/suggest?q={{searchTerms}}",
+        f"{origin}/search?q={{searchTerms}}{suffix}",
+        f"{origin}/suggest?q={{searchTerms}}{suffix}",
     )
 
 
@@ -45,6 +50,7 @@ class BrowserSetupDialog(QDialog):
         host: str,
         port: int | None,
         parent: QWidget | None = None,
+        token: str | None = None,
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle("Browser setup")
@@ -61,7 +67,7 @@ class BrowserSetupDialog(QDialog):
         if port is None:
             self._render_not_running(layout)
         else:
-            visit, search_template, suggest_template = _setup_urls(host, port)
+            visit, search_template, suggest_template = _setup_urls(host, port, token)
             intro = QLabel(
                 "Make SearchMob your browser's default search engine. Open the page below "
                 "once, then add SearchMob from your browser's search settings. When the "

@@ -99,6 +99,7 @@ class _UvicornWorker(QThread):
         port: int,
         prefs_store: JsonPreferencesStore,
         history_store: HistoryStore,
+        access_token: str | None = None,
     ) -> None:
         super().__init__()
         self._engines = engines
@@ -106,6 +107,7 @@ class _UvicornWorker(QThread):
         self._port = port
         self._prefs_store = prefs_store
         self._history_store = history_store
+        self._access_token = access_token
         self._server: object | None = None  # uvicorn.Server, deferred import
         self._ready = threading.Event()
 
@@ -141,6 +143,7 @@ class _UvicornWorker(QThread):
             suggestions_provider=composite,
             corrector=corrector,
             ranking_rules=load_ranking_rules(),
+            access_token=self._access_token,
         )
         config = uvicorn.Config(
             app,
@@ -227,12 +230,18 @@ class LocalServerController(QObject):
         # CLI's current behavior.
         self._history_store.set_enabled(prefs.history_enabled)
         engines = build_engines_from_prefs(prefs)
+        # In network mode (non-loopback bind), gate the query routes with the persisted token so
+        # other devices on the network must know it; loopback binds never enforce (token = None).
+        access_token = (
+            None if is_loopback_host(self._host) else (prefs.network_access_token or None)
+        )
         worker = _UvicornWorker(
             engines=engines,
             host=self._host,
             port=self._port,
             prefs_store=self._prefs_store,
             history_store=self._history_store,
+            access_token=access_token,
         )
         worker.started_ok.connect(self.serverStarted)
         worker.failed.connect(self.serverError)

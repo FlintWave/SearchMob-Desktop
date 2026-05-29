@@ -1,0 +1,63 @@
+# SearchMob Desktop — pinned runtime constraints for reproducible builds.
+#
+# This is a hash-free pip constraints file. It pins the project's RUNTIME dependencies (the
+# [project].dependencies array in pyproject.toml) and their transitive closure to the exact
+# versions that were verified working, so an install resolves the same set every time.
+#
+# It is used as a CONSTRAINTS file (`pip install -c requirements.lock ...`), not a requirements
+# file: it does not by itself install anything. `pip` only applies a pin here to a package that
+# some other requirement (pyproject's `>=` ranges) already pulls in. That keeps it additive — it
+# cannot drag in a package nothing asked for, and the `>=` floors in pyproject still hold.
+#
+# The dev / gui / storage extras and build-only tools (pytest, ruff, mypy, PySide6,
+# sqlcipher3-binary, briefcase) are intentionally NOT pinned here so this file stays focused on
+# the shipping runtime surface and does not couple CI to a tooling version.
+#
+# Regenerate after a dependency bump:
+#   1. Create a clean venv and `pip install -e .`   (runtime deps only, no extras).
+#   2. `pip freeze` and copy the resulting versions for the packages listed below.
+#   (If pip-tools is available, `pip-compile --no-emit-index-url -o requirements.lock pyproject.toml`
+#    produces an equivalent file; this curated form is the fallback when pip-compile is absent.)
+
+# --- Direct runtime dependencies (pyproject [project].dependencies) ---
+argon2-cffi==25.1.0
+beautifulsoup4==4.14.3
+cryptography==48.0.0
+httpx==0.28.1
+keyring==25.7.0
+platformdirs==4.10.0
+rich==15.0.0
+starlette==1.1.0
+typer==0.26.2
+uvicorn==0.48.0
+
+# --- Transitive dependencies (closure of the above) ---
+anyio==4.13.0
+argon2-cffi-bindings==25.1.0
+certifi==2026.5.20
+cffi==2.0.0
+click==8.4.1
+h11==0.16.0
+httpcore==1.0.9
+idna==3.16
+jaraco.classes==3.4.0
+jaraco.context==6.1.2
+jaraco.functools==4.5.0
+jeepney==0.9.0
+markdown-it-py==4.2.0
+mdurl==0.1.2
+more-itertools==11.1.0
+pycparser==3.0
+Pygments==2.20.0
+shellingham==1.5.4
+soupsieve==2.8.4
+SecretStorage==3.5.0
+typing_extensions==4.15.0
+
+# --- uvicorn[standard] extras (the project depends on the `standard` bundle) ---
+httptools==0.8.0
+python-dotenv==1.2.2
+PyYAML==6.0.3
+uvloop==0.22.1
+watchfiles==1.2.0
+websockets==16.0

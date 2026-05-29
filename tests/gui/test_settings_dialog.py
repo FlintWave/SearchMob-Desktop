@@ -139,3 +139,23 @@ def test_network_toggle_on_cancelled_stays_off_and_snaps_back(
     assert store.load().network_access_enabled is False
     assert cb.isChecked() is False
     assert controller.hosts == []
+
+
+def test_network_toggle_on_mints_token_and_reuses_it(
+    qapp: object, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(QMessageBox, "exec", lambda self: QMessageBox.StandardButton.Ok)
+    store = _store(tmp_path)
+    dialog = _dialog(store, server_controller=_FakeController())
+    cb = _checkbox_startswith(dialog, "Allow access from your network")
+
+    cb.setChecked(True)
+    token = store.load().network_access_token
+    assert token  # a non-empty token was minted on first enable
+    assert len(token) >= 24
+
+    # Turning off keeps the token so re-enabling reuses it (stable browser setup URLs).
+    cb.setChecked(False)
+    assert store.load().network_access_token == token
+    cb.setChecked(True)
+    assert store.load().network_access_token == token

@@ -40,12 +40,16 @@ def serve(
     max_suggestions: int = MAX_SUGGESTIONS,
     max_results: int = 10,
     timeout_seconds: float = 5.0,
+    access_token: str | None = None,
 ) -> None:
     """Build the app and run uvicorn synchronously, blocking until the server stops.
 
     `host` defaults to loopback (`127.0.0.1`); the parameter exists today only so the Phase 7
     network-mode toggle is a one-line plumbing change. `access_log=False` is non-negotiable: it
     is the desktop port's contribution to the same privacy guarantee the Android server makes.
+
+    `access_token` is passed through to `build_app`: when set and the bind host is non-loopback, it
+    gates the query routes for off-loopback clients. Loopback binds pass `None` and never enforce.
     """
     app = build_app(
         engines,
@@ -58,6 +62,7 @@ def serve(
         max_suggestions=max_suggestions,
         max_results=max_results,
         timeout_seconds=timeout_seconds,
+        access_token=access_token,
     )
     config = uvicorn.Config(
         app,

@@ -9,6 +9,7 @@ vault. The network toggle gate-keeps behind the same warning text the Android di
 from __future__ import annotations
 
 import os
+import secrets
 import time
 from dataclasses import replace
 from pathlib import Path
@@ -792,7 +793,19 @@ class SettingsDialog(QDialog):
                     cb.setChecked(False)
                     cb.blockSignals(False)
                     return
-            self._save(replace(self._prefs, network_access_enabled=checked))
+            # Mint a network access token the first time network mode is turned on, then reuse it
+            # on later toggles. The token gates the query routes for off-loopback clients and is
+            # baked into the descriptor / setup URLs. Keep it on turn-off so re-enabling reuses it.
+            token = self._prefs.network_access_token
+            if checked and not token:
+                token = secrets.token_urlsafe(24)
+            self._save(
+                replace(
+                    self._prefs,
+                    network_access_enabled=checked,
+                    network_access_token=token,
+                )
+            )
             # If the server is running, tell the controller; takes effect on next restart.
             if self._server_controller is not None:
                 from searchmob_desktop.server import LOOPBACK_HOST
@@ -840,10 +853,15 @@ class SettingsDialog(QDialog):
 
         host = LOOPBACK_HOST
         port: int | None = None
+        token: str | None = None
         if self._server_controller is not None and self._server_controller.is_running:
             host = "127.0.0.1"
             port = 8787  # default; the controller does not expose the live port today
-        dialog = BrowserSetupDialog(host=host, port=port, parent=self)
+            # In network mode the query routes are token-gated, so the setup URLs must carry the
+            # token or a browser added off-loopback would be rejected. Loopback stays token-free.
+            if self._prefs.network_access_enabled and self._prefs.network_access_token:
+                token = self._prefs.network_access_token
+        dialog = BrowserSetupDialog(host=host, port=port, parent=self, token=token)
         dialog.exec()
 
     def _open_about(self) -> None:

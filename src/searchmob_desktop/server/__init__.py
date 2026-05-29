@@ -18,8 +18,10 @@ from searchmob_desktop.server.app import (
     MAX_SUGGESTIONS,
     SuggestionsProvider,
     build_app,
+    host_header_allowed,
     is_loopback_host,
     is_safe_http_url,
+    requires_token,
 )
 from searchmob_desktop.server.runner import serve
 
@@ -30,7 +32,9 @@ __all__ = [
     "MAX_SUGGESTIONS",
     "SuggestionsProvider",
     "build_app",
+    "host_header_allowed",
     "is_loopback_host",
     "is_safe_http_url",
+    "requires_token",
     "serve",
 ]

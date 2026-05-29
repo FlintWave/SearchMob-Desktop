@@ -20,6 +20,7 @@ def test_defaults_match_android_contract() -> None:
     assert prefs.upstream_suggestions_enabled is False
     assert prefs.update_check_enabled is True
     assert prefs.last_update_check_ms == 0
+    assert prefs.network_access_token == ""
     assert dict(prefs.engine_enabled) == {}
 
 
@@ -30,6 +31,7 @@ def test_round_trip_through_json(tmp_path: Path) -> None:
         theme="dark",
         history_enabled=True,
         network_access_enabled=True,
+        network_access_token="abc-DEF-123_token",
         upstream_suggestions_enabled=True,
         update_check_enabled=False,
         last_update_check_ms=1_700_000_000_000,
@@ -38,6 +40,16 @@ def test_round_trip_through_json(tmp_path: Path) -> None:
     store.save(original)
     reloaded = store.load()
     assert reloaded == original
+    assert reloaded.network_access_token == "abc-DEF-123_token"
+
+
+def test_network_access_token_defaults_empty_for_old_prefs(tmp_path: Path) -> None:
+    """An older prefs.json without the token field loads with an empty token, not a crash."""
+    path = tmp_path / "prefs.json"
+    path.write_text(json.dumps({"network_access_enabled": True}), encoding="utf-8")
+    loaded = JsonPreferencesStore(path).load()
+    assert loaded.network_access_enabled is True
+    assert loaded.network_access_token == ""
 
 
 def test_load_returns_defaults_when_file_missing(tmp_path: Path) -> None:
