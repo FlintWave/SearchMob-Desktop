@@ -6,6 +6,12 @@ All notable changes to SearchMob Desktop are documented here. The version scheme
 ## Unreleased
 
 ### Added
+- **Personalization controls in the browser (served UI).** The results page the browser sees now
+  has the same scope/ranking tools as the app: per-result **Block / Lower / Raise / Pin** by domain
+  and a **scope (lens) selector**. Edits persist to the encrypted vault and apply on the next search
+  (the server reads rules live, no restart). The editing routes are **loopback-only** - a device
+  reaching the server over the network can search but cannot change the owner's rules - and are
+  same-origin guarded against CSRF.
 - **Use a hostname instead of an IP for browser setup.** The setup URLs now show `localhost` for
   the normal loopback case. In network mode you can add trusted hostnames (Settings -> Network),
   e.g. a Tailscale MagicDNS or mDNS `<host>.local` name, and the server accepts them in the

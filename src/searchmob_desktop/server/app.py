@@ -30,19 +30,24 @@ import socket
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import asdict
 from ipaddress import ip_address
-from urllib.parse import urlsplit
+from urllib.parse import parse_qsl, urlsplit
 
 from starlette.applications import Starlette
 from starlette.middleware import Middleware
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
-from starlette.responses import JSONResponse, PlainTextResponse, Response
+from starlette.responses import (
+    JSONResponse,
+    PlainTextResponse,
+    RedirectResponse,
+    Response,
+)
 from starlette.routing import Route
 from starlette.types import ASGIApp
 
 from searchmob_desktop.engines import EngineContext, EngineFn, SearchResult, aggregate
 from searchmob_desktop.engines.correct import SpellCorrector
-from searchmob_desktop.engines.rank import RankingRules, apply_ranking, host_of_url
+from searchmob_desktop.engines.rank import RankingRules, RankRule, apply_ranking, host_of_url
 from searchmob_desktop.server.opensearch import build_descriptor
 from searchmob_desktop.server.templates import render_home_page, render_results_page
 
@@ -95,6 +100,10 @@ class _SecurityHeadersMiddleware(BaseHTTPMiddleware):
     """
 
     _GATED_PATHS = frozenset({"/search", "/api/search", "/suggest"})
+    # State-changing routes (personalization edits from the served UI). They are owner-only: even in
+    # network mode only a loopback client may POST them, so a device on the network can search but
+    # cannot alter the owner's rules. A same-origin check on the Origin header blocks CSRF.
+    _MUTATION_PATHS = frozenset({"/rules/domain", "/scope"})
 
     def __init__(
         self,
@@ -124,6 +133,19 @@ class _SecurityHeadersMiddleware(BaseHTTPMiddleware):
             and request.query_params.get("token") != self._access_token
         ):
             return PlainTextResponse("Forbidden", status_code=403)
+
+        if request.method == "POST" and request.url.path in self._MUTATION_PATHS:
+            # Owner-only: only a loopback client may change personalization rules.
+            if not is_loopback_host(client_host):
+                return PlainTextResponse("Forbidden", status_code=403)
+            # CSRF: a browser sends Origin on POST; reject if it is present and not our own origin.
+            origin = request.headers.get("origin")
+            if origin:
+                origin_host = _hostname_only(urlsplit(origin).netloc)
+                if not host_header_allowed(
+                    origin_host, self._bound_host_getter(), self._allowed_hosts
+                ):
+                    return PlainTextResponse("Forbidden", status_code=403)
 
         response = await call_next(request)
         response.headers.setdefault("Referrer-Policy", "no-referrer")
@@ -273,6 +295,8 @@ def build_app(
     suggestions_provider: SuggestionsProvider | None = None,
     corrector: SpellCorrector | None = None,
     ranking_rules: RankingRules | None = None,
+    ranking_rules_provider: Callable[[], RankingRules] | None = None,
+    ranking_rules_saver: Callable[[RankingRules], bool] | None = None,
     max_query_length: int = MAX_QUERY_LENGTH,
     max_suggestions: int = MAX_SUGGESTIONS,
     max_results: int = 10,
@@ -303,6 +327,11 @@ def build_app(
     `allowed_hosts` is an explicit set of trusted hostnames the Host-header allowlist accepts in
     addition to loopback / the bound host / IP literals, so a browser can reach the server by a
     friendly name (the machine's own hostname, or a configured Tailscale/mDNS name) in network mode.
+
+    `ranking_rules_provider` is read on each search so personalization edits take effect without a
+    restart; if omitted, the static `ranking_rules` is used. `ranking_rules_saver`, when provided,
+    enables the served UI's editing routes (`POST /rules/domain`, `POST /scope`); those routes are
+    loopback-only (a network visitor can search but not change the owner's rules).
     """
     provider: SuggestionsProvider = (
         suggestions_provider if suggestions_provider is not None else _no_suggestions
@@ -313,7 +342,11 @@ def build_app(
             return ""
         return raw[:max_query_length]
 
-    rules = ranking_rules if ranking_rules is not None else RankingRules()
+    # Read the rules through a provider so edits made from the served UI (or the in-app settings)
+    # take effect on the next search without restarting the server. A static `ranking_rules` is
+    # wrapped in a constant provider for back-compat (tests and callers that pass a fixed set).
+    static_rules = ranking_rules if ranking_rules is not None else RankingRules()
+    rules_provider: Callable[[], RankingRules] = ranking_rules_provider or (lambda: static_rules)
 
     async def _run_metasearch(query: str) -> list[SearchResult]:
         if not query.strip() or not engines:
@@ -324,7 +357,7 @@ def build_app(
         # aggregation so the served results match the in-app results.
         return apply_ranking(
             results,
-            rules,
+            rules_provider(),
             host_of=lambda r: host_of_url(r.url),
             text_of=lambda r: f"{r.title} {r.snippet}",
         )
@@ -346,11 +379,58 @@ def build_app(
     async def healthz(_request: Request) -> Response:
         return PlainTextResponse("ok")
 
+    def _is_owner(request: Request) -> bool:
+        # The owner (a loopback client) sees the editing controls; a network-mode visitor does not,
+        # because the rules-mutation routes are loopback-only. Editing also needs a saver wired.
+        client_host = request.client.host if request.client is not None else ""
+        return ranking_rules_saver is not None and is_loopback_host(client_host)
+
     async def search_html(request: Request) -> Response:
         query = _clamp(request.query_params.get("q"))
         results = await _run_metasearch(query)
-        body = render_results_page(query, results, is_safe_http_url, correction=_correction(query))
+        body = render_results_page(
+            query,
+            results,
+            is_safe_http_url,
+            correction=_correction(query),
+            rules=rules_provider(),
+            editable=_is_owner(request),
+        )
         return Response(body, media_type="text/html; charset=utf-8")
+
+    def _redirect_back(request: Request) -> Response:
+        # Return to the page the POST came from when it is one of our own origins; else home. 303
+        # makes the browser re-fetch with GET so a refresh does not re-POST.
+        referer = request.headers.get("referer", "")
+        if referer:
+            host = _hostname_only(urlsplit(referer).netloc)
+            if host_header_allowed(host, bound_host_getter(), allowed_hosts):
+                return RedirectResponse(referer, status_code=303)
+        return RedirectResponse("/", status_code=303)
+
+    async def _form(request: Request) -> dict[str, str]:
+        # Parse an application/x-www-form-urlencoded body without pulling in python-multipart (which
+        # Starlette's request.form() would require). Our forms are simple urlencoded posts.
+        raw = await request.body()
+        return dict(parse_qsl(raw.decode("utf-8", "replace")))
+
+    async def set_domain_rule(request: Request) -> Response:
+        if ranking_rules_saver is None:
+            return PlainTextResponse("Personalization is read-only here.", status_code=503)
+        form = await _form(request)
+        domain = form.get("domain", "").strip().lower()
+        action = form.get("action", "").strip().upper()
+        if domain and action in RankRule.__members__:
+            ranking_rules_saver(rules_provider().with_domain_rule(domain, RankRule[action]))
+        return _redirect_back(request)
+
+    async def set_scope(request: Request) -> Response:
+        if ranking_rules_saver is None:
+            return PlainTextResponse("Personalization is read-only here.", status_code=503)
+        form = await _form(request)
+        lens = form.get("lens", "").strip()
+        ranking_rules_saver(rules_provider().with_active_lens(lens or None))
+        return _redirect_back(request)
 
     async def search_json(request: Request) -> Response:
         query = _clamp(request.query_params.get("q"))
@@ -389,6 +469,10 @@ def build_app(
         Route("/api/search", search_json, methods=["GET"]),
         Route("/opensearch.xml", opensearch_xml, methods=["GET"]),
         Route("/suggest", suggest, methods=["GET"]),
+        # Personalization edits from the served UI. Gated loopback-only + same-origin in the
+        # middleware; no-op (503) when no saver is wired.
+        Route("/rules/domain", set_domain_rule, methods=["POST"]),
+        Route("/scope", set_scope, methods=["POST"]),
     ]
     middleware = [
         Middleware(

@@ -112,6 +112,21 @@ class RankingRules:
             goggles=self.goggles,
         )
 
+    def with_active_lens(self, name: str | None) -> RankingRules:
+        """Return a copy with `active_lens` set to `name` (None clears it).
+
+        An unknown name is accepted as-is (the `active` property simply resolves to None until a
+        matching lens exists), matching the in-app selector's tolerance.
+        """
+        if name == self.active_lens:
+            return self
+        return RankingRules(
+            domain_rules=self.domain_rules,
+            lenses=self.lenses,
+            active_lens=name,
+            goggles=self.goggles,
+        )
+
     def to_dict(self) -> dict[str, Any]:
         """Return the camelCase dict mirroring the Android serialization."""
         return {
