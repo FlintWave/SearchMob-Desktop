@@ -10,12 +10,13 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from PySide6.QtCore import QModelIndex, QPersistentModelIndex, QSize, Qt, QUrl
+from PySide6.QtCore import QModelIndex, QPersistentModelIndex, QRectF, QSize, Qt, QUrl
 from PySide6.QtGui import (
     QColor,
     QDesktopServices,
     QFont,
     QPainter,
+    QPen,
     QStandardItem,
     QStandardItemModel,
 )
@@ -28,6 +29,7 @@ from PySide6.QtWidgets import (
 )
 
 from searchmob_desktop.engines import SearchResult
+from searchmob_desktop.gui.theme import active_palette
 
 # Custom roles so the delegate does not have to parse the visible string back into fields.
 _TITLE_ROLE = Qt.ItemDataRole.UserRole + 1
@@ -39,7 +41,11 @@ _ENGINE_ROLE = Qt.ItemDataRole.UserRole + 4
 class _ResultDelegate(QStyledItemDelegate):
     """Paint a result row: title (bold), URL (muted), snippet (small), engine (badge color)."""
 
-    _ROW_PADDING = 10
+    # Outer margin between the item rect edge and the drawn card (the list also sets `spacing`,
+    # so cards never touch). Inner padding is the gap from the card edge to the text.
+    _CARD_MARGIN = 3
+    _CARD_PADDING = 14
+    _CARD_RADIUS = 12
     _LINE_SPACING = 4
 
     def sizeHint(
@@ -47,12 +53,14 @@ class _ResultDelegate(QStyledItemDelegate):
         option: QStyleOptionViewItem,
         index: QModelIndex | QPersistentModelIndex,
     ) -> QSize:
-        # Reserve enough vertical room for four single-line texts plus padding. We do not try to
-        # word-wrap inside sizeHint; the delegate elides instead, so each row stays a constant
-        # height and the list scrolls predictably.
+        # Reserve enough vertical room for four single-line texts plus card padding and margin. We
+        # do not word-wrap inside sizeHint; the delegate elides instead, so each row stays a
+        # constant height and the list scrolls predictably.
         fm = option.fontMetrics
         line_h = fm.height()
-        height = self._ROW_PADDING * 2 + line_h * 4 + self._LINE_SPACING * 3
+        height = (
+            self._CARD_MARGIN * 2 + self._CARD_PADDING * 2 + line_h * 4 + self._LINE_SPACING * 3
+        )
         return QSize(option.rect.width(), height)
 
     def paint(
@@ -61,18 +69,36 @@ class _ResultDelegate(QStyledItemDelegate):
         option: QStyleOptionViewItem,
         index: QModelIndex | QPersistentModelIndex,
     ) -> None:
+        palette = active_palette()
         painter.save()
-        # Background: let the style draw hover/selection so we honor the QSS palette.
-        widget = option.widget
-        style = widget.style() if widget is not None else option.styleObject.style()
-        style.drawPrimitive(QStyle.PrimitiveElement.PE_PanelItemViewItem, option, painter, widget)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
 
-        rect = option.rect.adjusted(
-            self._ROW_PADDING,
-            self._ROW_PADDING,
-            -self._ROW_PADDING,
-            -self._ROW_PADDING,
+        # Draw a rounded card filling the item rect (minus the outer margin). Hover/selection get a
+        # lighter fill and an accent hairline so the active row reads clearly.
+        card_rect = QRectF(option.rect).adjusted(
+            self._CARD_MARGIN,
+            self._CARD_MARGIN,
+            -self._CARD_MARGIN,
+            -self._CARD_MARGIN,
         )
+        state = option.state
+        hovered = bool(state & QStyle.StateFlag.State_MouseOver)
+        selected = bool(state & QStyle.StateFlag.State_Selected)
+        fill = palette.card_hover if (hovered or selected) else palette.card
+        painter.setBrush(QColor(fill))
+        if selected:
+            painter.setPen(QPen(QColor(palette.accent), 1))
+        else:
+            painter.setPen(QPen(QColor(palette.border), 1))
+        painter.drawRoundedRect(card_rect, self._CARD_RADIUS, self._CARD_RADIUS)
+
+        # Text area: inside the card by the inner padding.
+        rect = card_rect.adjusted(
+            self._CARD_PADDING,
+            self._CARD_PADDING,
+            -self._CARD_PADDING,
+            -self._CARD_PADDING,
+        ).toRect()
         fm = option.fontMetrics
         line_h = fm.height()
 
@@ -84,24 +110,24 @@ class _ResultDelegate(QStyledItemDelegate):
         title_font = QFont(option.font)
         title_font.setBold(True)
         painter.setFont(title_font)
-        painter.setPen(option.palette.text().color())
+        painter.setPen(QColor(palette.text))
         title_text = fm.elidedText(title or url, Qt.TextElideMode.ElideRight, rect.width())
         painter.drawText(rect.left(), rect.top() + fm.ascent(), title_text)
 
         painter.setFont(option.font)
-        painter.setPen(QColor("#3060a8"))
+        painter.setPen(QColor(palette.url))
         url_y = rect.top() + line_h + self._LINE_SPACING + fm.ascent()
         url_text = fm.elidedText(url, Qt.TextElideMode.ElideRight, rect.width())
         painter.drawText(rect.left(), url_y, url_text)
 
         if snippet:
-            painter.setPen(option.palette.text().color())
+            painter.setPen(QColor(palette.muted))
             snippet_y = url_y + line_h + self._LINE_SPACING
             snippet_text = fm.elidedText(snippet, Qt.TextElideMode.ElideRight, rect.width())
             painter.drawText(rect.left(), snippet_y, snippet_text)
 
         if engine:
-            painter.setPen(QColor("#2a7a2a"))
+            painter.setPen(QColor(palette.engine))
             engine_y = rect.top() + (line_h + self._LINE_SPACING) * 3 + fm.ascent()
             engine_text = fm.elidedText(f"via {engine}", Qt.TextElideMode.ElideRight, rect.width())
             painter.drawText(rect.left(), engine_y, engine_text)
@@ -120,6 +146,9 @@ class ResultsView(QListView):
         self.setSelectionMode(QListView.SelectionMode.SingleSelection)
         self.setUniformItemSizes(True)
         self.setEditTriggers(QListView.EditTrigger.NoEditTriggers)
+        self.setMouseTracking(True)  # so hover repaints the card under the cursor
+        self.setSpacing(4)
+        self.setVerticalScrollMode(QListView.ScrollMode.ScrollPerPixel)
         self.activated.connect(self._on_activated)
 
     def set_results(self, results: Sequence[SearchResult]) -> None:
