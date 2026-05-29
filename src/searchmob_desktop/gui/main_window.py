@@ -9,12 +9,14 @@ the GUI thread via the worker's `finished` signal.
 
 from __future__ import annotations
 
+import asyncio
 from html import escape
 from importlib.resources import as_file, files
 
-from PySide6.QtCore import Qt, QThreadPool, QTimer
-from PySide6.QtGui import QAction, QIcon, QKeySequence
+from PySide6.QtCore import Qt, QThreadPool, QTimer, QUrl
+from PySide6.QtGui import QAction, QDesktopServices, QIcon, QKeySequence
 from PySide6.QtWidgets import (
+    QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -36,6 +38,7 @@ from searchmob_desktop.data.ranking_store import load_ranking_rules, save_rankin
 from searchmob_desktop.engines import EngineContext, SearchResult, aggregate
 from searchmob_desktop.engines.correct import start_background_corrector
 from searchmob_desktop.engines.rank import RankRule, apply_ranking, host_of_url
+from searchmob_desktop.engines.wiki_summary import SummaryBox, summary_for_query
 from searchmob_desktop.gui.about_dialog import AboutDialog
 from searchmob_desktop.gui.browser_setup_dialog import BrowserSetupDialog
 from searchmob_desktop.gui.history_dialog import HistoryDialog
@@ -144,6 +147,11 @@ class MainWindow(QMainWindow):
         self._didyoumean.hide()
         outer.addWidget(self._didyoumean)
 
+        # Contextual Wikipedia summary card, shown above the results for entity-like queries.
+        self._summary_card = self._build_summary_card()
+        self._summary_card.hide()
+        outer.addWidget(self._summary_card)
+
         # Body swaps between a friendly empty state and the results list so the window never shows a
         # bare void before the first search.
         self._body = QStackedWidget()
@@ -204,6 +212,45 @@ class MainWindow(QMainWindow):
             server_controller=self._server,
             parent=self,
         ).exec()
+
+    # --- Summary card ------------------------------------------------------------------------
+
+    def _build_summary_card(self) -> QFrame:
+        """A knowledge-panel card (title link, description, extract) for the Wikipedia summary."""
+        card = QFrame()
+        card.setObjectName("summaryCard")
+        card.setProperty("role", "card")
+        card.setFrameShape(QFrame.Shape.StyledPanel)
+        col = QVBoxLayout(card)
+        col.setSpacing(4)
+        self._summary_title = QLabel()
+        self._summary_title.setTextFormat(Qt.TextFormat.RichText)
+        self._summary_title.setOpenExternalLinks(False)
+        self._summary_title.linkActivated.connect(lambda url: QDesktopServices.openUrl(QUrl(url)))
+        title_font = self._summary_title.font()
+        title_font.setBold(True)
+        title_font.setPointSize(title_font.pointSize() + 2)
+        self._summary_title.setFont(title_font)
+        self._summary_desc = QLabel()
+        self._summary_desc.setProperty("role", "muted")
+        self._summary_extract = QLabel()
+        self._summary_extract.setWordWrap(True)
+        footer = QLabel("From Wikipedia")
+        footer.setProperty("role", "muted")
+        for w in (self._summary_title, self._summary_desc, self._summary_extract, footer):
+            col.addWidget(w)
+        return card
+
+    def _show_summary(self, box: SummaryBox) -> None:
+        if box.url:
+            href = escape(box.url, quote=True)
+            self._summary_title.setText(f'<a href="{href}">{escape(box.title)}</a>')
+        else:
+            self._summary_title.setText(escape(box.title))
+        self._summary_desc.setText(box.description)
+        self._summary_desc.setVisible(bool(box.description))
+        self._summary_extract.setText(box.extract)
+        self._summary_card.show()
 
     # --- Empty state -------------------------------------------------------------------------
 
@@ -293,17 +340,25 @@ class MainWindow(QMainWindow):
         self._last_query = query
         self._status_label.setText("Searching ...")
         self._didyoumean.hide()
+        self._summary_card.hide()
         self._results.clear()
         self._search_btn.setEnabled(False)
 
         prefs = self._prefs_store.load()
         engines = build_engines_from_prefs(prefs)
         ctx = EngineContext(query=query, max_results=10, timeout_seconds=5.0)
+        summary_enabled = prefs.summary_enabled
 
-        async def _run() -> list[SearchResult]:
-            return await aggregate(ctx, engines)
+        async def _run() -> tuple[list[SearchResult], SummaryBox | None]:
+            # Fetch the contextual summary concurrently with the metasearch so it adds no latency.
+            summary_task = (
+                asyncio.ensure_future(summary_for_query(query)) if summary_enabled else None
+            )
+            results = await aggregate(ctx, engines)
+            summary = await summary_task if summary_task is not None else None
+            return results, summary
 
-        worker: AsyncWorker[list[SearchResult]] = AsyncWorker(_run)
+        worker: AsyncWorker[tuple[list[SearchResult], SummaryBox | None]] = AsyncWorker(_run)
         worker.signals.finished.connect(self._on_results_ready)
         worker.signals.failed.connect(self._on_search_failed)
         # Record the search in the (in-memory) history store if enabled. The store handles the
@@ -314,8 +369,17 @@ class MainWindow(QMainWindow):
             pass
         worker.start(self._pool)
 
-    def _on_results_ready(self, results: object) -> None:
+    def _on_results_ready(self, payload: object) -> None:
         self._search_btn.setEnabled(True)
+        # The worker returns (results, summary). Show the summary card regardless of result count.
+        results: object = payload
+        summary: object = None
+        if isinstance(payload, tuple) and len(payload) == 2:
+            results, summary = payload
+        if isinstance(summary, SummaryBox):
+            self._show_summary(summary)
+        else:
+            self._summary_card.hide()
         if not isinstance(results, list):
             self._status_label.setText("Search failed: unexpected result type.")
             self._body.setCurrentWidget(self._empty_state)

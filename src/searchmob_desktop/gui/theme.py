@@ -182,6 +182,15 @@ QFrame[role="caveat"] {{
 }}
 QLabel[role="caveat-text"] {{ color: {p.danger_text}; }}
 
+/* Contextual Wikipedia summary card, above the results. */
+QFrame#summaryCard {{
+    background-color: {p.card};
+    border: 1px solid {p.border};
+    border-radius: 10px;
+    padding: 6px 4px;
+}}
+QFrame#summaryCard QLabel {{ background: transparent; }}
+
 /* Slim, modern scrollbars. */
 QScrollBar:vertical {{ background: transparent; width: 10px; margin: 2px; }}
 QScrollBar::handle:vertical {{ background: {p.border}; border-radius: 5px; min-height: 28px; }}
