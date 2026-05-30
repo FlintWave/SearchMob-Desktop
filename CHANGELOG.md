@@ -3,6 +3,18 @@
 All notable changes to SearchMob Desktop are documented here. The version scheme is Ubuntu-style
 `YY.MM.VV` and releases are tagged `vYY.MM.VV`.
 
+## Unreleased
+
+### Added
+- **Result sorting (freshest by date + relevance).** A new Sort control (in the app and on the
+  served page) offers **Freshest + Relevant** (default), **Date** (newest first), and **Relevance**.
+  Dates are extracted best-effort from each result's snippet/title ("3 days ago", "May 28, 2026",
+  ISO, ...) with guards against future-date junk and bare years; the default blend gives recent
+  results a boost while keeping undated results at full relevance standing (so evergreen searches
+  look unchanged), and leans harder into freshness for obviously time-sensitive queries (release
+  date, latest, score, a current/next year). The choice persists in the app and is a `?sort=` URL
+  param on the served page.
+
 ## 26.05.05 — 2026-05-29
 
 ### Added

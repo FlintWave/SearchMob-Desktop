@@ -16,12 +16,18 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True, slots=True)
 class SearchResult:
-    """One result row from one engine, in the order that engine returned it."""
+    """One result row from one engine, in the order that engine returned it.
+
+    `published` is the result's best-known publication time in epoch milliseconds, or `None` when
+    no date could be determined (the common case for general web results). It drives freshness
+    sorting; `None` means "unknown", treated as neither old nor new.
+    """
 
     title: str
     url: str
     snippet: str
     engine: str
+    published: int | None = None
 
 
 @dataclass(frozen=True, slots=True)

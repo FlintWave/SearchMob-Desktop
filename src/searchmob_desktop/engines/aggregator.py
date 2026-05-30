@@ -15,6 +15,7 @@ Kotlin `EngineResult.Failure` branch.
 from __future__ import annotations
 
 import asyncio
+import time
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 
@@ -22,6 +23,7 @@ import httpx
 
 from searchmob_desktop.engines.normalize import normalize_url, strip_tracking_params
 from searchmob_desktop.engines.proxy import make_privacy_client
+from searchmob_desktop.engines.snippet_date import parse_date
 from searchmob_desktop.engines.types import EngineContext, SearchResult
 
 EngineFn = Callable[[httpx.AsyncClient, EngineContext], Awaitable[list[SearchResult]]]
@@ -36,6 +38,7 @@ class _Bucket:
     snippet: str
     engines: set[str]
     score: float
+    published: int | None = None
 
 
 async def aggregate(ctx: EngineContext, engines: Sequence[EngineFn]) -> list[SearchResult]:
@@ -59,6 +62,16 @@ async def aggregate(ctx: EngineContext, engines: Sequence[EngineFn]) -> list[Sea
         else:
             per_engine.append([])
 
+    now_ms = int(time.time() * 1000)
+
+    def _published_of(item: SearchResult) -> int | None:
+        # A structured date from the engine wins; else parse the snippet/title. A weak (bare-year)
+        # parse is dropped to None so it never earns a freshness boost.
+        if item.published is not None:
+            return item.published
+        parsed = parse_date(f"{item.snippet} {item.title}", now_ms)
+        return None if parsed is None or parsed.weak else parsed.epoch_ms
+
     buckets: dict[str, _Bucket] = {}
     for engine_results in per_engine:
         for rank, item in enumerate(engine_results):
@@ -74,12 +87,19 @@ async def aggregate(ctx: EngineContext, engines: Sequence[EngineFn]) -> list[Sea
                     snippet=item.snippet,
                     engines={item.engine},
                     score=contribution,
+                    published=_published_of(item),
                 )
             else:
                 existing.engines.add(item.engine)
                 existing.score += contribution
                 if not existing.snippet and item.snippet:
                     existing.snippet = item.snippet
+                # Keep the newest known date when several engines surface the same URL.
+                candidate = _published_of(item)
+                if candidate is not None and (
+                    existing.published is None or candidate > existing.published
+                ):
+                    existing.published = candidate
 
     ranked = sorted(buckets.values(), key=lambda b: b.score, reverse=True)
     return [
@@ -88,6 +108,7 @@ async def aggregate(ctx: EngineContext, engines: Sequence[EngineFn]) -> list[Sea
             url=b.url,
             snippet=b.snippet,
             engine=",".join(sorted(b.engines)),
+            published=b.published,
         )
         for b in ranked[: ctx.max_results]
     ]
