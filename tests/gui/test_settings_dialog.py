@@ -159,3 +159,33 @@ def test_network_toggle_on_mints_token_and_reuses_it(
     assert store.load().network_access_token == token
     cb.setChecked(True)
     assert store.load().network_access_token == token
+
+
+def test_local_ai_enable_persists(qapp: object, tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    dialog = _dialog(store)
+    assert store.load().llm_enabled is False
+    dialog._llm_enable.setChecked(True)
+    assert store.load().llm_enabled is True
+
+
+def test_local_ai_detected_models_populate_and_persist(qapp: object, tmp_path: Path) -> None:
+    from searchmob_desktop.engines.local_llm import LlmBackend
+
+    store = _store(tmp_path)
+    dialog = _dialog(store)
+    dialog._on_models_detected(
+        [LlmBackend("Ollama", "http://127.0.0.1:11434/v1", ("llama3", "qwen2"))]
+    )
+    assert dialog._llm_combo.count() == 2
+    # The first detected model is selected and persisted so it is immediately usable.
+    assert store.load().llm_base_url == "http://127.0.0.1:11434/v1"
+    assert store.load().llm_model == "llama3"
+
+
+def test_local_ai_no_models_disables_combo(qapp: object, tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    dialog = _dialog(store)
+    dialog._on_models_detected([])
+    assert dialog._llm_combo.isEnabled() is False
+    assert store.load().llm_model == ""
