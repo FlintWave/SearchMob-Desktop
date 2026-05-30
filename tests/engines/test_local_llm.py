@@ -104,3 +104,55 @@ async def test_generate_answer_fail_soft_on_server_error() -> None:
     respx.post("http://127.0.0.1:11434/v1/chat/completions").mock(return_value=httpx.Response(500))
     config = LlmConfig(enabled=True, base_url="http://127.0.0.1:11434/v1", model="llama3")
     assert await generate_answer(config, "q", _RESULTS) is None
+
+
+def _sse(*contents: str) -> str:
+    """Build an OpenAI-style SSE stream body from a list of token contents."""
+    lines = []
+    for c in contents:
+        chunk = {"choices": [{"delta": {"content": c}}]}
+        lines.append(f"data: {__import__('json').dumps(chunk)}")
+    lines.append("data: [DONE]")
+    return "\n\n".join(lines) + "\n\n"
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_stream_answer_emits_deltas_and_returns_full() -> None:
+    from searchmob_desktop.engines.local_llm import stream_answer
+
+    body = _sse("Everest", " is", " tallest [1].")
+    respx.post("http://127.0.0.1:11434/v1/chat/completions").mock(
+        return_value=httpx.Response(200, text=body)
+    )
+    config = LlmConfig(enabled=True, base_url="http://127.0.0.1:11434/v1", model="llama3")
+    seen: list[str] = []
+    full = await stream_answer(config, "tallest mountain", _RESULTS, seen.append)
+    assert seen == ["Everest", " is", " tallest [1]."]
+    assert full == "Everest is tallest [1]."
+
+
+@pytest.mark.asyncio
+async def test_stream_answer_none_when_not_ready() -> None:
+    from searchmob_desktop.engines.local_llm import stream_answer
+
+    seen: list[str] = []
+    assert await stream_answer(LlmConfig(), "q", _RESULTS, seen.append) is None
+    assert seen == []
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_stream_answer_returns_partial_on_midstream_error() -> None:
+    from searchmob_desktop.engines.local_llm import stream_answer
+
+    # A valid first token, then a malformed line, then the connection drops: keep what we got.
+    body = 'data: {"choices":[{"delta":{"content":"partial"}}]}\n\n'
+    respx.post("http://127.0.0.1:11434/v1/chat/completions").mock(
+        return_value=httpx.Response(200, text=body)
+    )
+    config = LlmConfig(enabled=True, base_url="http://127.0.0.1:11434/v1", model="llama3")
+    seen: list[str] = []
+    full = await stream_answer(config, "q", _RESULTS, seen.append)
+    assert full == "partial"
+    assert seen == ["partial"]
