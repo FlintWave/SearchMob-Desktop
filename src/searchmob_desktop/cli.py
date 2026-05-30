@@ -214,6 +214,7 @@ def serve(
         ranking_rules_provider=load_ranking_rules,
         ranking_rules_saver=save_ranking_rules,
         summary_provider=summary_for_query if prefs.summary_enabled else None,
+        ai_slop_mode=prefs.ai_slop_mode,
         max_results=max_results,
         timeout_seconds=timeout,
         access_token=access_token,

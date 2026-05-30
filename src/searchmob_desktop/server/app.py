@@ -50,6 +50,7 @@ from starlette.types import ASGIApp
 from searchmob_desktop.engines import EngineContext, EngineFn, SearchResult, aggregate
 from searchmob_desktop.engines.correct import SpellCorrector
 from searchmob_desktop.engines.rank import RankingRules, RankRule, apply_ranking, host_of_url
+from searchmob_desktop.engines.rank.slop_blocklist import load_slop_domains
 from searchmob_desktop.engines.sort import SortMode, sort_results
 from searchmob_desktop.engines.wiki_summary import SummaryBox
 from searchmob_desktop.server.opensearch import build_descriptor
@@ -302,6 +303,7 @@ def build_app(
     ranking_rules_provider: Callable[[], RankingRules] | None = None,
     ranking_rules_saver: Callable[[RankingRules], bool] | None = None,
     summary_provider: Callable[[str], Awaitable[SummaryBox | None]] | None = None,
+    ai_slop_mode: str = "off",
     max_query_length: int = MAX_QUERY_LENGTH,
     max_suggestions: int = MAX_SUGGESTIONS,
     max_results: int = 10,
@@ -368,6 +370,8 @@ def build_app(
             rules_provider(),
             host_of=lambda r: host_of_url(r.url),
             text_of=lambda r: f"{r.title} {r.snippet}",
+            slop_domains=load_slop_domains(),
+            slop_mode=ai_slop_mode,
         )
 
     def _correction(query: str) -> str | None:

@@ -230,6 +230,26 @@ class SettingsDialog(QDialog):
             )
         )
 
+        slop_row = QHBoxLayout()
+        slop_row.addWidget(QLabel("Filter AI-generated / low-quality sites:"))
+        self._slop_combo = QComboBox()
+        for label, value in (("Downrank", "downrank"), ("Hide", "hide"), ("Off", "off")):
+            self._slop_combo.addItem(label, value)
+        self._slop_combo.setCurrentIndex(
+            max(0, self._slop_combo.findData(self._prefs.ai_slop_mode))
+        )
+        self._slop_combo.currentIndexChanged.connect(self._on_slop_changed)
+        slop_row.addWidget(self._slop_combo, stretch=1)
+        layout.addLayout(slop_row)
+        slop_help = QLabel(
+            "On by default. Downrank pushes known AI content farms and low-quality sites below "
+            "other results; Hide removes them. The bundled list is applied on your device - your "
+            "query never leaves it for filtering - and your own domain rules above always win."
+        )
+        slop_help.setWordWrap(True)
+        slop_help.setProperty("role", "muted")
+        layout.addWidget(slop_help)
+
         lens_row = QHBoxLayout()
         lens_row.addWidget(QLabel("Active scope:"))
         self._lens_combo = QComboBox()
@@ -330,6 +350,11 @@ class SettingsDialog(QDialog):
     def _on_lens_selected(self, index: int) -> None:
         name = None if index <= 0 else self._lens_combo.currentText()
         self._save_ranking(replace(self._ranking, active_lens=name))
+
+    def _on_slop_changed(self) -> None:
+        """AI-slop filter mode changed: persist it and re-rank the current results live."""
+        self._save(replace(self._prefs, ai_slop_mode=str(self._slop_combo.currentData())))
+        self.rulesChanged.emit()
 
     def _on_add_sample_lenses(self) -> None:
         existing = {lens.name for lens in self._ranking.lenses}

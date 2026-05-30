@@ -18,6 +18,7 @@ from urllib.parse import urlsplit
 
 from searchmob_desktop.engines.rank import goggles
 from searchmob_desktop.engines.rank.model import Lens, RankingRules, RankRule
+from searchmob_desktop.engines.rank.slop_blocklist import matches_blocklist
 
 T = TypeVar("T")
 
@@ -52,7 +53,12 @@ def _passes_lens(lens: Lens, host: str | None, text: str) -> bool:
     return True
 
 
-def _effective_rule(host: str | None, rules: RankingRules) -> RankRule:
+def _effective_rule(
+    host: str | None,
+    rules: RankingRules,
+    slop_domains: frozenset[str],
+    slop_mode: str,
+) -> RankRule:
     if host is None:
         return RankRule.NORMAL
     for key, rule in rules.domain_rules.items():
@@ -65,6 +71,10 @@ def _effective_rule(host: str | None, rules: RankingRules) -> RankRule:
         return RankRule.RAISE
     if RankRule.LOWER in actions:
         return RankRule.LOWER
+    # AI-slop blocklist last, so an explicit user rule or goggle above always wins (and a user can
+    # rescue a false positive by setting that domain to NORMAL/RAISE).
+    if slop_mode in ("downrank", "hide") and matches_blocklist(host, slop_domains):
+        return RankRule.BLOCK if slop_mode == "hide" else RankRule.LOWER
     return RankRule.NORMAL
 
 
@@ -73,13 +83,17 @@ def apply_ranking(  # noqa: UP047
     rules: RankingRules,
     host_of: Callable[[T], str | None],
     text_of: Callable[[T], str] = lambda _: "",
+    slop_domains: frozenset[str] = frozenset(),
+    slop_mode: str = "off",
 ) -> list[T]:
     """Re-rank `items` per `rules`, preserving relevance order within each bucket.
 
-    Empty rules (`RankingRules()`) return `items` unchanged. The active lens, if any, filters items
+    Empty rules + no slop filter return `items` unchanged. The active lens, if any, filters items
     before bucketing. Blocked items are dropped; the result is pinned + raised + normal + lowered.
+    `slop_mode` ("off"/"downrank"/"hide") applies the bundled AI-slop blocklist after user rules.
     """
-    if rules == RankingRules():
+    slop_active = slop_mode in ("downrank", "hide") and bool(slop_domains)
+    if rules == RankingRules() and not slop_active:
         return items
     try:
         lens = rules.active
@@ -91,7 +105,7 @@ def apply_ranking(  # noqa: UP047
             host = host_of(item)
             if lens is not None and not _passes_lens(lens, host, text_of(item)):
                 continue
-            rule = _effective_rule(host, rules)
+            rule = _effective_rule(host, rules, slop_domains, slop_mode)
             if rule is RankRule.BLOCK:
                 continue
             if rule is RankRule.PIN:

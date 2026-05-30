@@ -68,6 +68,8 @@ class UserPreferences:
     summary_enabled: bool = True
     # Result sort order: "fresh" (freshness+relevance blend, default), "date", or "relevance".
     sort_mode: str = "fresh"
+    # AI-slop / low-quality content filter: "downrank" (default, on), "hide", or "off".
+    ai_slop_mode: str = "downrank"
     update_check_enabled: bool = True
     last_update_check_ms: int = 0
     # Set once the first-run setup wizard has been completed or skipped, so it never reappears.

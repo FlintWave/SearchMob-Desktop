@@ -75,3 +75,20 @@ def test_import_pasted_goggles(qapp, tmp_path, fake_vault, monkeypatch) -> None:
     dialog._on_import_goggles_pasted()
     sites = {g.site for g in fake_vault["rules"].goggles}
     assert sites == {"spam.example", "dev.to"}
+
+
+def test_slop_combo_defaults_to_downrank_and_persists(qapp, tmp_path, fake_vault) -> None:  # type: ignore[no-untyped-def]
+    store = JsonPreferencesStore(path=tmp_path / "prefs.json")
+    dialog = sd.SettingsDialog(prefs_store=store)
+    # Default pref is "downrank" so the combo starts there.
+    assert dialog._slop_combo.currentData() == "downrank"
+
+    changed: list[int] = []
+    dialog.rulesChanged.connect(lambda: changed.append(1))
+
+    dialog._slop_combo.setCurrentIndex(dialog._slop_combo.findData("hide"))
+    assert changed  # rulesChanged fired so the main window re-ranks live
+    assert store.load().ai_slop_mode == "hide"
+
+    dialog._slop_combo.setCurrentIndex(dialog._slop_combo.findData("off"))
+    assert store.load().ai_slop_mode == "off"
