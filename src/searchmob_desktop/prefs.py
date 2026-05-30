@@ -66,6 +66,8 @@ class UserPreferences:
     # Show a contextual Wikipedia summary box above results for entity-like queries. Adds at most
     # one extra outbound call per search to Wikipedia (which is already a search engine here).
     summary_enabled: bool = True
+    # Result sort order: "fresh" (freshness+relevance blend, default), "date", or "relevance".
+    sort_mode: str = "fresh"
     update_check_enabled: bool = True
     last_update_check_ms: int = 0
     # Set once the first-run setup wizard has been completed or skipped, so it never reappears.

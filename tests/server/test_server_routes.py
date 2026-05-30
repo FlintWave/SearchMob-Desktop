@@ -153,9 +153,9 @@ def test_search_json_returns_aggregated_results_and_echoes_query() -> None:
         "https://example.com/a2",
         "https://example.com/b1",
     ]
-    # Every result dict carries the four keys the contract documents.
+    # Every result dict carries the documented keys (incl. the nullable `published` timestamp).
     for item in payload["results"]:
-        assert set(item.keys()) == {"title", "url", "snippet", "engine"}
+        assert set(item.keys()) == {"title", "url", "snippet", "engine", "published"}
 
 
 def test_search_json_caps_query_length() -> None:

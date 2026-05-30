@@ -208,6 +208,26 @@ def render_home_page() -> str:
     return f"<!DOCTYPE html><html>{head}{body}</html>"
 
 
+def _sort_bar(query: str, sort_mode: str) -> str:
+    """A sort selector. GET so the choice is bookmarkable; carries the query in a hidden field."""
+    options = []
+    for value, label in (
+        ("fresh", "Freshest + Relevant"),
+        ("date", "Date"),
+        ("relevance", "Relevance"),
+    ):
+        selected = " selected" if value == sort_mode else ""
+        options.append(f'<option value="{value}"{selected}>{label}</option>')
+    return (
+        '<form class="scopebar" action="/search" method="get">'
+        f'<input type="hidden" name="q" value="{escape(query, quote=True)}">'
+        "<label>Sort:</label>"
+        '<select name="sort" onchange="this.form.submit()">' + "".join(options) + "</select>"
+        '<noscript><button type="submit">Apply</button></noscript>'
+        "</form>"
+    )
+
+
 def _scope_bar(rules: RankingRules) -> str:
     """A scope (lens) selector. Renders only when the profile has at least one lens defined."""
     if not rules.lenses:
@@ -286,6 +306,7 @@ def render_results_page(
     rules: RankingRules | None = None,
     editable: bool = False,
     summary: SummaryBox | None = None,
+    sort_mode: str = "fresh",
 ) -> str:
     """The results page. Empty/blank query -> a placeholder; otherwise -> the merged results.
 
@@ -340,6 +361,7 @@ def render_results_page(
         parts.append(f'<p class="empty">No results for “{safe_query}”.</p>')
     else:
         parts.append(f'<p class="meta">Results for “{safe_query}”</p>')
+        parts.append(_sort_bar(query, sort_mode))
         if editable:
             parts.append(_scope_bar(active_rules))
         for result in results_list:

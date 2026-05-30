@@ -28,6 +28,7 @@ import asyncio
 import inspect
 import json
 import socket
+import time
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import asdict
 from ipaddress import ip_address
@@ -49,6 +50,7 @@ from starlette.types import ASGIApp
 from searchmob_desktop.engines import EngineContext, EngineFn, SearchResult, aggregate
 from searchmob_desktop.engines.correct import SpellCorrector
 from searchmob_desktop.engines.rank import RankingRules, RankRule, apply_ranking, host_of_url
+from searchmob_desktop.engines.sort import SortMode, sort_results
 from searchmob_desktop.engines.wiki_summary import SummaryBox
 from searchmob_desktop.server.opensearch import build_descriptor
 from searchmob_desktop.server.templates import render_home_page, render_results_page
@@ -351,15 +353,18 @@ def build_app(
     static_rules = ranking_rules if ranking_rules is not None else RankingRules()
     rules_provider: Callable[[], RankingRules] = ranking_rules_provider or (lambda: static_rules)
 
-    async def _run_metasearch(query: str) -> list[SearchResult]:
+    async def _run_metasearch(
+        query: str, sort_mode: SortMode = SortMode.FRESH_RELEVANT
+    ) -> list[SearchResult]:
         if not query.strip() or not engines:
             return []
         ctx = EngineContext(query=query, max_results=max_results, timeout_seconds=timeout_seconds)
         results = await metasearch(ctx, engines)
-        # Apply the user's local personalization rules (block/lower/raise/pin, lens, goggles) after
-        # aggregation so the served results match the in-app results.
+        # Sort (relevance/date/freshness blend), then apply the user's personalization rules so the
+        # served results match the in-app results and PIN/RAISE preserve the chosen order.
+        ordered = sort_results(results, sort_mode, query, int(time.time() * 1000))
         return apply_ranking(
-            results,
+            ordered,
             rules_provider(),
             host_of=lambda r: host_of_url(r.url),
             text_of=lambda r: f"{r.title} {r.snippet}",
@@ -398,10 +403,11 @@ def build_app(
 
     async def search_html(request: Request) -> Response:
         query = _clamp(request.query_params.get("q"))
+        sort_mode = SortMode.from_value(request.query_params.get("sort"))
         # Fetch the contextual summary concurrently with the metasearch so the box never adds
         # latency to the results path.
         summary_task = asyncio.ensure_future(_maybe_summary(query))
-        results = await _run_metasearch(query)
+        results = await _run_metasearch(query, sort_mode)
         summary = await summary_task
         body = render_results_page(
             query,
@@ -411,6 +417,7 @@ def build_app(
             rules=rules_provider(),
             editable=_is_owner(request),
             summary=summary,
+            sort_mode=sort_mode.value,
         )
         return Response(body, media_type="text/html; charset=utf-8")
 
@@ -450,7 +457,9 @@ def build_app(
 
     async def search_json(request: Request) -> Response:
         query = _clamp(request.query_params.get("q"))
-        results = await _run_metasearch(query)
+        results = await _run_metasearch(
+            query, SortMode.from_value(request.query_params.get("sort"))
+        )
         payload = {
             "query": query,
             "results": [asdict(result) for result in results],

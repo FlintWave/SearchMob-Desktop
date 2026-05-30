@@ -10,12 +10,14 @@ the GUI thread via the worker's `finished` signal.
 from __future__ import annotations
 
 import asyncio
+import time
 from html import escape
 from importlib.resources import as_file, files
 
 from PySide6.QtCore import Qt, QThreadPool, QTimer, QUrl
 from PySide6.QtGui import QAction, QDesktopServices, QIcon, QKeySequence
 from PySide6.QtWidgets import (
+    QComboBox,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -38,6 +40,7 @@ from searchmob_desktop.data.ranking_store import load_ranking_rules, save_rankin
 from searchmob_desktop.engines import EngineContext, SearchResult, aggregate
 from searchmob_desktop.engines.correct import start_background_corrector
 from searchmob_desktop.engines.rank import RankRule, apply_ranking, host_of_url
+from searchmob_desktop.engines.sort import SortMode, sort_results
 from searchmob_desktop.engines.wiki_summary import SummaryBox, summary_for_query
 from searchmob_desktop.gui.about_dialog import AboutDialog
 from searchmob_desktop.gui.browser_setup_dialog import BrowserSetupDialog
@@ -91,6 +94,8 @@ class MainWindow(QMainWindow):
         # without re-searching.
         self._ranking_rules = load_ranking_rules()
         self._raw_results: list[SearchResult] = []
+        # Result sort order ("fresh"/"date"/"relevance"); re-sorts in place without re-searching.
+        self._sort_mode = SortMode.from_value(prefs.sort_mode)
         # On-device "did you mean"; the dictionary loads off-thread so early searches just get no
         # suggestion. The last submitted query is kept so the result handler can offer a correction.
         self._corrector = start_background_corrector(
@@ -132,10 +137,25 @@ class MainWindow(QMainWindow):
         search_row.addWidget(self._search_btn)
         outer.addLayout(search_row)
 
-        # Status line above the results: idle / loading / empty / error / count.
+        # Status line + sort control above the results: idle / loading / empty / error / count.
+        status_row = QHBoxLayout()
         self._status_label = QLabel("Enter a query to search.")
         self._status_label.setProperty("role", "muted")
-        outer.addWidget(self._status_label)
+        status_row.addWidget(self._status_label, stretch=1)
+        sort_label = QLabel("Sort:")
+        sort_label.setProperty("role", "muted")
+        status_row.addWidget(sort_label)
+        self._sort_combo = QComboBox()
+        for label, mode in (
+            ("Freshest + Relevant", SortMode.FRESH_RELEVANT),
+            ("Date", SortMode.DATE),
+            ("Relevance", SortMode.RELEVANCE),
+        ):
+            self._sort_combo.addItem(label, mode.value)
+        self._sort_combo.setCurrentIndex(max(0, self._sort_combo.findData(self._sort_mode.value)))
+        self._sort_combo.currentIndexChanged.connect(self._on_sort_changed)
+        status_row.addWidget(self._sort_combo)
+        outer.addLayout(status_row)
 
         # "Did you mean: X" banner from the on-device corrector. Hidden until a search yields a
         # suggestion; clicking the link re-runs the search with the corrected query.
@@ -396,9 +416,14 @@ class MainWindow(QMainWindow):
         self._maybe_show_correction()
 
     def _apply_ranking_and_show(self) -> None:
-        """Re-rank the last raw results with the current rules and update the view + status."""
+        """Sort, then re-rank the last raw results with the current rules; update view + status."""
+        # Sort first (relevance/date/freshness blend), then bucket by the user's rules so PIN/RAISE
+        # are honored while preserving the chosen order within each bucket.
+        ordered = sort_results(
+            self._raw_results, self._sort_mode, self._last_query, int(time.time() * 1000)
+        )
         ranked = apply_ranking(
-            self._raw_results,
+            ordered,
             self._ranking_rules,
             host_of=lambda r: host_of_url(r.url),
             text_of=lambda r: f"{r.title} {r.snippet}",
@@ -407,6 +432,19 @@ class MainWindow(QMainWindow):
         hidden = len(self._raw_results) - len(ranked)
         suffix = f" ({hidden} hidden by your rules)" if hidden > 0 else ""
         self._status_label.setText(f"{len(ranked)} results{suffix}.")
+
+    def _on_sort_changed(self) -> None:
+        """Sort control changed: persist the choice and re-sort the current results in place."""
+        self._sort_mode = SortMode.from_value(self._sort_combo.currentData())
+        try:
+            from dataclasses import replace
+
+            prefs = self._prefs_store.load()
+            self._prefs_store.save(replace(prefs, sort_mode=self._sort_mode.value))
+        except OSError:
+            pass
+        if self._raw_results:
+            self._apply_ranking_and_show()
 
     def _on_rule_requested(self, domain: str, rule: RankRule) -> None:
         """A right-click ranking action on a result domain: persist it and re-rank in place."""
