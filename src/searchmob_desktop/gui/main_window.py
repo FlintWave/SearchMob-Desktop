@@ -40,6 +40,7 @@ from searchmob_desktop.data.history_factory import build_history_store
 from searchmob_desktop.data.ranking_store import load_ranking_rules, save_ranking_rules
 from searchmob_desktop.engines import EngineContext, SearchResult, aggregate
 from searchmob_desktop.engines.correct import start_background_corrector
+from searchmob_desktop.engines.local_llm import LlmConfig, generate_answer
 from searchmob_desktop.engines.rank import RankRule, apply_ranking, host_of_url
 from searchmob_desktop.engines.rank.slop_blocklist import load_slop_domains
 from searchmob_desktop.engines.sort import SortMode, sort_results
@@ -196,6 +197,12 @@ class MainWindow(QMainWindow):
         self._didyoumean.hide()
         outer.addWidget(self._didyoumean)
 
+        # Optional local-AI answer card, populated after results when the feature is enabled and a
+        # local model server is reachable. Hidden otherwise (and on any error).
+        self._answer_card = self._build_answer_card()
+        self._answer_card.hide()
+        outer.addWidget(self._answer_card)
+
         # Contextual Wikipedia summary card, shown above the results for entity-like queries.
         self._summary_card = self._build_summary_card()
         self._summary_card.hide()
@@ -301,6 +308,56 @@ class MainWindow(QMainWindow):
         self._summary_extract.setText(box.extract)
         self._summary_card.show()
 
+    def _build_answer_card(self) -> QFrame:
+        """A card showing a locally-generated, results-grounded answer with citations."""
+        card = QFrame()
+        card.setObjectName("answerCard")
+        card.setProperty("role", "card")
+        card.setFrameShape(QFrame.Shape.StyledPanel)
+        col = QVBoxLayout(card)
+        col.setSpacing(4)
+        header = QLabel("AI answer (local)")
+        header.setProperty("role", "heading")
+        self._answer_body = QLabel()
+        self._answer_body.setWordWrap(True)
+        self._answer_body.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        footer = QLabel("Generated on your device from the results below. May be inaccurate.")
+        footer.setProperty("role", "muted")
+        for w in (header, self._answer_body, footer):
+            col.addWidget(w)
+        return card
+
+    def _maybe_generate_answer(self, query: str, results: list[SearchResult]) -> None:
+        """Kick off local-model answer generation when enabled, ready, and there are results."""
+        prefs = self._prefs_store.load()
+        config = LlmConfig(
+            enabled=prefs.llm_enabled,
+            base_url=prefs.llm_base_url,
+            model=prefs.llm_model,
+        )
+        if not config.ready or not results:
+            self._answer_card.hide()
+            return
+        # Show an immediate "thinking" state so the card does not pop in late with no warning.
+        self._answer_body.setText("Thinking ...")
+        self._answer_card.show()
+        grounding = list(results)
+
+        async def _run() -> str | None:
+            return await generate_answer(config, query, grounding)
+
+        worker: AsyncWorker[str | None] = AsyncWorker(_run)
+        worker.signals.finished.connect(self._on_answer_ready)
+        worker.signals.failed.connect(lambda _exc: self._answer_card.hide())
+        worker.start(self._pool)
+
+    def _on_answer_ready(self, payload: object) -> None:
+        if isinstance(payload, str) and payload.strip():
+            self._answer_body.setText(payload)
+            self._answer_card.show()
+        else:
+            self._answer_card.hide()
+
     # --- Empty state -------------------------------------------------------------------------
 
     def _build_empty_state(self) -> QWidget:
@@ -390,6 +447,7 @@ class MainWindow(QMainWindow):
         self._status_label.setText("Searching ...")
         self._didyoumean.hide()
         self._summary_card.hide()
+        self._answer_card.hide()
         self._results.clear()
         self._search_btn.setEnabled(False)
 
@@ -442,11 +500,14 @@ class MainWindow(QMainWindow):
             self._status_label.setText("No results found.")
             self._body.setCurrentWidget(self._empty_state)
             self._maybe_show_correction()
+            self._answer_card.hide()
             return
         self._raw_results = results
         self._body.setCurrentWidget(self._results)
         self._apply_ranking_and_show()
         self._maybe_show_correction()
+        # Ground the optional local-AI answer on the original query and the freshly ranked results.
+        self._maybe_generate_answer(self._last_query, results)
 
     def _apply_ranking_and_show(self) -> None:
         """Sort, then re-rank the last raw results with the current rules; update view + status."""

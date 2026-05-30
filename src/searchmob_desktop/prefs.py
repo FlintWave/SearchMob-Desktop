@@ -70,6 +70,13 @@ class UserPreferences:
     sort_mode: str = "fresh"
     # AI-slop / low-quality content filter: "downrank" (default, on), "hide", or "off".
     ai_slop_mode: str = "downrank"
+    # Optional local-LLM answer box. Off by default and only ever talks to a model server running on
+    # this machine (Ollama/LM Studio); nothing leaves the device. `llm_base_url` is the OpenAI-
+    # compatible endpoint base; `llm_model` is the chosen model. Both empty until the user detects
+    # and picks one.
+    llm_enabled: bool = False
+    llm_base_url: str = ""
+    llm_model: str = ""
     update_check_enabled: bool = True
     last_update_check_ms: int = 0
     # Set once the first-run setup wizard has been completed or skipped, so it never reappears.
