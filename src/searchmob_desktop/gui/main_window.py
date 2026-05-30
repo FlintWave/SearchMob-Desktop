@@ -14,7 +14,7 @@ import time
 from html import escape
 from importlib.resources import as_file, files
 
-from PySide6.QtCore import Qt, QThreadPool, QTimer, QUrl
+from PySide6.QtCore import Qt, QThreadPool, QTimer, QUrl, Signal
 from PySide6.QtGui import QAction, QDesktopServices, QIcon, QKeySequence
 from PySide6.QtWidgets import (
     QButtonGroup,
@@ -40,7 +40,7 @@ from searchmob_desktop.data.history_factory import build_history_store
 from searchmob_desktop.data.ranking_store import load_ranking_rules, save_ranking_rules
 from searchmob_desktop.engines import EngineContext, SearchResult, aggregate
 from searchmob_desktop.engines.correct import start_background_corrector
-from searchmob_desktop.engines.local_llm import LlmConfig, generate_answer
+from searchmob_desktop.engines.local_llm import LlmConfig, stream_answer
 from searchmob_desktop.engines.rank import RankRule, apply_ranking, host_of_url
 from searchmob_desktop.engines.rank.slop_blocklist import load_slop_domains
 from searchmob_desktop.engines.sort import SortMode, sort_results
@@ -55,7 +55,7 @@ from searchmob_desktop.gui.server_controller import (
     build_engines_from_prefs,
 )
 from searchmob_desktop.gui.settings_dialog import SettingsDialog
-from searchmob_desktop.gui.theme import apply_theme
+from searchmob_desktop.gui.theme import DARK_PALETTE, active_palette, apply_theme
 from searchmob_desktop.gui.workers import AsyncWorker
 from searchmob_desktop.prefs import JsonPreferencesStore
 from searchmob_desktop.server import LOOPBACK_HOST
@@ -73,6 +73,11 @@ def app_icon() -> QIcon:
 
 class MainWindow(QMainWindow):
     """Top-level shell."""
+
+    # Marshal local-AI streaming updates from the worker thread to the GUI thread. The int is a
+    # generation id so deltas from a superseded search are ignored once a newer search starts.
+    _answer_delta = Signal(int, str)
+    _answer_final = Signal(int, object)
 
     def __init__(
         self,
@@ -122,6 +127,12 @@ class MainWindow(QMainWindow):
         self._server.serverError.connect(self._on_server_error)
 
         self._pool = QThreadPool.globalInstance()
+        # Local-AI streaming state: a monotonically increasing id per answer request, and the text
+        # accumulated so far for the current one. The signals deliver worker-thread updates here.
+        self._answer_gen = 0
+        self._answer_accum = ""
+        self._answer_delta.connect(self._on_answer_delta)
+        self._answer_final.connect(self._on_answer_final)
 
         central = QWidget(self)
         outer = QVBoxLayout(central)
@@ -142,6 +153,14 @@ class MainWindow(QMainWindow):
         self._search_btn.clicked.connect(self._on_submit)
         search_row.addWidget(self._query_input, stretch=1)
         search_row.addWidget(self._search_btn)
+        # Quick light/dark toggle on the homepage, mirroring the served page. Labels itself with the
+        # theme it will switch to (a sun for Light, a moon for Dark).
+        self._theme_btn = QPushButton()
+        self._theme_btn.setProperty("role", "chip")
+        self._theme_btn.setToolTip("Switch between light and dark")
+        self._theme_btn.clicked.connect(self._on_toggle_theme)
+        search_row.addWidget(self._theme_btn)
+        self._update_theme_button()
         outer.addLayout(search_row)
 
         # Category tabs (Web/News/Forums/Academic). Each scopes the query over the same engines; no
@@ -338,34 +357,52 @@ class MainWindow(QMainWindow):
         return card
 
     def _maybe_generate_answer(self, query: str, results: list[SearchResult]) -> None:
-        """Kick off local-model answer generation when enabled, ready, and there are results."""
+        """Stream a local-model answer (when enabled and ready) into the card as it is generated."""
         prefs = self._prefs_store.load()
         config = LlmConfig(
             enabled=prefs.llm_enabled,
             base_url=prefs.llm_base_url,
             model=prefs.llm_model,
         )
+        # Each request gets a new id; deltas/finish from a superseded search are then ignored.
+        self._answer_gen += 1
+        gen = self._answer_gen
+        self._answer_accum = ""
         if not config.ready or not results:
             self._answer_card.hide()
             return
-        # Show an immediate "thinking" state so the card does not pop in late with no warning.
+        # Show an immediate "thinking" state; the first streamed token replaces it.
         self._answer_body.setText("Thinking ...")
         self._answer_card.show()
         grounding = list(results)
 
         async def _run() -> str | None:
-            return await generate_answer(config, query, grounding)
+            # on_delta runs on the worker thread; emitting a signal hops safely to the GUI thread.
+            return await stream_answer(
+                config, query, grounding, lambda piece: self._answer_delta.emit(gen, piece)
+            )
 
         worker: AsyncWorker[str | None] = AsyncWorker(_run)
-        worker.signals.finished.connect(self._on_answer_ready)
-        worker.signals.failed.connect(lambda _exc: self._answer_card.hide())
+        worker.signals.finished.connect(lambda payload, g=gen: self._answer_final.emit(g, payload))
+        worker.signals.failed.connect(lambda _exc, g=gen: self._answer_final.emit(g, None))
         worker.start(self._pool)
 
-    def _on_answer_ready(self, payload: object) -> None:
+    def _on_answer_delta(self, gen: int, text: str) -> None:
+        """A streamed token arrived (GUI thread): append it to the card."""
+        if gen != self._answer_gen:
+            return  # a newer search has superseded this stream
+        self._answer_accum += text
+        self._answer_body.setText(self._answer_accum)
+        self._answer_card.show()
+
+    def _on_answer_final(self, gen: int, payload: object) -> None:
+        """The stream finished (GUI thread): set the full text, or hide if nothing was produced."""
+        if gen != self._answer_gen:
+            return
         if isinstance(payload, str) and payload.strip():
             self._answer_body.setText(payload)
             self._answer_card.show()
-        else:
+        elif not self._answer_accum:
             self._answer_card.hide()
 
     # --- Empty state -------------------------------------------------------------------------
@@ -665,6 +702,27 @@ class MainWindow(QMainWindow):
 
     # --- Dialogs -----------------------------------------------------------------------------
 
+    def _update_theme_button(self) -> None:
+        """Label the toggle with the theme it switches to: a sun for Light, a moon for Dark."""
+        is_dark = active_palette() == DARK_PALETTE
+        self._theme_btn.setText("☀ Light" if is_dark else "☾ Dark")
+
+    def _on_toggle_theme(self) -> None:
+        """Flip between light and dark, persist the choice, and re-style the app live."""
+        from dataclasses import replace
+
+        new_theme = "light" if active_palette() == DARK_PALETTE else "dark"
+        try:
+            self._prefs_store.save(replace(self._prefs_store.load(), theme=new_theme))
+        except OSError:
+            pass
+        from PySide6.QtWidgets import QApplication
+
+        app = QApplication.instance()
+        if app is not None:
+            apply_theme(app, new_theme)  # type: ignore[arg-type]
+        self._update_theme_button()
+
     def _on_open_settings(self) -> None:
         dialog = SettingsDialog(
             prefs_store=self._prefs_store,
@@ -680,6 +738,8 @@ class MainWindow(QMainWindow):
             if app is not None:
                 # `QApplication.instance()` returns `QCoreApplication`; cast for the type checker.
                 apply_theme(app, theme)  # type: ignore[arg-type]
+            # Keep the homepage toggle's sun/moon label in sync with the Settings change.
+            self._update_theme_button()
 
         def _on_rules_changed() -> None:
             # The ranking tab edited the vault-stored rules; reload, refresh the scope selector

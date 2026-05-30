@@ -3,15 +3,24 @@
 All notable changes to SearchMob Desktop are documented here. The version scheme is Ubuntu-style
 `YY.MM.VV` and releases are tagged `vYY.MM.VV`.
 
-## 26.05.07 — 2026-05-29
+## 26.05.08 — 2026-05-29
+
+### Added
+- **Light/dark toggle on the main window**, next to the search box (a sun/moon button), mirroring
+  the served page. It flips and persists the theme without opening Settings.
+
+### Changed
+- **The local AI answer now streams.** The answer appears token by token as the model produces it,
+  instead of waiting (and looking stalled) until the whole answer is finished. This matters for
+  larger local models that take a while to begin replying; you now see it fill in live, and a
+  slow-but-progressing generation is never cut off by a timeout.
 
 ### Fixed
 - **The local server now starts on launch**, so SearchMob is reachable (and usable as your browser's
   search engine) the moment the app opens, without starting it by hand.
 - **Local AI was easy to leave inert.** The Local AI settings tab is now a single Model dropdown
   ("Off" plus every model found on this machine): picking a model turns the answer box on, so a
-  chosen model is never silently disabled. Models are detected automatically when you open the tab,
-  and the answer timeout was raised so a large model that is slow on its first run is not dropped.
+  chosen model is never silently disabled. Models are detected automatically when you open the tab.
 - **Result scope (lens) selector** is now available on the main window next to the Sort control, not
   just on the served page; it appears once you have at least one saved lens.
 - **Zero-knowledge passphrase setup** no longer fails with "the vault is not unlocked" when the OS

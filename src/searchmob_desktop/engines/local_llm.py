@@ -15,6 +15,7 @@ than the model's free-floating memory.
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from dataclasses import dataclass
 
 import httpx
@@ -33,6 +34,10 @@ _BACKENDS: tuple[tuple[str, str, str], ...] = (
 # (loading weights into memory) before the first token; a tighter bound would silently drop the box.
 _PROBE_TIMEOUT = 1.5
 _ANSWER_TIMEOUT = 180.0
+# For streaming, the timeout is the gap allowed between tokens (reset by each one), not a total cap.
+# It is generous so a big model that is slow to load before the first token is not dropped, while a
+# genuinely dead connection still eventually times out.
+_STREAM_READ_TIMEOUT = 120.0
 _MAX_ANSWER_BYTES = 2 * 1024 * 1024
 # How many results to ground the answer on, and how much of each snippet to include.
 _MAX_SOURCES = 6
@@ -194,3 +199,84 @@ async def generate_answer(
     except (httpx.HTTPError, ValueError):
         return None
     return _answer_from_completion(payload)
+
+
+def _delta_from_chunk(payload: object) -> str:
+    """Pull the incremental text from one OpenAI streaming chunk (`choices[0].delta.content`)."""
+    if not isinstance(payload, dict):
+        return ""
+    choices = payload.get("choices")
+    if not isinstance(choices, list) or not choices:
+        return ""
+    first = choices[0]
+    if not isinstance(first, dict):
+        return ""
+    delta = first.get("delta")
+    if isinstance(delta, dict):
+        content = delta.get("content")
+        if isinstance(content, str):
+            return content
+    return ""
+
+
+async def stream_answer(
+    config: LlmConfig,
+    query: str,
+    results: list[SearchResult],
+    on_delta: Callable[[str], None],
+    read_timeout: float = _STREAM_READ_TIMEOUT,
+) -> str | None:
+    """Stream a grounded answer token-by-token, calling `on_delta` for each piece, return the whole.
+
+    Streaming matters for local models: a large model can take tens of seconds to load and begin
+    replying, and non-streaming would show nothing until the entire answer is generated (which reads
+    as a hang). With streaming the answer appears as it is produced, and the timeout is a per-read
+    gap (between tokens), not a total cap, so a slow-but-progressing generation is never cut off.
+
+    Returns the full text (also the accumulation of the deltas), or None when not ready / blank /
+    no results / the server errors before any text arrives. Any text received before an error is
+    returned rather than discarded.
+    """
+    if not config.ready or not query.strip() or not results:
+        return None
+    body = {
+        "model": config.model,
+        "messages": build_messages(query, results),
+        "stream": True,
+        "temperature": 0.2,
+    }
+    url = config.base_url.rstrip("/") + "/chat/completions"
+    # Connect quickly, but allow a long gap before the first token (model load); a token resets it.
+    timeout = httpx.Timeout(read_timeout, connect=10.0)
+    parts: list[str] = []
+    total = 0
+    try:
+        async with (
+            httpx.AsyncClient(timeout=timeout, follow_redirects=False, trust_env=False) as (client),
+            client.stream("POST", url, json=body) as resp,
+        ):
+            resp.raise_for_status()
+            async for line in resp.aiter_lines():
+                line = line.strip()
+                if not line or not line.startswith("data:"):
+                    continue
+                data = line[len("data:") :].strip()
+                if data == "[DONE]":
+                    break
+                try:
+                    chunk = json.loads(data)
+                except ValueError:
+                    continue
+                piece = _delta_from_chunk(chunk)
+                if piece:
+                    total += len(piece)
+                    if total > _MAX_ANSWER_BYTES:
+                        break
+                    parts.append(piece)
+                    on_delta(piece)
+    except (httpx.HTTPError, ValueError):
+        # Return whatever streamed before the error rather than losing a partial answer.
+        text = "".join(parts).strip()
+        return text or None
+    text = "".join(parts).strip()
+    return text or None
