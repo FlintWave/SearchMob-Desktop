@@ -3,7 +3,21 @@
 All notable changes to SearchMob Desktop are documented here. The version scheme is Ubuntu-style
 `YY.MM.VV` and releases are tagged `vYY.MM.VV`.
 
-## Unreleased
+## 26.05.07 — 2026-05-29
+
+### Fixed
+- **The local server now starts on launch**, so SearchMob is reachable (and usable as your browser's
+  search engine) the moment the app opens, without starting it by hand.
+- **Local AI was easy to leave inert.** The Local AI settings tab is now a single Model dropdown
+  ("Off" plus every model found on this machine): picking a model turns the answer box on, so a
+  chosen model is never silently disabled. Models are detected automatically when you open the tab,
+  and the answer timeout was raised so a large model that is slow on its first run is not dropped.
+- **Result scope (lens) selector** is now available on the main window next to the Sort control, not
+  just on the served page; it appears once you have at least one saved lens.
+- **Zero-knowledge passphrase setup** no longer fails with "the vault is not unlocked" when the OS
+  keyring's availability changed since the vault was created. Unlock now tries every key-encryption
+  key the vault could have been wrapped with (OS keyring and the on-disk fallback).
+- **The first-run wizard opens centered over the main window** instead of in a screen corner.
 
 ### Added
 - **Result sorting (freshest by date + relevance).** A new Sort control (in the app and on the
@@ -14,6 +28,22 @@ All notable changes to SearchMob Desktop are documented here. The version scheme
   look unchanged), and leans harder into freshness for obviously time-sensitive queries (release
   date, latest, score, a current/next year). The choice persists in the app and is a `?sort=` URL
   param on the served page.
+- **AI-slop / low-quality content filter.** Results from a bundled, CC0-licensed list of
+  AI-content-farm and low-quality domains can be downranked or hidden, entirely on-device (no query
+  leaves the machine for filtering). Three modes in Settings -> Result ranking: **Downrank**
+  (default, on), **Hide**, and **Off**. The filter runs after your own per-domain rules and goggles,
+  so an explicit rule always wins and you can rescue a false positive by setting that domain to
+  Normal or Raise.
+- **Search verticals (category tabs).** A row of categories above the results: **Web** (default),
+  **News**, **Forums**, and **Academic**. Each is a scoped search over the same engines (a `site:`
+  filter the engines understand) plus a sensible default sort, so no new service ever sees your
+  query and no API key is involved. News favors recent major outlets; Forums covers discussion
+  sites; Academic covers scholarly sources. Available in the app and on the served page (`?vertical=`).
+- **Optional local-AI answer box.** When you have a language-model server running on this computer
+  (**Ollama** on port 11434 or **LM Studio** on port 1234), the app can show a short, cited answer
+  above the results, summarizing your own results. It is off by default, only appears once you enable
+  it and detect a local model in Settings -> Local AI, and **never touches the network** - it talks
+  only to the loopback model server and nowhere else.
 
 ## 26.05.05 — 2026-05-29
 

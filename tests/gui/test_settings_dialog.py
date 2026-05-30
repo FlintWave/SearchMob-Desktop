@@ -161,31 +161,57 @@ def test_network_toggle_on_mints_token_and_reuses_it(
     assert store.load().network_access_token == token
 
 
-def test_local_ai_enable_persists(qapp: object, tmp_path: Path) -> None:
-    store = _store(tmp_path)
-    dialog = _dialog(store)
-    assert store.load().llm_enabled is False
-    dialog._llm_enable.setChecked(True)
-    assert store.load().llm_enabled is True
-
-
-def test_local_ai_detected_models_populate_and_persist(qapp: object, tmp_path: Path) -> None:
+def test_local_ai_picking_a_model_enables_and_persists(qapp: object, tmp_path: Path) -> None:
     from searchmob_desktop.engines.local_llm import LlmBackend
 
     store = _store(tmp_path)
     dialog = _dialog(store)
+    assert store.load().llm_enabled is False
     dialog._on_models_detected(
         [LlmBackend("Ollama", "http://127.0.0.1:11434/v1", ("llama3", "qwen2"))]
     )
-    assert dialog._llm_combo.count() == 2
-    # The first detected model is selected and persisted so it is immediately usable.
-    assert store.load().llm_base_url == "http://127.0.0.1:11434/v1"
-    assert store.load().llm_model == "llama3"
+    # "Off" plus the two detected models.
+    assert dialog._llm_combo.count() == 3
+    # Detection alone does not enable: the feature was off, so it stays on "Off".
+    assert store.load().llm_enabled is False
+    # Selecting a model turns the box on and persists the choice.
+    idx = dialog._llm_combo.findText("Ollama — qwen2")
+    assert idx > 0
+    dialog._llm_combo.setCurrentIndex(idx)
+    assert store.load().llm_enabled is True
+    assert store.load().llm_model == "qwen2"
+    # Selecting "Off" turns it back off.
+    dialog._llm_combo.setCurrentIndex(0)
+    assert store.load().llm_enabled is False
 
 
-def test_local_ai_no_models_disables_combo(qapp: object, tmp_path: Path) -> None:
+def test_local_ai_saved_enabled_model_is_preselected(qapp: object, tmp_path: Path) -> None:
+    from dataclasses import replace
+
+    from searchmob_desktop.engines.local_llm import LlmBackend
+
+    store = _store(tmp_path)
+    store.save(
+        replace(
+            store.load(),
+            llm_enabled=True,
+            llm_base_url="http://127.0.0.1:11434/v1",
+            llm_model="llama3",
+        )
+    )
+    dialog = _dialog(store)
+    dialog._on_models_detected(
+        [LlmBackend("Ollama", "http://127.0.0.1:11434/v1", ("llama3", "qwen2"))]
+    )
+    # The saved, enabled model is the current selection (not "Off").
+    assert dialog._llm_combo.currentText() == "Ollama — llama3"
+
+
+def test_local_ai_no_models_shows_only_off(qapp: object, tmp_path: Path) -> None:
     store = _store(tmp_path)
     dialog = _dialog(store)
     dialog._on_models_detected([])
-    assert dialog._llm_combo.isEnabled() is False
-    assert store.load().llm_model == ""
+    # Just the "Off" entry; the feature stays off.
+    assert dialog._llm_combo.count() == 1
+    assert dialog._llm_combo.currentText().startswith("Off")
+    assert store.load().llm_enabled is False

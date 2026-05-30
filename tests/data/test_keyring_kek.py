@@ -77,3 +77,44 @@ def test_no_keyring_falls_back_to_file(tmp_path: Path) -> None:
     assert (fallback.stat().st_mode & 0o777) == 0o600
     kek2 = store.load()
     assert kek1 == kek2
+
+
+def test_candidate_keks_returns_keyring_and_file(tmp_path: Path) -> None:
+    fake = _FakeKeyring()
+    fb = tmp_path / "fallback.kek"
+    store = KeyringKekStore(keyring_module=fake, fallback_file_path=fb)
+    # Seed a keyring KEK and a (different) fallback file KEK.
+    import base64
+
+    fake.store[("org.searchmob.desktop", "kek")] = base64.b64encode(b"K" * 32).decode("ascii")
+    fb.write_bytes(b"F" * 32)
+    cands = store.candidate_keks()
+    assert b"K" * 32 in cands
+    assert b"F" * 32 in cands
+
+
+def test_unwrap_recovers_dek_wrapped_with_file_kek_after_keyring_flip(tmp_path: Path) -> None:
+    """A DEK wrapped with the fallback-file KEK must still unwrap once the keyring holds a different
+    KEK (the real-world bug: keyring availability changed between wrap and unwrap)."""
+    import base64
+
+    from searchmob_desktop.data.crypto.wrap import KeyringDekWrapper
+
+    fb = tmp_path / "fallback.kek"
+
+    # Wrap while the keyring is UNavailable: load() falls back to the file, generating the file KEK.
+    wrap_store = KeyringKekStore(keyring_module=_FailingKeyring(), fallback_file_path=fb)
+    dek = b"D" * 32
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        blob = KeyringDekWrapper(wrap_store).wrap(dek)
+    file_kek = fb.read_bytes()
+
+    # Later run: keyring is back with a DIFFERENT KEK, so load() would prefer the wrong one.
+    fake = _FakeKeyring()
+    fake.store[("org.searchmob.desktop", "kek")] = base64.b64encode(b"K" * 32).decode("ascii")
+    unlock_store = KeyringKekStore(keyring_module=fake, fallback_file_path=fb)
+    assert unlock_store.load() != file_kek  # load() now prefers the keyring KEK
+
+    # Unwrap must still succeed by also trying the file KEK among the candidates.
+    assert KeyringDekWrapper(unlock_store).unwrap(blob) == dek
