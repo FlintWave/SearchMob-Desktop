@@ -17,6 +17,7 @@ from importlib.resources import as_file, files
 from PySide6.QtCore import Qt, QThreadPool, QTimer, QUrl
 from PySide6.QtGui import QAction, QDesktopServices, QIcon, QKeySequence
 from PySide6.QtWidgets import (
+    QButtonGroup,
     QComboBox,
     QFrame,
     QHBoxLayout,
@@ -42,6 +43,7 @@ from searchmob_desktop.engines.correct import start_background_corrector
 from searchmob_desktop.engines.rank import RankRule, apply_ranking, host_of_url
 from searchmob_desktop.engines.rank.slop_blocklist import load_slop_domains
 from searchmob_desktop.engines.sort import SortMode, sort_results
+from searchmob_desktop.engines.verticals import Vertical, transform_query
 from searchmob_desktop.engines.wiki_summary import SummaryBox, summary_for_query
 from searchmob_desktop.gui.about_dialog import AboutDialog
 from searchmob_desktop.gui.browser_setup_dialog import BrowserSetupDialog
@@ -97,6 +99,9 @@ class MainWindow(QMainWindow):
         self._raw_results: list[SearchResult] = []
         # Result sort order ("fresh"/"date"/"relevance"); re-sorts in place without re-searching.
         self._sort_mode = SortMode.from_value(prefs.sort_mode)
+        # Active search vertical (Web/News/Forums/Academic). Changing it re-runs the search because
+        # the query sent to the engines is scoped differently per vertical.
+        self._vertical = Vertical.WEB
         # On-device "did you mean"; the dictionary loads off-thread so early searches just get no
         # suggestion. The last submitted query is kept so the result handler can offer a correction.
         self._corrector = start_background_corrector(
@@ -137,6 +142,29 @@ class MainWindow(QMainWindow):
         search_row.addWidget(self._query_input, stretch=1)
         search_row.addWidget(self._search_btn)
         outer.addLayout(search_row)
+
+        # Category tabs (Web/News/Forums/Academic). Each scopes the query over the same engines; no
+        # new endpoint or API key. Switching re-runs the search because the engine query differs.
+        vertical_row = QHBoxLayout()
+        vertical_row.setSpacing(8)
+        self._vertical_group = QButtonGroup(self)
+        self._vertical_group.setExclusive(True)
+        for label, value in (
+            ("Web", Vertical.WEB),
+            ("News", Vertical.NEWS),
+            ("Forums", Vertical.FORUMS),
+            ("Academic", Vertical.ACADEMIC),
+        ):
+            btn = QPushButton(label)
+            btn.setCheckable(True)
+            btn.setProperty("role", "chip")
+            btn.setChecked(value is Vertical.WEB)
+            self._vertical_group.addButton(btn)
+            btn.setProperty("vertical", value.value)
+            vertical_row.addWidget(btn)
+        vertical_row.addStretch(1)
+        self._vertical_group.buttonClicked.connect(self._on_vertical_clicked)
+        outer.addLayout(vertical_row)
 
         # Status line + sort control above the results: idle / loading / empty / error / count.
         status_row = QHBoxLayout()
@@ -367,7 +395,11 @@ class MainWindow(QMainWindow):
 
         prefs = self._prefs_store.load()
         engines = build_engines_from_prefs(prefs)
-        ctx = EngineContext(query=query, max_results=10, timeout_seconds=5.0)
+        # Scope the engine query for the active vertical; the summary, correction, and sort all keep
+        # the original query so freshness keywords and entity lookups are unaffected by operators.
+        ctx = EngineContext(
+            query=transform_query(query, self._vertical), max_results=10, timeout_seconds=5.0
+        )
         summary_enabled = prefs.summary_enabled
 
         async def _run() -> tuple[list[SearchResult], SummaryBox | None]:
@@ -435,6 +467,13 @@ class MainWindow(QMainWindow):
         hidden = len(self._raw_results) - len(ranked)
         suffix = f" ({hidden} hidden by your rules)" if hidden > 0 else ""
         self._status_label.setText(f"{len(ranked)} results{suffix}.")
+
+    def _on_vertical_clicked(self, button: QPushButton) -> None:
+        """A category tab was clicked: switch vertical and re-run the search."""
+        self._vertical = Vertical.from_value(button.property("vertical"))
+        # Re-run only when there is a query in the box; _on_submit no-ops on empty input.
+        if self._query_input.text().strip():
+            self._on_submit()
 
     def _on_sort_changed(self) -> None:
         """Sort control changed: persist the choice and re-sort the current results in place."""

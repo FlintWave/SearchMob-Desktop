@@ -105,6 +105,11 @@ _PAGE_CSS = (
     ".summary .ssource{font-size:12px}"
     ".summary img{width:84px;height:84px;object-fit:cover;border-radius:8px;flex:none}"
     "@media (max-width:560px){.summary img{display:none}}"
+    ".verticalbar{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 16px}"
+    ".verticalbar .chip{font-size:13px;padding:5px 14px;border:1px solid var(--border);"
+    "border-radius:16px;background:var(--card);color:var(--muted);text-decoration:none}"
+    ".verticalbar .chip.active{background:var(--accent);border-color:var(--accent);color:#fff;"
+    "font-weight:600}"
     ".scopebar{display:flex;align-items:center;gap:8px;margin:0 0 18px;font-size:13px;"
     "color:var(--muted)}"
     ".scopebar select{font-size:13px;padding:3px 6px;border:1px solid var(--border);"
@@ -208,6 +213,26 @@ def render_home_page() -> str:
     return f"<!DOCTYPE html><html>{head}{body}</html>"
 
 
+def _vertical_bar(query: str, vertical: str) -> str:
+    """Category tabs (Web / News / Forums / Academic) as GET links carrying the current query.
+
+    Each link re-runs the search scoped to that vertical. The active one is marked so CSS can style
+    it. Links (not a select) so the categories are visible at a glance and bookmarkable.
+    """
+    safe_q = quote_plus(query)
+    chips = []
+    for value, label in (
+        ("web", "Web"),
+        ("news", "News"),
+        ("forums", "Forums"),
+        ("academic", "Academic"),
+    ):
+        active = " active" if value == vertical else ""
+        href = f"/search?q={safe_q}&vertical={value}"
+        chips.append(f'<a class="chip{active}" href="{escape(href, quote=True)}">{label}</a>')
+    return '<nav class="verticalbar">' + "".join(chips) + "</nav>"
+
+
 def _sort_bar(query: str, sort_mode: str) -> str:
     """A sort selector. GET so the choice is bookmarkable; carries the query in a hidden field."""
     options = []
@@ -307,6 +332,7 @@ def render_results_page(
     editable: bool = False,
     summary: SummaryBox | None = None,
     sort_mode: str = "fresh",
+    vertical: str = "web",
 ) -> str:
     """The results page. Empty/blank query -> a placeholder; otherwise -> the merged results.
 
@@ -344,6 +370,11 @@ def render_results_page(
     parts.append(_theme_toggle_button())
     parts.append("</div>")
     parts.append('<div class="results">')
+
+    # Category tabs render whenever there is a query, so the user can switch verticals even from a
+    # vertical that returned nothing.
+    if not blank:
+        parts.append(_vertical_bar(query, vertical))
 
     if not blank and correction:
         href = "/search?q=" + quote_plus(correction)
