@@ -3,7 +3,7 @@
 All notable changes to SearchMob Desktop are documented here. The version scheme is Ubuntu-style
 `YY.MM.VV` and releases are tagged `vYY.MM.VV`.
 
-## Unreleased
+## 26.05.05 — 2026-05-29
 
 ### Added
 - **Contextual Wikipedia summary box.** For entity-like queries, a short knowledge-panel card from
