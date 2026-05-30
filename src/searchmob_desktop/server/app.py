@@ -52,6 +52,7 @@ from searchmob_desktop.engines.correct import SpellCorrector
 from searchmob_desktop.engines.rank import RankingRules, RankRule, apply_ranking, host_of_url
 from searchmob_desktop.engines.rank.slop_blocklist import load_slop_domains
 from searchmob_desktop.engines.sort import SortMode, sort_results
+from searchmob_desktop.engines.verticals import Vertical, default_sort, transform_query
 from searchmob_desktop.engines.wiki_summary import SummaryBox
 from searchmob_desktop.server.opensearch import build_descriptor
 from searchmob_desktop.server.templates import render_home_page, render_results_page
@@ -356,11 +357,16 @@ def build_app(
     rules_provider: Callable[[], RankingRules] = ranking_rules_provider or (lambda: static_rules)
 
     async def _run_metasearch(
-        query: str, sort_mode: SortMode = SortMode.FRESH_RELEVANT
+        query: str,
+        sort_mode: SortMode = SortMode.FRESH_RELEVANT,
+        vertical: Vertical = Vertical.WEB,
     ) -> list[SearchResult]:
         if not query.strip() or not engines:
             return []
-        ctx = EngineContext(query=query, max_results=max_results, timeout_seconds=timeout_seconds)
+        # Scope the query for the chosen vertical (a `site:` OR group the engines understand); the
+        # original query still drives sort/summary/correction so freshness keywords are detected.
+        scoped = transform_query(query, vertical)
+        ctx = EngineContext(query=scoped, max_results=max_results, timeout_seconds=timeout_seconds)
         results = await metasearch(ctx, engines)
         # Sort (relevance/date/freshness blend), then apply the user's personalization rules so the
         # served results match the in-app results and PIN/RAISE preserve the chosen order.
@@ -407,11 +413,14 @@ def build_app(
 
     async def search_html(request: Request) -> Response:
         query = _clamp(request.query_params.get("q"))
-        sort_mode = SortMode.from_value(request.query_params.get("sort"))
+        vertical = Vertical.from_value(request.query_params.get("vertical"))
+        # An explicit `?sort=` wins; absent it, the vertical picks the sensible default sort.
+        sort_param = request.query_params.get("sort")
+        sort_mode = SortMode.from_value(sort_param) if sort_param else default_sort(vertical)
         # Fetch the contextual summary concurrently with the metasearch so the box never adds
         # latency to the results path.
         summary_task = asyncio.ensure_future(_maybe_summary(query))
-        results = await _run_metasearch(query, sort_mode)
+        results = await _run_metasearch(query, sort_mode, vertical)
         summary = await summary_task
         body = render_results_page(
             query,
@@ -422,6 +431,7 @@ def build_app(
             editable=_is_owner(request),
             summary=summary,
             sort_mode=sort_mode.value,
+            vertical=vertical.value,
         )
         return Response(body, media_type="text/html; charset=utf-8")
 
@@ -461,9 +471,10 @@ def build_app(
 
     async def search_json(request: Request) -> Response:
         query = _clamp(request.query_params.get("q"))
-        results = await _run_metasearch(
-            query, SortMode.from_value(request.query_params.get("sort"))
-        )
+        vertical = Vertical.from_value(request.query_params.get("vertical"))
+        sort_param = request.query_params.get("sort")
+        sort_mode = SortMode.from_value(sort_param) if sort_param else default_sort(vertical)
+        results = await _run_metasearch(query, sort_mode, vertical)
         payload = {
             "query": query,
             "results": [asdict(result) for result in results],

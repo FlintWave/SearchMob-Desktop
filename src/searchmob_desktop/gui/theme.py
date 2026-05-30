@@ -148,6 +148,21 @@ QPushButton[role="primary"] {{
 QPushButton[role="primary"]:hover {{ background-color: {p.accent_hover}; }}
 QPushButton[role="primary"]:disabled {{ background-color: {p.border}; color: {p.muted}; }}
 
+/* Category tabs (verticals): pill-shaped chips; the active one is accent-filled. */
+QPushButton[role="chip"] {{
+    padding: 5px 14px;
+    border-radius: 14px;
+    font-size: 13px;
+    color: {p.muted};
+}}
+QPushButton[role="chip"]:checked {{
+    background-color: {p.accent};
+    color: {p.on_accent};
+    border: none;
+    font-weight: 600;
+}}
+QPushButton[role="chip"]:checked:hover {{ background-color: {p.accent_hover}; }}
+
 /* Results list: cards float on the window background. */
 QListView {{
     background-color: {p.bg};
