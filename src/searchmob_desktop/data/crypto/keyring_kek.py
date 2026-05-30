@@ -71,6 +71,34 @@ class KeyringKekStore:
             _log.warning("keyring unavailable (%s); falling back to file-based KEK", exc)
             return self._load_from_fallback_file()
 
+    def candidate_keks(self) -> list[bytes]:
+        """Return every KEK that could currently decrypt a DEK we wrapped, in preference order.
+
+        `load()` picks a single source (keyring first, file second) and may *create* one, but the
+        DEK on disk could have been wrapped with the other source if keyring availability changed
+        between wrap and unwrap (e.g. a vault created when the session keyring was missing, opened
+        later when it is present). So unwrap must try both. This method only *reads* what already
+        exists; it never generates or stores a KEK, so calling it has no side effects.
+        """
+        out: list[bytes] = []
+        try:
+            existing = self._keyring.get_password(self._service, self._account)  # type: ignore[attr-defined]
+            if existing:
+                out.append(base64.b64decode(existing))
+        except (NoKeyringError, KeyringError):
+            pass
+        if self._fallback_path is not None and self._fallback_path.exists():
+            try:
+                out.append(self._fallback_path.read_bytes())
+            except OSError:
+                pass
+        # Deduplicate while preserving order (the two sources can hold the same bytes).
+        unique: list[bytes] = []
+        for kek in out:
+            if kek not in unique:
+                unique.append(kek)
+        return unique
+
     def clear(self) -> None:
         """Remove the KEK from the keyring (and the fallback file if it exists).
 

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 
+from PySide6.QtGui import QShowEvent
 from PySide6.QtWidgets import (
     QDialog,
     QFrame,
@@ -84,6 +85,21 @@ class OnboardingDialog(QDialog):
 
         self._stack.currentChanged.connect(lambda _i: self._update_nav())
         self._update_nav()
+        self._centered = False
+
+    def showEvent(self, event: QShowEvent) -> None:
+        """Center the wizard over the main window on first show.
+
+        A parented modal is not reliably centered by every window manager (it can open in a corner),
+        so we position it explicitly over the parent's frame the first time it appears.
+        """
+        super().showEvent(event)
+        parent = self.parentWidget()
+        if not self._centered and parent is not None:
+            geo = self.frameGeometry()
+            geo.moveCenter(parent.frameGeometry().center())
+            self.move(geo.topLeft())
+            self._centered = True
 
     # --- Page builders -----------------------------------------------------------------------
 

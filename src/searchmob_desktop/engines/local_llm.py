@@ -29,8 +29,10 @@ _BACKENDS: tuple[tuple[str, str, str], ...] = (
 )
 
 # Bound everything: a local model can stream a lot, and the probe/answer should never hang the UI.
+# The answer timeout is generous because a large model (20B+) can take a while on a cold start
+# (loading weights into memory) before the first token; a tighter bound would silently drop the box.
 _PROBE_TIMEOUT = 1.5
-_ANSWER_TIMEOUT = 60.0
+_ANSWER_TIMEOUT = 180.0
 _MAX_ANSWER_BYTES = 2 * 1024 * 1024
 # How many results to ground the answer on, and how much of each snippet to include.
 _MAX_SOURCES = 6

@@ -34,4 +34,8 @@ def run_gui(argv: list[str] | None = None) -> int:
 
     window = MainWindow(prefs_store=prefs_store)
     window.show()
+    # Start the local server on launch so SearchMob is immediately reachable (and usable as the
+    # browser's search engine) without the user starting it by hand. Fail-soft: a bind error is
+    # reported through the window's serverError handler, not raised here.
+    window.start_server()
     return int(app.exec())

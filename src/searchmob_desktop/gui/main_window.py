@@ -172,6 +172,14 @@ class MainWindow(QMainWindow):
         self._status_label = QLabel("Enter a query to search.")
         self._status_label.setProperty("role", "muted")
         status_row.addWidget(self._status_label, stretch=1)
+        # Scope (lens) selector: pick the active personalization lens, mirroring the served page's
+        # scope bar. Hidden until at least one lens exists (created in Settings -> Result ranking).
+        self._scope_label = QLabel("Scope:")
+        self._scope_label.setProperty("role", "muted")
+        status_row.addWidget(self._scope_label)
+        self._scope_combo = QComboBox()
+        self._scope_combo.currentIndexChanged.connect(self._on_scope_changed)
+        status_row.addWidget(self._scope_combo)
         sort_label = QLabel("Sort:")
         sort_label.setProperty("role", "muted")
         status_row.addWidget(sort_label)
@@ -186,6 +194,8 @@ class MainWindow(QMainWindow):
         self._sort_combo.currentIndexChanged.connect(self._on_sort_changed)
         status_row.addWidget(self._sort_combo)
         outer.addLayout(status_row)
+        # Populate the scope selector from the loaded rules (and toggle its visibility).
+        self._refresh_scope_combo()
 
         # "Did you mean: X" banner from the on-device corrector. Hidden until a search yields a
         # suggestion; clicking the link re-runs the search with the corrected query.
@@ -549,6 +559,29 @@ class MainWindow(QMainWindow):
         if self._raw_results:
             self._apply_ranking_and_show()
 
+    def _refresh_scope_combo(self) -> None:
+        """Rebuild the scope selector from the current rules; hide it when no lenses exist."""
+        self._scope_combo.blockSignals(True)
+        self._scope_combo.clear()
+        self._scope_combo.addItem("No scope", "")
+        for lens in self._ranking_rules.lenses:
+            self._scope_combo.addItem(lens.name, lens.name)
+        active = self._ranking_rules.active_lens or ""
+        idx = self._scope_combo.findData(active)
+        self._scope_combo.setCurrentIndex(idx if idx >= 0 else 0)
+        self._scope_combo.blockSignals(False)
+        has_lenses = bool(self._ranking_rules.lenses)
+        self._scope_label.setVisible(has_lenses)
+        self._scope_combo.setVisible(has_lenses)
+
+    def _on_scope_changed(self) -> None:
+        """Scope control changed: set the active lens, persist it, and re-rank in place."""
+        name = self._scope_combo.currentData() or None
+        self._ranking_rules = self._ranking_rules.with_active_lens(name)
+        save_ranking_rules(self._ranking_rules)
+        if self._raw_results:
+            self._apply_ranking_and_show()
+
     def _on_rule_requested(self, domain: str, rule: RankRule) -> None:
         """A right-click ranking action on a result domain: persist it and re-rank in place."""
         if rule == RankRule.NORMAL:
@@ -590,6 +623,17 @@ class MainWindow(QMainWindow):
         self._body.setCurrentWidget(self._empty_state)
 
     # --- Server ------------------------------------------------------------------------------
+
+    def start_server(self) -> None:
+        """Start the local server if it is not already running.
+
+        Called once on launch by `run_gui` so SearchMob is reachable (and usable as the browser's
+        search engine) the moment the app opens, without the user having to start it by hand. A
+        no-op if a server is already running, and fail-soft: a bind error surfaces through the usual
+        `serverError` handler rather than blocking launch.
+        """
+        if not self._server.is_running:
+            self._server.start()
 
     def _on_toggle_server(self) -> None:
         if self._server.is_running:
@@ -638,8 +682,10 @@ class MainWindow(QMainWindow):
                 apply_theme(app, theme)  # type: ignore[arg-type]
 
         def _on_rules_changed() -> None:
-            # The ranking tab edited the vault-stored rules; reload and re-rank current results.
+            # The ranking tab edited the vault-stored rules; reload, refresh the scope selector
+            # (lenses may have been added/removed), and re-rank current results.
             self._ranking_rules = load_ranking_rules()
+            self._refresh_scope_combo()
             if self._raw_results:
                 self._apply_ranking_and_show()
 

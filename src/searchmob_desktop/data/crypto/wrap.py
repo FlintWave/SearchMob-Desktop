@@ -53,7 +53,19 @@ class KeyringDekWrapper:
         return encrypt(self._kek_store.load(), dek)
 
     def unwrap(self, blob: bytes) -> bytes | None:
-        return decrypt(self._kek_store.load(), blob)
+        # Try every KEK the store still holds (the keyring entry and/or the fallback file). load()
+        # prefers one source, but the DEK may have been wrapped with the other if the keyring's
+        # availability changed between wrap and unwrap; trying both makes unlock robust to that.
+        candidates = self._kek_store.candidate_keks()
+        if not candidates:
+            # No KEK is readable yet (fresh process, nothing generated). Fall back to load(), which
+            # creates/returns one, so a first wrap-then-unwrap in the same run still works.
+            candidates = [self._kek_store.load()]
+        for kek in candidates:
+            dek = decrypt(kek, blob)
+            if dek is not None:
+                return dek
+        return None
 
 
 class PassphraseDekWrapper:
