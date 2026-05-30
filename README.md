@@ -40,7 +40,7 @@ privacy proxy, and the same store-nothing-by-default behavior.
 
 ## Install
 
-The latest release is `26.05.04` (see [`CHANGELOG.md`](CHANGELOG.md)). Two install paths:
+The latest release is `26.05.05` (see [`CHANGELOG.md`](CHANGELOG.md)). Two install paths:
 
 ### End users: native installer (recommended)
 
