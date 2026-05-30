@@ -157,6 +157,7 @@ class _UvicornWorker(QThread):
             summary_provider=(
                 summary_for_query if self._prefs_store.load().summary_enabled else None
             ),
+            ai_slop_mode=self._prefs_store.load().ai_slop_mode,
             access_token=self._access_token,
             allowed_hosts=self._allowed_hosts,
         )

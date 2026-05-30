@@ -40,6 +40,7 @@ from searchmob_desktop.data.ranking_store import load_ranking_rules, save_rankin
 from searchmob_desktop.engines import EngineContext, SearchResult, aggregate
 from searchmob_desktop.engines.correct import start_background_corrector
 from searchmob_desktop.engines.rank import RankRule, apply_ranking, host_of_url
+from searchmob_desktop.engines.rank.slop_blocklist import load_slop_domains
 from searchmob_desktop.engines.sort import SortMode, sort_results
 from searchmob_desktop.engines.wiki_summary import SummaryBox, summary_for_query
 from searchmob_desktop.gui.about_dialog import AboutDialog
@@ -427,6 +428,8 @@ class MainWindow(QMainWindow):
             self._ranking_rules,
             host_of=lambda r: host_of_url(r.url),
             text_of=lambda r: f"{r.title} {r.snippet}",
+            slop_domains=load_slop_domains(),
+            slop_mode=self._prefs_store.load().ai_slop_mode,
         )
         self._results.set_results(ranked)
         hidden = len(self._raw_results) - len(ranked)
