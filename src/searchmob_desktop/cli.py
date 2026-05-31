@@ -210,6 +210,13 @@ def serve(
             return False
         return True
 
+    def _clear_history() -> bool:
+        try:
+            history_store.clear()
+        except Exception:
+            return False
+        return True
+
     _serve_local_server(
         _build_engines(),
         host=host,
@@ -225,6 +232,9 @@ def serve(
         # `summary_enabled` pref gates it.
         prefs_provider=prefs_store.load,
         prefs_saver=_save_prefs,
+        # Recent history + clear for the served Settings page (owner-only / loopback).
+        history_provider=lambda: list(history_store.recent(50)),
+        history_clearer=_clear_history,
         summary_provider=summary_for_query,
         ai_slop_mode=prefs.ai_slop_mode,
         max_results=max_results,
