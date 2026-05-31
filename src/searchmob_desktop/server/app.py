@@ -446,7 +446,11 @@ def build_app(
         return suggestion.corrected if suggestion is not None else None
 
     async def home(request: Request) -> Response:
-        body = render_home_page(settings_link=_is_settings_owner(request))
+        body = render_home_page(
+            settings_link=_is_settings_owner(request),
+            rules=rules_provider(),
+            editable=_is_owner(request),
+        )
         return Response(body, media_type="text/html; charset=utf-8")
 
     async def healthz(_request: Request) -> Response:

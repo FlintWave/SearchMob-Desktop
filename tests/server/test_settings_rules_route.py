@@ -80,6 +80,19 @@ def test_settings_lists_existing_domain_rules_and_lenses() -> None:
     assert "docs.rs" in html  # the lens's include-domains field is prefilled
 
 
+def test_home_page_shows_scope_selector_for_owner() -> None:
+    # The scope selector is available before a search: it renders on the home page for the loopback
+    # owner when lenses exist (the sample scopes are present by default in real use).
+    rules = _Rules(RankingRules(lenses=(Lens(name="Docs"),)))
+    with _loopback(_app(_Prefs(), rules)) as client:
+        home = client.get("/").text
+    assert 'action="/scope"' in home
+    assert "Docs" in home
+    # A network visitor's home page has no scope editor.
+    with _remote(_app(_Prefs(), rules)) as client:
+        assert 'action="/scope"' not in client.get("/").text
+
+
 def test_create_lens_via_post() -> None:
     rules = _Rules()
     with _loopback(_app(_Prefs(), rules)) as client:
