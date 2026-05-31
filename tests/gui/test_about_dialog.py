@@ -22,3 +22,14 @@ def test_about_shows_attribution_and_trademark_disclaimer(qapp: object) -> None:
     # Names the marks it references so the nominative use is explicit.
     for mark in ("DuckDuckGo", "Brave", "Kagi"):
         assert mark in text
+
+
+def test_about_has_a_link_to_the_android_app(qapp: object) -> None:
+    from PySide6.QtWidgets import QPushButton
+
+    from searchmob_desktop.gui.about_dialog import ANDROID_URL
+
+    dialog = AboutDialog()
+    labels = [b.text() for b in dialog.findChildren(QPushButton)]
+    assert any("Android" in t for t in labels)
+    assert ANDROID_URL.endswith("/SearchMob")  # the sibling repo, not the desktop one
