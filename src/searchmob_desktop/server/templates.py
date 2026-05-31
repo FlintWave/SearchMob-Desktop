@@ -17,7 +17,7 @@ from html import escape
 from urllib.parse import quote_plus, urlsplit
 
 from searchmob_desktop.engines import SearchResult
-from searchmob_desktop.engines.rank import RankingRules, RankRule, host_of_url
+from searchmob_desktop.engines.rank import Lens, RankingRules, RankRule, host_of_url
 from searchmob_desktop.engines.wiki_summary import SummaryBox
 from searchmob_desktop.prefs import UserPreferences
 
@@ -91,6 +91,33 @@ _PAGE_CSS = (
     ".settings .actions{margin-top:6px}"
     ".settings .actions button{background:var(--accent);color:#fff;border:0;border-radius:22px;"
     "padding:10px 26px;font-size:15px;font-weight:600;cursor:pointer}"
+    ".settings .card h3.sub{font-size:13px;margin:16px 0 8px;color:var(--muted)}"
+    ".settings .rulelist{list-style:none;margin:0 0 14px;padding:0}"
+    ".settings .rulelist li{display:flex;align-items:center;gap:8px;flex-wrap:wrap;"
+    "padding:8px 0;border-bottom:1px solid var(--border)}"
+    ".settings .rulelist .dom{font-weight:600;font-size:13px;word-break:break-all}"
+    ".settings .rulelist .rank{margin-left:auto}"
+    ".settings .addrule{display:flex;gap:8px;flex-wrap:wrap;align-items:center}"
+    ".settings .addrule input[type=text]{flex:1;min-width:140px;padding:8px 11px;"
+    "border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--fg);"
+    "font-size:14px}"
+    ".settings .addrule select{width:auto;min-width:110px}"
+    ".settings .addrule button,.settings .lensform button,.settings .lensdel button{"
+    "background:var(--accent);color:#fff;border:0;border-radius:18px;padding:8px 18px;"
+    "font-size:13px;font-weight:600;cursor:pointer}"
+    ".settings .lensitem{display:flex;gap:10px;align-items:flex-start;padding:10px 0;"
+    "border-bottom:1px solid var(--border)}"
+    ".settings .lensform{flex:1;display:flex;flex-direction:column;gap:8px}"
+    ".settings .lensform .lname{font-weight:600}"
+    ".settings .lensform input[type=text]{width:100%;padding:8px 11px;"
+    "border:1px solid var(--border);"
+    "border-radius:8px;background:var(--bg);color:var(--fg);font-size:14px}"
+    ".settings .lensform .lf{display:flex;flex-direction:column;gap:3px;font-size:12px;"
+    "color:var(--muted)}"
+    ".settings .lensform button{align-self:flex-start}"
+    ".settings .lensdel button{background:transparent;color:var(--muted);"
+    "border:1px solid var(--border)}"
+    ".settings .lensdel button:hover{border-color:#d33;color:#d33}"
     ".searchbox{display:flex;align-items:stretch;background:var(--card);"
     "border:1px solid var(--border);border-radius:26px;box-shadow:var(--shadow);overflow:hidden}"
     ".searchbox input[type=text]{flex:1;min-width:0;border:0;outline:0;background:transparent;"
@@ -496,12 +523,120 @@ _SLOP_OPTIONS: tuple[tuple[str, str], ...] = (
 )
 
 
-def render_settings_page(prefs: UserPreferences, saved: bool = False) -> str:
-    """The browser Settings page: live preference toggles, persisted to the encrypted prefs store.
+_ADD_RULE_OPTIONS: tuple[tuple[str, str], ...] = (
+    ("RAISE", "Raise"),
+    ("LOWER", "Lower"),
+    ("BLOCK", "Block"),
+    ("PIN", "Pin"),
+)
+
+
+def _domain_rules_section(rules: RankingRules) -> str:
+    """The Domain rules card: every saved per-domain rule (editable) plus an add form."""
+    parts = ['<section class="card"><h2>Domain rules</h2>']
+    if rules.domain_rules:
+        parts.append('<ul class="rulelist">')
+        for domain, rule in sorted(rules.domain_rules.items()):
+            parts.append("<li>")
+            parts.append(f'<span class="dom">{escape(domain)}</span>')
+            parts.append('<form class="rank" action="/rules/domain" method="post">')
+            parts.append(
+                f'<input type="hidden" name="domain" value="{escape(domain, quote=True)}">'
+            )
+            for action_rule, label in _RANK_ACTIONS:
+                on = " on" if action_rule is rule else ""
+                parts.append(
+                    f'<button class="btn{on}" type="submit" name="action" '
+                    f'value="{action_rule.value}">{label}</button>'
+                )
+            parts.append('<button type="submit" name="action" value="NORMAL">Reset</button>')
+            parts.append("</form></li>")
+        parts.append("</ul>")
+    else:
+        parts.append(
+            '<p class="hint">No domain rules yet. Add one below, or use the '
+            "Block / Lower / Raise / Pin buttons on any result.</p>"
+        )
+    parts.append('<form class="addrule" action="/rules/domain" method="post">')
+    parts.append(
+        '<input type="text" name="domain" placeholder="example.com" autocomplete="off" required>'
+    )
+    parts.append(_select("action", _ADD_RULE_OPTIONS, "RAISE"))
+    parts.append('<button type="submit">Add rule</button>')
+    parts.append("</form>")
+    parts.append("</section>")
+    return "".join(parts)
+
+
+def _lens_form(lens: Lens | None) -> str:
+    """A lens edit form prefilled from `lens`, or an empty create form when None."""
+    name = lens.name if lens else ""
+    fields = (
+        ("include_domains", "Only these domains", lens.include_domains if lens else ()),
+        ("exclude_domains", "Exclude these domains", lens.exclude_domains if lens else ()),
+        ("include_keywords", "Require these keywords", lens.include_keywords if lens else ()),
+        ("exclude_keywords", "Exclude these keywords", lens.exclude_keywords if lens else ()),
+    )
+    parts = ['<form class="lensform" action="/settings/lens" method="post">']
+    parts.append(
+        '<input class="lname" type="text" name="name" placeholder="Scope name" '
+        f'value="{escape(name, quote=True)}" autocomplete="off" required>'
+    )
+    for fname, label, values in fields:
+        joined = ", ".join(values)
+        parts.append(
+            f'<label class="lf">{escape(label)}'
+            f'<input type="text" name="{fname}" value="{escape(joined, quote=True)}" '
+            'placeholder="comma separated" autocomplete="off"></label>'
+        )
+    parts.append('<button type="submit">Save scope</button>')
+    parts.append("</form>")
+    return "".join(parts)
+
+
+def _lenses_section(rules: RankingRules) -> str:
+    """The Scopes card: the active selector, each lens (edit + delete), and a create form."""
+    parts = ['<section class="card"><h2>Scopes (lenses)</h2>']
+    parts.append(
+        '<p class="hint">A scope filters results to the domains and keywords you choose. '
+        "Set the active scope here, or per-search from the results page.</p>"
+    )
+    if rules.lenses:
+        opts = ['<option value="">No scope</option>']
+        for lens in rules.lenses:
+            sel = " selected" if lens.name == rules.active_lens else ""
+            opts.append(
+                f'<option value="{escape(lens.name, quote=True)}"{sel}>{escape(lens.name)}</option>'
+            )
+        parts.append(
+            '<form class="scopebar" action="/scope" method="post"><label>Active scope</label>'
+        )
+        parts.append(
+            '<select name="lens" onchange="this.form.submit()">' + "".join(opts) + "</select>"
+        )
+        parts.append('<noscript><button type="submit">Apply</button></noscript></form>')
+        for lens in rules.lenses:
+            parts.append('<div class="lensitem">')
+            parts.append(_lens_form(lens))
+            parts.append(
+                '<form class="lensdel" action="/settings/lens/delete" method="post">'
+                f'<input type="hidden" name="name" value="{escape(lens.name, quote=True)}">'
+                '<button type="submit">Delete</button></form>'
+            )
+            parts.append("</div>")
+    parts.append('<h3 class="sub">Create a scope</h3>')
+    parts.append(_lens_form(None))
+    parts.append("</section>")
+    return "".join(parts)
+
+
+def render_settings_page(prefs: UserPreferences, rules: RankingRules, saved: bool = False) -> str:
+    """The browser Settings page: live preference toggles plus domain-rule and scope management.
 
     Owner-only (the server serves it to a loopback client and 404s otherwise). `saved` shows a brief
-    confirmation after a successful POST. Mirrors the relevant parts of the desktop Settings dialog;
-    each control maps to a `UserPreferences` field the server reads live on the next search.
+    confirmation after a successful POST. Mirrors the relevant parts of the desktop Settings dialog:
+    the preference toggles map to `UserPreferences` fields, while `rules` drives the domain-rule
+    list and the scope (lens) editor, both persisted to the encrypted ranking store.
     """
     head = _page_head("Settings · SearchMob")
     parts: list[str] = []
@@ -550,6 +685,12 @@ def render_settings_page(prefs: UserPreferences, saved: bool = False) -> str:
 
     parts.append('<div class="actions"><button type="submit">Save</button></div>')
     parts.append("</form>")
+
+    # Domain rules and scopes are their own forms (each row posts independently), so they live
+    # outside the preferences form above.
+    parts.append(_domain_rules_section(rules))
+    parts.append(_lenses_section(rules))
+
     parts.append("</div>")
     parts.append(f"<script>{_THEME_TOGGLE_JS}</script>")
     parts.append("</body>")

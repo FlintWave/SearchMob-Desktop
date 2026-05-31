@@ -127,6 +127,33 @@ class RankingRules:
             goggles=self.goggles,
         )
 
+    def with_lens(self, lens: Lens) -> RankingRules:
+        """Return a copy with `lens` added, replacing any existing lens of the same name.
+
+        Name match is exact (the served editor and the in-app editor both key lenses by name), so
+        editing a lens re-saves under the same name and overwrites in place rather than duplicating.
+        """
+        kept = tuple(existing for existing in self.lenses if existing.name != lens.name)
+        return RankingRules(
+            domain_rules=self.domain_rules,
+            lenses=(*kept, lens),
+            active_lens=self.active_lens,
+            goggles=self.goggles,
+        )
+
+    def without_lens(self, name: str) -> RankingRules:
+        """Return a copy with the lens `name` removed; clears `active_lens` if it pointed there."""
+        if all(lens.name != name for lens in self.lenses):
+            return self
+        kept = tuple(lens for lens in self.lenses if lens.name != name)
+        active = None if self.active_lens == name else self.active_lens
+        return RankingRules(
+            domain_rules=self.domain_rules,
+            lenses=kept,
+            active_lens=active,
+            goggles=self.goggles,
+        )
+
     def to_dict(self) -> dict[str, Any]:
         """Return the camelCase dict mirroring the Android serialization."""
         return {
