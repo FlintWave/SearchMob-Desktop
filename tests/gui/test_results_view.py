@@ -82,3 +82,22 @@ def test_each_menu_rule_emits_for_the_domain(qapp: object) -> None:
         (domain, RankRule.BLOCK),
         (domain, RankRule.NORMAL),
     ]
+
+
+def test_single_click_opens_the_result_url(qapp: object, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A single left-click (the `clicked` signal) opens the row's URL in the system browser.
+
+    Mirrors the served page (a plain link) so a result is never "unclickable". We patch
+    `QDesktopServices.openUrl` and emit `clicked` for a row, asserting the row's URL is opened.
+    """
+    opened: list[str] = []
+    monkeypatch.setattr(
+        results_view_module.QDesktopServices,
+        "openUrl",
+        staticmethod(lambda url: opened.append(url.toString())),
+    )
+    view = ResultsView()
+    view.set_results(_RESULTS)
+
+    view.clicked.emit(view.model().index(0, 0))
+    assert opened == ["https://alpha.example/a"]

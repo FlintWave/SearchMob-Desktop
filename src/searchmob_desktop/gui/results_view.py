@@ -159,6 +159,11 @@ class ResultsView(QListView):
         self.setMouseTracking(True)  # so hover repaints the card under the cursor
         self.setSpacing(4)
         self.setVerticalScrollMode(QListView.ScrollMode.ScrollPerPixel)
+        # Single left-click opens the result, matching the served page (a plain link) so a result
+        # is never "unclickable". `clicked` is the single-click signal; `activated` is kept for the
+        # keyboard path (Enter) and platforms whose style activates on a single click. Right-click
+        # is unaffected (it raises the ranking menu via contextMenuEvent).
+        self.clicked.connect(self._on_activated)
         self.activated.connect(self._on_activated)
 
     def contextMenuEvent(self, event: QContextMenuEvent) -> None:
