@@ -593,14 +593,13 @@ def build_app(
         text = form.get("goggles", "")[:_MAX_GOGGLE_CHARS]
         parsed = parse_goggles(text)
         if parsed:
-            current = rules_provider()
-            ranking_rules_saver(replace(current, goggles=current.goggles + tuple(parsed)))
+            ranking_rules_saver(rules_provider().with_added_goggles(tuple(parsed)))
         return RedirectResponse("/settings?saved=1", status_code=303)
 
     async def clear_goggles(request: Request) -> Response:
         if ranking_rules_saver is None:
             return PlainTextResponse("Settings are read-only here.", status_code=503)
-        ranking_rules_saver(replace(rules_provider(), goggles=()))
+        ranking_rules_saver(rules_provider().with_goggles(()))
         return RedirectResponse("/settings?saved=1", status_code=303)
 
     async def clear_history(_request: Request) -> Response:

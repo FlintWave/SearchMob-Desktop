@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import Enum
 from typing import Any, ClassVar
 
@@ -90,14 +90,7 @@ class RankingRules:
         """Return a copy with `domain` set to `rule`. A NORMAL rule removes the entry instead."""
         if rule is RankRule.NORMAL:
             return self.without_domain_rule(domain)
-        updated = dict(self.domain_rules)
-        updated[domain] = rule
-        return RankingRules(
-            domain_rules=updated,
-            lenses=self.lenses,
-            active_lens=self.active_lens,
-            goggles=self.goggles,
-        )
+        return replace(self, domain_rules={**self.domain_rules, domain: rule})
 
     def without_domain_rule(self, domain: str) -> RankingRules:
         """Return a copy with any rule for `domain` removed."""
@@ -105,12 +98,7 @@ class RankingRules:
             return self
         updated = dict(self.domain_rules)
         updated.pop(domain, None)
-        return RankingRules(
-            domain_rules=updated,
-            lenses=self.lenses,
-            active_lens=self.active_lens,
-            goggles=self.goggles,
-        )
+        return replace(self, domain_rules=updated)
 
     def with_active_lens(self, name: str | None) -> RankingRules:
         """Return a copy with `active_lens` set to `name` (None clears it).
@@ -120,12 +108,7 @@ class RankingRules:
         """
         if name == self.active_lens:
             return self
-        return RankingRules(
-            domain_rules=self.domain_rules,
-            lenses=self.lenses,
-            active_lens=name,
-            goggles=self.goggles,
-        )
+        return replace(self, active_lens=name)
 
     def with_lens(self, lens: Lens) -> RankingRules:
         """Return a copy with `lens` added, replacing any existing lens of the same name.
@@ -134,12 +117,7 @@ class RankingRules:
         editing a lens re-saves under the same name and overwrites in place rather than duplicating.
         """
         kept = tuple(existing for existing in self.lenses if existing.name != lens.name)
-        return RankingRules(
-            domain_rules=self.domain_rules,
-            lenses=(*kept, lens),
-            active_lens=self.active_lens,
-            goggles=self.goggles,
-        )
+        return replace(self, lenses=(*kept, lens))
 
     def without_lens(self, name: str) -> RankingRules:
         """Return a copy with the lens `name` removed; clears `active_lens` if it pointed there."""
@@ -147,12 +125,15 @@ class RankingRules:
             return self
         kept = tuple(lens for lens in self.lenses if lens.name != name)
         active = None if self.active_lens == name else self.active_lens
-        return RankingRules(
-            domain_rules=self.domain_rules,
-            lenses=kept,
-            active_lens=active,
-            goggles=self.goggles,
-        )
+        return replace(self, lenses=kept, active_lens=active)
+
+    def with_goggles(self, goggles: tuple[GoggleRule, ...]) -> RankingRules:
+        """Return a copy whose goggle set is exactly `goggles` (replaces any existing)."""
+        return replace(self, goggles=goggles)
+
+    def with_added_goggles(self, new_goggles: tuple[GoggleRule, ...]) -> RankingRules:
+        """Return a copy with `new_goggles` appended to the existing goggle set."""
+        return replace(self, goggles=self.goggles + new_goggles)
 
     def to_dict(self) -> dict[str, Any]:
         """Return the camelCase dict mirroring the Android serialization."""

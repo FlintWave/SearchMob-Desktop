@@ -55,6 +55,18 @@ async def test_vertical_scopes_the_query(monkeypatch, tmp_path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_query_is_length_clamped(monkeypatch, tmp_path) -> None:
+    from searchmob_desktop.server.app import MAX_QUERY_LENGTH
+
+    monkeypatch.setattr(mcp_server, "aggregate", _fake_aggregate)
+    out = await mcp_server.run_web_search(
+        "x" * (MAX_QUERY_LENGTH + 500), engines=[_fake_engine], prefs_store=_prefs(tmp_path)
+    )
+    # WEB vertical does not scope, so the fake echoes the (clamped) query into the snippet.
+    assert len(out[0]["snippet"]) == MAX_QUERY_LENGTH
+
+
+@pytest.mark.asyncio
 async def test_limit_is_clamped(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(mcp_server, "aggregate", _fake_aggregate)
     out = await mcp_server.run_web_search(
