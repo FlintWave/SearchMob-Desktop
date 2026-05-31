@@ -39,6 +39,7 @@ dependencies = [
     "argon2-cffi>=24",
     "platformdirs>=4",
     "keyring>=25",
+    "mcp>=1.0",
 ]
 
 [project.optional-dependencies]

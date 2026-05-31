@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QThreadPool, Signal
+from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import (
     QButtonGroup,
     QCheckBox,
@@ -148,6 +149,7 @@ class SettingsDialog(QDialog):
         self._tabs.addTab(self._build_keys_tab(), "API keys")
         self._tabs.addTab(self._build_ranking_tab(), "Result ranking")
         self._local_ai_tab_index = self._tabs.addTab(self._build_local_ai_tab(), "Local AI")
+        self._tabs.addTab(self._build_ai_access_tab(), "AI access")
         self._tabs.addTab(self._build_history_tab(), "Search history")
         self._tabs.addTab(self._build_suggestions_tab(), "Suggestions")
         self._tabs.addTab(self._build_updates_tab(), "Updates")
@@ -872,6 +874,46 @@ class SettingsDialog(QDialog):
         return tab
 
     # --- Updates -----------------------------------------------------------------------------
+
+    def _build_ai_access_tab(self) -> QWidget:
+        """Show the MCP config so an AI agent can search through SearchMob (loopback, opt-in)."""
+        from searchmob_desktop.mcp_server import config_snippet
+
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        intro = QLabel(
+            "Let an AI agent (Claude Desktop, an IDE assistant, ...) run its web searches through "
+            "SearchMob instead of a third-party search engine. The agent launches SearchMob as a "
+            "local subprocess (nothing listens on the network) and gets a private 'web_search' "
+            "tool. Add this to your agent's MCP server config:"
+        )
+        intro.setWordWrap(True)
+        layout.addWidget(intro)
+
+        self._mcp_config = QPlainTextEdit()
+        self._mcp_config.setReadOnly(True)
+        self._mcp_config.setPlainText(config_snippet())
+        self._mcp_config.setFixedHeight(150)
+        layout.addWidget(self._mcp_config)
+
+        copy_btn = QPushButton("Copy config")
+        copy_btn.clicked.connect(self._on_copy_mcp_config)
+        layout.addWidget(copy_btn)
+
+        note = QLabel(
+            "Searches still go only to your configured engines through the privacy proxy, and your "
+            "ranking rules and AI-slop filter apply. Nothing runs until your agent launches it."
+        )
+        note.setWordWrap(True)
+        note.setProperty("role", "muted")
+        layout.addWidget(note)
+        layout.addStretch(1)
+        return tab
+
+    def _on_copy_mcp_config(self) -> None:
+        clipboard = QGuiApplication.clipboard()
+        if clipboard is not None:
+            clipboard.setText(self._mcp_config.toPlainText())
 
     def _build_updates_tab(self) -> QWidget:
         tab = QWidget()

@@ -465,6 +465,20 @@ def gui() -> None:
     raise typer.Exit(code=run_gui())
 
 
+@app.command()
+def mcp() -> None:
+    """Run the Model Context Protocol server (stdio).
+
+    Lets a local AI agent (Claude Desktop, an IDE assistant, ...) run its web searches through
+    SearchMob's private metasearch instead of a third-party search API. The agent launches this as
+    a subprocess; nothing listens on the network. Configure the agent with a `searchmob` MCP server
+    whose command is this binary plus the `mcp` argument.
+    """
+    from searchmob_desktop.mcp_server import run_stdio
+
+    run_stdio()
+
+
 def main() -> None:
     """Console-script entry point."""
     app()
