@@ -29,6 +29,37 @@ def test_server_command_runs_serve_with_host_and_port() -> None:
     assert cmd[0]  # an executable (console script or interpreter)
 
 
+def test_server_command_frozen_app_omits_dash_m(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A packaged binary must be invoked as `<exe> serve ...` with NO `-m`.
+
+    Regression for the broken systemd unit: the frozen `/usr/bin/searchmob_desktop` routes its argv
+    straight to the CLI, so `-m` produced "No such option: -m" and a restart loop. With no console
+    script on PATH and a non-`python` executable, the command must not contain `-m`.
+    """
+    monkeypatch.setattr(service.shutil, "which", lambda _name: None)
+    monkeypatch.setattr(service.sys, "executable", "/usr/bin/searchmob_desktop")
+    cmd = service.server_command(host="127.0.0.1", port=8787)
+    assert cmd == ["/usr/bin/searchmob_desktop", "serve", "--host", "127.0.0.1", "--port", "8787"]
+    assert "-m" not in cmd
+
+
+def test_server_command_plain_interpreter_uses_dash_m(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A real `python` interpreter must be invoked with `-m searchmob_desktop`."""
+    monkeypatch.setattr(service.shutil, "which", lambda _name: None)
+    monkeypatch.setattr(service.sys, "executable", "/usr/bin/python3.12")
+    monkeypatch.delattr(service.sys, "frozen", raising=False)
+    cmd = service.server_command(host="127.0.0.1", port=8787)
+    assert cmd[:3] == ["/usr/bin/python3.12", "-m", "searchmob_desktop"]
+
+
+def test_server_command_console_script_wins(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An installed `searchmob-desktop` console script is invoked directly (no `-m`)."""
+    monkeypatch.setattr(service.shutil, "which", lambda _name: "/usr/local/bin/searchmob-desktop")
+    cmd = service.server_command()
+    assert cmd[0] == "/usr/local/bin/searchmob-desktop"
+    assert "-m" not in cmd
+
+
 def test_status_unsupported_is_all_false(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(service, "_backend", lambda: "unsupported")
     state = service.status()
@@ -65,12 +96,18 @@ def test_systemd_install_writes_unit_and_enables(
     monkeypatch.setattr(service, "_backend", lambda: "systemd")
     calls: list[tuple[str, ...]] = []
     monkeypatch.setattr(service, "_systemctl", lambda *a: calls.append(a) or _ok(*a))
+    # Do not touch the real `loginctl`; just record that lingering was requested.
+    linger: list[bool] = []
+    monkeypatch.setattr(service, "_enable_linger", lambda: linger.append(True) or True)
 
-    ok, _ = service.install_and_enable(host="127.0.0.1", port=8787)
+    ok, msg = service.install_and_enable(host="127.0.0.1", port=8787)
     assert ok
     assert "ExecStart=" in service.unit_path().read_text(encoding="utf-8")
     assert ("daemon-reload",) in calls
     assert ("enable", "--now", service.SYSTEMD_UNIT) in calls
+    # Lingering is what makes it start at boot, so the install attempts it and says so.
+    assert linger == [True]
+    assert "starts with your system" in msg
 
 
 def test_systemd_install_reports_failure(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

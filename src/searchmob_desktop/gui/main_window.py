@@ -679,18 +679,30 @@ class MainWindow(QMainWindow):
             self._server.start()
 
     def _on_server_started(self, port: int) -> None:
-        self._toggle_server_action.setText("Stop server")
         bound = self._server.bound_url or f"http://127.0.0.1:{port}/"
-        self.statusBar().showMessage(f"Server running at {bound}")
+        external = self._server.is_external
+        if external:
+            # The background service owns this server; the app is only reusing it. Do not offer to
+            # stop a process the app does not own.
+            self._toggle_server_action.setText("Background service running")
+            self._toggle_server_action.setEnabled(False)
+            self.statusBar().showMessage(f"Using the background service at {bound}")
+        else:
+            self._toggle_server_action.setText("Stop server")
+            self._toggle_server_action.setEnabled(True)
+            self.statusBar().showMessage(f"Server running at {bound}")
         if self._tray is not None:
-            self._tray_server_action.setText("Stop server")
+            self._tray_server_action.setText("Background service" if external else "Stop server")
+            self._tray_server_action.setEnabled(not external)
             self._tray.setToolTip(f"SearchMob Desktop - {bound}")
 
     def _on_server_stopped(self) -> None:
         self._toggle_server_action.setText("Start server")
+        self._toggle_server_action.setEnabled(True)
         self.statusBar().showMessage("Server stopped.")
         if self._tray is not None:
             self._tray_server_action.setText("Start server")
+            self._tray_server_action.setEnabled(True)
             self._tray.setToolTip("SearchMob Desktop")
 
     def _on_server_error(self, message: str) -> None:
