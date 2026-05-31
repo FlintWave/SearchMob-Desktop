@@ -24,6 +24,8 @@ from searchmob_desktop.version import __version__
 
 REPO_URL = "https://github.com/FlintWave/SearchMob-Desktop"
 BUG_URL = "https://github.com/FlintWave/SearchMob-Desktop/issues/new/choose"
+# The sibling Android app, for users who want SearchMob on their phone too.
+ANDROID_URL = "https://github.com/FlintWave/SearchMob"
 
 
 class AboutDialog(QDialog):
@@ -146,11 +148,14 @@ class AboutDialog(QDialog):
         buttons = QHBoxLayout()
         repo_btn = QPushButton("View source on GitHub")
         repo_btn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(REPO_URL)))
+        android_btn = QPushButton("SearchMob for Android")
+        android_btn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(ANDROID_URL)))
         bug_btn = QPushButton("Report a bug")
         bug_btn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(BUG_URL)))
         close_btn = QPushButton("Close")
         close_btn.clicked.connect(self.accept)
         buttons.addWidget(repo_btn)
+        buttons.addWidget(android_btn)
         buttons.addWidget(bug_btn)
         buttons.addStretch(1)
         buttons.addWidget(close_btn)
