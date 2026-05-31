@@ -172,3 +172,15 @@ def test_without_lens_keeps_active_when_other_removed() -> None:
 def test_without_lens_missing_is_noop() -> None:
     base = RankingRules(lenses=(Lens(name="news"),))
     assert base.without_lens("missing") is base
+
+
+def test_with_goggles_replaces_and_added_appends() -> None:
+    g1 = GoggleRule(site="a.example", action=RankRule.BLOCK)
+    g2 = GoggleRule(site="b.example", action=RankRule.RAISE)
+    base = RankingRules(goggles=(g1,))
+    # with_goggles replaces the whole set.
+    assert base.with_goggles((g2,)).goggles == (g2,)
+    # with_added_goggles appends, leaving the original untouched (immutable).
+    appended = base.with_added_goggles((g2,))
+    assert appended.goggles == (g1, g2)
+    assert base.goggles == (g1,)

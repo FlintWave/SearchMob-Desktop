@@ -26,6 +26,7 @@ from searchmob_desktop.engines.rank.slop_blocklist import load_slop_domains
 from searchmob_desktop.engines.sort import SortMode, sort_results
 from searchmob_desktop.engines.verticals import Vertical, default_sort, transform_query
 from searchmob_desktop.prefs import JsonPreferencesStore
+from searchmob_desktop.server.app import MAX_QUERY_LENGTH
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -52,7 +53,9 @@ async def run_web_search(
     a blank query or no engines returns an empty list. `engines`/`prefs_store` are injectable for
     tests; in normal use they default to the same engine list and preferences the CLI uses.
     """
-    query = (query or "").strip()
+    # Clamp the query the same way the HTTP server does (server/app.py `_clamp`), so an agent cannot
+    # push a megabyte-scale string into the engine adapters' request URLs/bodies.
+    query = (query or "").strip()[:MAX_QUERY_LENGTH]
     if not query:
         return []
     limit = max(1, min(limit, _MAX_LIMIT))
