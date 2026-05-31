@@ -43,7 +43,7 @@ from searchmob_desktop.engines import (
 from searchmob_desktop.engines.correct import start_background_corrector
 from searchmob_desktop.engines.proxy import make_privacy_client
 from searchmob_desktop.engines.wiki_summary import summary_for_query
-from searchmob_desktop.prefs import JsonPreferencesStore
+from searchmob_desktop.prefs import JsonPreferencesStore, UserPreferences
 from searchmob_desktop.server import is_loopback_host
 from searchmob_desktop.server import serve as _serve_local_server
 from searchmob_desktop.suggest import (
@@ -203,6 +203,13 @@ def serve(
     # only clients that know it can run searches. Loopback binds never enforce, so pass None there.
     access_token = None if is_loopback_host(host) else (prefs.network_access_token or None)
 
+    def _save_prefs(updated: UserPreferences) -> bool:
+        try:
+            prefs_store.save(updated)
+        except OSError:
+            return False
+        return True
+
     _serve_local_server(
         _build_engines(),
         host=host,
@@ -213,7 +220,12 @@ def serve(
         # without a restart (the server gates the edit routes loopback-only).
         ranking_rules_provider=load_ranking_rules,
         ranking_rules_saver=save_ranking_rules,
-        summary_provider=summary_for_query if prefs.summary_enabled else None,
+        # Live preferences so the served Settings page (served under the background service too)
+        # reads and persists toggles without a restart. Summary is always wired; the live
+        # `summary_enabled` pref gates it.
+        prefs_provider=prefs_store.load,
+        prefs_saver=_save_prefs,
+        summary_provider=summary_for_query,
         ai_slop_mode=prefs.ai_slop_mode,
         max_results=max_results,
         timeout_seconds=timeout,
