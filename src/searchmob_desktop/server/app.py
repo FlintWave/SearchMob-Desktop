@@ -30,7 +30,7 @@ import json
 import socket
 import time
 from collections.abc import Awaitable, Callable, Sequence
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from ipaddress import ip_address
 from urllib.parse import parse_qsl, urlsplit
 
@@ -54,8 +54,13 @@ from searchmob_desktop.engines.rank.slop_blocklist import load_slop_domains
 from searchmob_desktop.engines.sort import SortMode, sort_results
 from searchmob_desktop.engines.verticals import Vertical, default_sort, transform_query
 from searchmob_desktop.engines.wiki_summary import SummaryBox
+from searchmob_desktop.prefs import UserPreferences
 from searchmob_desktop.server.opensearch import build_descriptor
-from searchmob_desktop.server.templates import render_home_page, render_results_page
+from searchmob_desktop.server.templates import (
+    render_home_page,
+    render_results_page,
+    render_settings_page,
+)
 
 LOOPBACK_HOST = "127.0.0.1"
 DEFAULT_PORT = 8787
@@ -109,7 +114,7 @@ class _SecurityHeadersMiddleware(BaseHTTPMiddleware):
     # State-changing routes (personalization edits from the served UI). They are owner-only: even in
     # network mode only a loopback client may POST them, so a device on the network can search but
     # cannot alter the owner's rules. A same-origin check on the Origin header blocks CSRF.
-    _MUTATION_PATHS = frozenset({"/rules/domain", "/scope"})
+    _MUTATION_PATHS = frozenset({"/rules/domain", "/scope", "/settings/prefs"})
 
     def __init__(
         self,
@@ -303,6 +308,8 @@ def build_app(
     ranking_rules: RankingRules | None = None,
     ranking_rules_provider: Callable[[], RankingRules] | None = None,
     ranking_rules_saver: Callable[[RankingRules], bool] | None = None,
+    prefs_provider: Callable[[], UserPreferences] | None = None,
+    prefs_saver: Callable[[UserPreferences], bool] | None = None,
     summary_provider: Callable[[str], Awaitable[SummaryBox | None]] | None = None,
     ai_slop_mode: str = "off",
     max_query_length: int = MAX_QUERY_LENGTH,
@@ -340,6 +347,12 @@ def build_app(
     restart; if omitted, the static `ranking_rules` is used. `ranking_rules_saver`, when provided,
     enables the served UI's editing routes (`POST /rules/domain`, `POST /scope`); those routes are
     loopback-only (a network visitor can search but not change the owner's rules).
+
+    `prefs_provider` is read on each request so the served Settings page reflects live preferences
+    and so toggles (AI-slop filter mode, Wikipedia summary, default sort) take effect without a
+    restart. `prefs_saver`, when provided, enables the loopback-only `GET /settings` page and its
+    `POST /settings/prefs` route; without it, no settings page is served. Like the ranking routes
+    these are owner-only (loopback) and same-origin guarded.
     """
     provider: SuggestionsProvider = (
         suggestions_provider if suggestions_provider is not None else _no_suggestions
@@ -356,6 +369,16 @@ def build_app(
     static_rules = ranking_rules if ranking_rules is not None else RankingRules()
     rules_provider: Callable[[], RankingRules] = ranking_rules_provider or (lambda: static_rules)
 
+    def _load_prefs() -> UserPreferences | None:
+        # Read live preferences per request so the served Settings toggles apply without a restart.
+        # Fail-soft: any error reading prefs falls back to the static defaults passed to build_app.
+        if prefs_provider is None:
+            return None
+        try:
+            return prefs_provider()
+        except Exception:
+            return None
+
     async def _run_metasearch(
         query: str,
         sort_mode: SortMode = SortMode.FRESH_RELEVANT,
@@ -368,6 +391,10 @@ def build_app(
         scoped = transform_query(query, vertical)
         ctx = EngineContext(query=scoped, max_results=max_results, timeout_seconds=timeout_seconds)
         results = await metasearch(ctx, engines)
+        # The AI-slop filter mode is taken live from prefs when wired, so the Settings toggle takes
+        # effect on the next search; otherwise the static build-time value is used.
+        prefs = _load_prefs()
+        slop_mode = prefs.ai_slop_mode if prefs is not None else ai_slop_mode
         # Sort (relevance/date/freshness blend), then apply the user's personalization rules so the
         # served results match the in-app results and PIN/RAISE preserve the chosen order.
         ordered = sort_results(results, sort_mode, query, int(time.time() * 1000))
@@ -377,7 +404,7 @@ def build_app(
             host_of=lambda r: host_of_url(r.url),
             text_of=lambda r: f"{r.title} {r.snippet}",
             slop_domains=load_slop_domains(),
-            slop_mode=ai_slop_mode,
+            slop_mode=slop_mode,
         )
 
     def _correction(query: str) -> str | None:
@@ -391,8 +418,9 @@ def build_app(
             return None
         return suggestion.corrected if suggestion is not None else None
 
-    async def home(_request: Request) -> Response:
-        return Response(render_home_page(), media_type="text/html; charset=utf-8")
+    async def home(request: Request) -> Response:
+        body = render_home_page(settings_link=_is_settings_owner(request))
+        return Response(body, media_type="text/html; charset=utf-8")
 
     async def healthz(_request: Request) -> Response:
         return PlainTextResponse("ok")
@@ -406,17 +434,36 @@ def build_app(
     async def _maybe_summary(query: str) -> SummaryBox | None:
         if summary_provider is None or not query.strip():
             return None
+        # The Wikipedia summary card honors the live pref when wired: a caller that always passes a
+        # provider lets the Settings toggle control it (prefs absent = always on, back-compat).
+        prefs = _load_prefs()
+        if prefs is not None and not prefs.summary_enabled:
+            return None
         try:
             return await summary_provider(query)
         except Exception:
             return None
 
+    def _is_settings_owner(request: Request) -> bool:
+        # The Settings page and its writes are owner-only: a loopback client, and only when a prefs
+        # saver is wired (so there is something to persist to).
+        client_host = request.client.host if request.client is not None else ""
+        return prefs_saver is not None and is_loopback_host(client_host)
+
     async def search_html(request: Request) -> Response:
         query = _clamp(request.query_params.get("q"))
         vertical = Vertical.from_value(request.query_params.get("vertical"))
-        # An explicit `?sort=` wins; absent it, the vertical picks the sensible default sort.
+        # An explicit `?sort=` wins. Absent it, a non-default vertical keeps its sensible default
+        # (e.g. News favors Date); the plain Web view honors the user's configured default sort from
+        # prefs when wired, so the Settings choice is what the browser sees by default.
         sort_param = request.query_params.get("sort")
-        sort_mode = SortMode.from_value(sort_param) if sort_param else default_sort(vertical)
+        prefs = _load_prefs()
+        if sort_param:
+            sort_mode = SortMode.from_value(sort_param)
+        elif vertical is Vertical.WEB and prefs is not None:
+            sort_mode = SortMode.from_value(prefs.sort_mode)
+        else:
+            sort_mode = default_sort(vertical)
         # Fetch the contextual summary concurrently with the metasearch so the box never adds
         # latency to the results path.
         summary_task = asyncio.ensure_future(_maybe_summary(query))
@@ -432,6 +479,7 @@ def build_app(
             summary=summary,
             sort_mode=sort_mode.value,
             vertical=vertical.value,
+            settings_link=_is_settings_owner(request),
         )
         return Response(body, media_type="text/html; charset=utf-8")
 
@@ -468,6 +516,43 @@ def build_app(
         lens = form.get("lens", "").strip()
         ranking_rules_saver(rules_provider().with_active_lens(lens or None))
         return _redirect_back(request)
+
+    async def settings_page(request: Request) -> Response:
+        # Owner-only: the page is served to a loopback client when a prefs saver is wired. A network
+        # visitor (or a build with no saver) gets 404 so the surface is invisible off-loopback.
+        if not _is_settings_owner(request):
+            return PlainTextResponse("Not found", status_code=404)
+        prefs = _load_prefs() or UserPreferences()
+        saved = request.query_params.get("saved") == "1"
+        body = render_settings_page(prefs, saved=saved)
+        return Response(body, media_type="text/html; charset=utf-8")
+
+    _BOOL_FORM = {"on", "true", "1", "yes"}
+
+    async def set_prefs(request: Request) -> Response:
+        if prefs_saver is None:
+            return PlainTextResponse("Settings are read-only here.", status_code=503)
+        form = await _form(request)
+        current = _load_prefs() or UserPreferences()
+        # Only accept known, valid values; anything unexpected leaves that field unchanged. A
+        # checkbox absent from the POST means unchecked (HTML omits unchecked checkboxes).
+        sort_mode = form.get("sort_mode", current.sort_mode)
+        if sort_mode not in {"relevance", "date", "fresh"}:
+            sort_mode = current.sort_mode
+        slop = form.get("ai_slop_mode", current.ai_slop_mode)
+        if slop not in {"off", "downrank", "hide"}:
+            slop = current.ai_slop_mode
+        updated = replace(
+            current,
+            sort_mode=sort_mode,
+            ai_slop_mode=slop,
+            summary_enabled=form.get("summary_enabled", "").lower() in _BOOL_FORM,
+            upstream_suggestions_enabled=(
+                form.get("upstream_suggestions_enabled", "").lower() in _BOOL_FORM
+            ),
+        )
+        prefs_saver(updated)
+        return RedirectResponse("/settings?saved=1", status_code=303)
 
     async def search_json(request: Request) -> Response:
         query = _clamp(request.query_params.get("q"))
@@ -513,6 +598,9 @@ def build_app(
         # middleware; no-op (503) when no saver is wired.
         Route("/rules/domain", set_domain_rule, methods=["POST"]),
         Route("/scope", set_scope, methods=["POST"]),
+        # Settings page + preference writes (owner-only; 404 / 503 otherwise).
+        Route("/settings", settings_page, methods=["GET"]),
+        Route("/settings/prefs", set_prefs, methods=["POST"]),
     ]
     middleware = [
         Middleware(

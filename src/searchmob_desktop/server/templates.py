@@ -19,6 +19,7 @@ from urllib.parse import quote_plus, urlsplit
 from searchmob_desktop.engines import SearchResult
 from searchmob_desktop.engines.rank import RankingRules, RankRule, host_of_url
 from searchmob_desktop.engines.wiki_summary import SummaryBox
+from searchmob_desktop.prefs import UserPreferences
 
 # The per-result domain actions offered in the served UI, in display order. Mirrors the in-app
 # right-click menu (block / lower / raise / pin); "Reset" maps to NORMAL (removes the rule).
@@ -68,6 +69,28 @@ _PAGE_CSS = (
     "color:var(--fg);border-radius:20px;padding:6px 14px;cursor:pointer;font-size:13px;"
     "white-space:nowrap}"
     ".theme-toggle:hover{border-color:var(--accent);color:var(--accent)}"
+    ".settings-link{margin-left:auto;border:1px solid var(--border);color:var(--fg);"
+    "border-radius:20px;padding:6px 14px;font-size:13px;text-decoration:none;white-space:nowrap}"
+    ".settings-link:hover{border-color:var(--accent);color:var(--accent)}"
+    ".settings-link+.theme-toggle{margin-left:0}"
+    ".topbar .spacer{margin-left:auto}"
+    ".settings{max-width:680px;margin:0 auto;padding:24px 18px 60px}"
+    ".settings h1{font-size:24px;margin:8px 0 18px}"
+    ".settings .saved{color:#fff;background:var(--accent);display:inline-block;border-radius:6px;"
+    "padding:4px 12px;font-size:13px;margin:0 0 16px}"
+    ".settings .card{background:var(--card);border:1px solid var(--border);border-radius:12px;"
+    "padding:16px 18px;margin:0 0 16px}"
+    ".settings .card h2{font-size:15px;margin:0 0 14px;color:var(--accent)}"
+    ".settings .field{margin:0 0 14px}"
+    ".settings .field>label{display:block;font-size:13px;margin:0 0 6px;font-weight:600}"
+    ".settings select{width:100%;padding:9px 12px;border:1px solid var(--border);border-radius:8px;"
+    "background:var(--bg);color:var(--fg);font-size:14px}"
+    ".settings .checkrow{display:flex;align-items:center;gap:9px;font-size:14px;margin:0 0 10px;"
+    "cursor:pointer}"
+    ".settings .hint{font-size:12px;color:var(--muted);margin:6px 0 0}"
+    ".settings .actions{margin-top:6px}"
+    ".settings .actions button{background:var(--accent);color:#fff;border:0;border-radius:22px;"
+    "padding:10px 26px;font-size:15px;font-weight:600;cursor:pointer}"
     ".searchbox{display:flex;align-items:stretch;background:var(--card);"
     "border:1px solid var(--border);border-radius:26px;box-shadow:var(--shadow);overflow:hidden}"
     ".searchbox input[type=text]{flex:1;min-width:0;border:0;outline:0;background:transparent;"
@@ -169,6 +192,13 @@ def _theme_toggle_button() -> str:
     )
 
 
+def _settings_link(show: bool) -> str:
+    """A Settings-page link, shown only to the loopback owner (the route itself is owner-only)."""
+    if not show:
+        return ""
+    return '<a href="/settings" class="settings-link" aria-label="Settings">Settings</a>'
+
+
 def _display_url(raw_url: str) -> str:
     """A human-friendly breadcrumb form of a URL (host then path segments). Best-effort."""
     try:
@@ -189,13 +219,18 @@ def _display_url(raw_url: str) -> str:
     return host + separator + separator.join(segments)
 
 
-def render_home_page() -> str:
-    """The home page: a centered search box plus the OpenSearch link."""
+def render_home_page(settings_link: bool = False) -> str:
+    """The home page: a centered search box plus the OpenSearch link.
+
+    `settings_link` adds a Settings link to the top bar; the server passes True only for the
+    loopback owner, since the Settings route is owner-only.
+    """
     head = _page_head("SearchMob")
     body = (
         '<body data-page="home">'
         '<div class="topbar">'
         '<span class="logo">SearchMob</span>'
+        f"{_settings_link(settings_link)}"
         f"{_theme_toggle_button()}"
         "</div>"
         '<div class="home">'
@@ -333,6 +368,7 @@ def render_results_page(
     summary: SummaryBox | None = None,
     sort_mode: str = "fresh",
     vertical: str = "web",
+    settings_link: bool = False,
 ) -> str:
     """The results page. Empty/blank query -> a placeholder; otherwise -> the merged results.
 
@@ -367,6 +403,7 @@ def render_results_page(
     )
     parts.append('<input type="submit" value="Search">')
     parts.append("</form>")
+    parts.append(_settings_link(settings_link))
     parts.append(_theme_toggle_button())
     parts.append("</div>")
     parts.append('<div class="results">')
@@ -420,6 +457,99 @@ def render_results_page(
                 parts.append(_rank_controls(result.url, active_rules))
             parts.append("</div>")
 
+    parts.append("</div>")
+    parts.append(f"<script>{_THEME_TOGGLE_JS}</script>")
+    parts.append("</body>")
+    return "<!DOCTYPE html><html>" + head + "".join(parts) + "</html>"
+
+
+def _select(name: str, options: tuple[tuple[str, str], ...], current: str) -> str:
+    """A `<select>` of (value, label) pairs with `current` marked selected."""
+    opts = []
+    for value, label in options:
+        selected = " selected" if value == current else ""
+        opts.append(
+            f'<option value="{escape(value, quote=True)}"{selected}>{escape(label)}</option>'
+        )
+    return f'<select name="{escape(name, quote=True)}">' + "".join(opts) + "</select>"
+
+
+def _checkbox(name: str, label: str, checked: bool) -> str:
+    """A labeled checkbox. HTML omits an unchecked box from a POST; the server reads that as off."""
+    on = " checked" if checked else ""
+    return (
+        '<label class="checkrow">'
+        f'<input type="checkbox" name="{escape(name, quote=True)}" value="on"{on}> {escape(label)}'
+        "</label>"
+    )
+
+
+_SORT_OPTIONS: tuple[tuple[str, str], ...] = (
+    ("fresh", "Freshest + Relevant"),
+    ("date", "Date (newest first)"),
+    ("relevance", "Relevance"),
+)
+_SLOP_OPTIONS: tuple[tuple[str, str], ...] = (
+    ("downrank", "Downrank (default)"),
+    ("hide", "Hide"),
+    ("off", "Off"),
+)
+
+
+def render_settings_page(prefs: UserPreferences, saved: bool = False) -> str:
+    """The browser Settings page: live preference toggles, persisted to the encrypted prefs store.
+
+    Owner-only (the server serves it to a loopback client and 404s otherwise). `saved` shows a brief
+    confirmation after a successful POST. Mirrors the relevant parts of the desktop Settings dialog;
+    each control maps to a `UserPreferences` field the server reads live on the next search.
+    """
+    head = _page_head("Settings · SearchMob")
+    parts: list[str] = []
+    parts.append('<body data-page="settings">')
+    parts.append('<div class="topbar">')
+    parts.append('<a href="/" class="logo">SearchMob</a>')
+    parts.append('<span class="spacer"></span>')
+    parts.append(_theme_toggle_button())
+    parts.append("</div>")
+    parts.append('<div class="settings">')
+    parts.append("<h1>Settings</h1>")
+    if saved:
+        parts.append('<p class="saved" role="status">Saved.</p>')
+    parts.append('<form action="/settings/prefs" method="post">')
+
+    parts.append('<section class="card">')
+    parts.append("<h2>Search &amp; ranking</h2>")
+    parts.append('<div class="field"><label>Default sort</label>')
+    parts.append(_select("sort_mode", _SORT_OPTIONS, prefs.sort_mode))
+    parts.append("</div>")
+    parts.append('<div class="field"><label>AI-slop / low-quality filter</label>')
+    parts.append(_select("ai_slop_mode", _SLOP_OPTIONS, prefs.ai_slop_mode))
+    parts.append(
+        '<p class="hint">Applied on-device after your own domain rules, which always win.</p>'
+    )
+    parts.append("</div>")
+    parts.append("</section>")
+
+    parts.append('<section class="card">')
+    parts.append("<h2>Suggestions</h2>")
+    parts.append(
+        _checkbox("summary_enabled", "Show the Wikipedia summary card", prefs.summary_enabled)
+    )
+    parts.append(
+        _checkbox(
+            "upstream_suggestions_enabled",
+            "Use upstream autocomplete suggestions",
+            prefs.upstream_suggestions_enabled,
+        )
+    )
+    parts.append(
+        '<p class="hint">Upstream autocomplete sends what you type to a suggestions service; '
+        "your on-device history suggestions are always private.</p>"
+    )
+    parts.append("</section>")
+
+    parts.append('<div class="actions"><button type="submit">Save</button></div>')
+    parts.append("</form>")
     parts.append("</div>")
     parts.append(f"<script>{_THEME_TOGGLE_JS}</script>")
     parts.append("</body>")

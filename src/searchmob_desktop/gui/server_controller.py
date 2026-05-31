@@ -180,6 +180,13 @@ class _UvicornWorker(QThread):
             history_terms=lambda: [e.query for e in self._history_store.recent(500)]
         )
 
+        def _save_prefs(updated: UserPreferences) -> bool:
+            try:
+                self._prefs_store.save(updated)
+            except OSError:
+                return False
+            return True
+
         app = build_app(
             self._engines,
             bound_port_getter=lambda: self._port,
@@ -190,9 +197,11 @@ class _UvicornWorker(QThread):
             # restart; the saver persists in-browser edits back to the encrypted vault.
             ranking_rules_provider=load_ranking_rules,
             ranking_rules_saver=save_ranking_rules,
-            summary_provider=(
-                summary_for_query if self._prefs_store.load().summary_enabled else None
-            ),
+            # Live prefs so the served Settings page reads and persists preferences without a
+            # restart. Summary is always wired; the live `summary_enabled` pref gates it.
+            prefs_provider=self._prefs_store.load,
+            prefs_saver=_save_prefs,
+            summary_provider=summary_for_query,
             ai_slop_mode=self._prefs_store.load().ai_slop_mode,
             access_token=self._access_token,
             allowed_hosts=self._allowed_hosts,
