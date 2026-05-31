@@ -49,7 +49,13 @@ from starlette.types import ASGIApp
 
 from searchmob_desktop.engines import EngineContext, EngineFn, SearchResult, aggregate
 from searchmob_desktop.engines.correct import SpellCorrector
-from searchmob_desktop.engines.rank import RankingRules, RankRule, apply_ranking, host_of_url
+from searchmob_desktop.engines.rank import (
+    Lens,
+    RankingRules,
+    RankRule,
+    apply_ranking,
+    host_of_url,
+)
 from searchmob_desktop.engines.rank.slop_blocklist import load_slop_domains
 from searchmob_desktop.engines.sort import SortMode, sort_results
 from searchmob_desktop.engines.verticals import Vertical, default_sort, transform_query
@@ -114,7 +120,15 @@ class _SecurityHeadersMiddleware(BaseHTTPMiddleware):
     # State-changing routes (personalization edits from the served UI). They are owner-only: even in
     # network mode only a loopback client may POST them, so a device on the network can search but
     # cannot alter the owner's rules. A same-origin check on the Origin header blocks CSRF.
-    _MUTATION_PATHS = frozenset({"/rules/domain", "/scope", "/settings/prefs"})
+    _MUTATION_PATHS = frozenset(
+        {
+            "/rules/domain",
+            "/scope",
+            "/settings/prefs",
+            "/settings/lens",
+            "/settings/lens/delete",
+        }
+    )
 
     def __init__(
         self,
@@ -517,6 +531,42 @@ def build_app(
         ranking_rules_saver(rules_provider().with_active_lens(lens or None))
         return _redirect_back(request)
 
+    def _csv_tuple(raw: str) -> tuple[str, ...]:
+        # Split a comma- or newline-separated field into clean, de-duplicated, lowercased entries.
+        seen: dict[str, None] = {}
+        for piece in raw.replace("\n", ",").split(","):
+            item = piece.strip().lower()
+            if item:
+                seen.setdefault(item, None)
+        return tuple(seen)
+
+    async def set_lens(request: Request) -> Response:
+        # Create or update a lens (replace by exact name). A blank name is ignored. Redirects to the
+        # Settings page so the saved lens shows immediately.
+        if ranking_rules_saver is None:
+            return PlainTextResponse("Settings are read-only here.", status_code=503)
+        form = await _form(request)
+        name = form.get("name", "").strip()
+        if name:
+            lens = Lens(
+                name=name,
+                include_domains=_csv_tuple(form.get("include_domains", "")),
+                exclude_domains=_csv_tuple(form.get("exclude_domains", "")),
+                include_keywords=_csv_tuple(form.get("include_keywords", "")),
+                exclude_keywords=_csv_tuple(form.get("exclude_keywords", "")),
+            )
+            ranking_rules_saver(rules_provider().with_lens(lens))
+        return RedirectResponse("/settings?saved=1", status_code=303)
+
+    async def delete_lens(request: Request) -> Response:
+        if ranking_rules_saver is None:
+            return PlainTextResponse("Settings are read-only here.", status_code=503)
+        form = await _form(request)
+        name = form.get("name", "").strip()
+        if name:
+            ranking_rules_saver(rules_provider().without_lens(name))
+        return RedirectResponse("/settings?saved=1", status_code=303)
+
     async def settings_page(request: Request) -> Response:
         # Owner-only: the page is served to a loopback client when a prefs saver is wired. A network
         # visitor (or a build with no saver) gets 404 so the surface is invisible off-loopback.
@@ -524,7 +574,7 @@ def build_app(
             return PlainTextResponse("Not found", status_code=404)
         prefs = _load_prefs() or UserPreferences()
         saved = request.query_params.get("saved") == "1"
-        body = render_settings_page(prefs, saved=saved)
+        body = render_settings_page(prefs, rules_provider(), saved=saved)
         return Response(body, media_type="text/html; charset=utf-8")
 
     _BOOL_FORM = {"on", "true", "1", "yes"}
@@ -601,6 +651,10 @@ def build_app(
         # Settings page + preference writes (owner-only; 404 / 503 otherwise).
         Route("/settings", settings_page, methods=["GET"]),
         Route("/settings/prefs", set_prefs, methods=["POST"]),
+        # Lens management from the Settings page (owner-only; domain rules reuse /rules/domain and
+        # the active-lens selector reuses /scope).
+        Route("/settings/lens", set_lens, methods=["POST"]),
+        Route("/settings/lens/delete", delete_lens, methods=["POST"]),
     ]
     middleware = [
         Middleware(

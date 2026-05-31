@@ -136,3 +136,39 @@ def test_without_domain_rule_is_immutable() -> None:
 def test_without_domain_rule_missing_is_noop() -> None:
     base = RankingRules(domain_rules={"a.com": RankRule.RAISE})
     assert base.without_domain_rule("missing.com") is base
+
+
+def test_with_lens_appends_a_new_lens() -> None:
+    base = RankingRules(lenses=(Lens(name="news"),))
+    updated = base.with_lens(Lens(name="docs", include_domains=("docs.rs",)))
+    assert [lens.name for lens in updated.lenses] == ["news", "docs"]
+    # Original is untouched (immutable update).
+    assert [lens.name for lens in base.lenses] == ["news"]
+
+
+def test_with_lens_replaces_same_name_in_place() -> None:
+    base = RankingRules(lenses=(Lens(name="news"), Lens(name="docs")))
+    updated = base.with_lens(Lens(name="news", include_keywords=("politics",)))
+    # Still two lenses, "news" overwritten (not duplicated), order keeps the survivors first.
+    assert [lens.name for lens in updated.lenses] == ["docs", "news"]
+    news = next(lens for lens in updated.lenses if lens.name == "news")
+    assert news.include_keywords == ("politics",)
+
+
+def test_without_lens_removes_and_clears_active() -> None:
+    base = RankingRules(lenses=(Lens(name="news"), Lens(name="docs")), active_lens="news")
+    updated = base.without_lens("news")
+    assert [lens.name for lens in updated.lenses] == ["docs"]
+    # The active lens pointed at the removed one, so it is cleared.
+    assert updated.active_lens is None
+
+
+def test_without_lens_keeps_active_when_other_removed() -> None:
+    base = RankingRules(lenses=(Lens(name="news"), Lens(name="docs")), active_lens="news")
+    updated = base.without_lens("docs")
+    assert updated.active_lens == "news"
+
+
+def test_without_lens_missing_is_noop() -> None:
+    base = RankingRules(lenses=(Lens(name="news"),))
+    assert base.without_lens("missing") is base
