@@ -8,7 +8,7 @@ from searchmob_desktop.engines.normalize import normalize_url, strip_tracking_pa
 def test_drops_utm_and_known_tracking_params() -> None:
     raw = (
         "https://example.com/page"
-        "?utm_source=newsletter&utm_medium=email&fbclid=abc&gclid=xyz"
+        "?utm_source=newsletter&utm_medium=email&fbclid=abc&gclid=xyz&gclsrc=aw&msclkid=mm"
         "&mc_cid=1&mc_eid=2&_hsenc=3&_hsmi=4&igshid=5&ref=6&ref_src=7&yclid=8&dclid=9"
         "&keep=yes"
     )

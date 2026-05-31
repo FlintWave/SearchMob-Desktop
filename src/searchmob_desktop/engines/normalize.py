@@ -6,8 +6,9 @@ different URLs (one with `?utm_source=...`, one without; or `HTTPS://Example.com
 
 Rules (mirroring the spirit of the Android `UrlNormalizer.kt`):
 
-* Drop common tracking query params (`utm_*`, `fbclid`, `gclid`, `mc_cid`, `mc_eid`, `_hsenc`,
-  `_hsmi`, `igshid`, `ref`, `ref_src`, `yclid`, `dclid`).
+* Drop common tracking query params (`utm_*`, `fbclid`, `gclid`, `gclsrc`, `msclkid`, `mc_cid`,
+  `mc_eid`, `_hsenc`, `_hsmi`, `igshid`, `ref`, `ref_src`, `yclid`, `dclid`). This set is kept in
+  sync with the Android app's `UrlNormalizer` so both strip the same trackers.
 * Lowercase scheme and host.
 * Strip a single trailing slash off the path, but leave the root path `/` alone.
 
@@ -24,6 +25,8 @@ _TRACKING_KEYS: Final[frozenset[str]] = frozenset(
     {
         "fbclid",
         "gclid",
+        "gclsrc",
+        "msclkid",
         "mc_cid",
         "mc_eid",
         "_hsenc",
