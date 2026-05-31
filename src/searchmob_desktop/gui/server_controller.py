@@ -12,6 +12,7 @@ in-memory history store is used until the user explicitly enables encrypted stor
 from __future__ import annotations
 
 import asyncio
+import socket
 import threading
 from collections.abc import Sequence
 
@@ -48,6 +49,41 @@ from searchmob_desktop.suggest import (
     HistorySuggestionsProvider,
     UpstreamSuggestionsProvider,
 )
+
+
+def probe_local_server(host: str, port: int, timeout: float = 0.6) -> bool:
+    """Return True if a SearchMob server already answers `/healthz` at `(host, port)`.
+
+    Used so the GUI can *reuse* a server that the background service already started instead of
+    binding the same port and conflicting (which is what made "close the GUI and keep searching"
+    fail before: the service and the in-app server fought over the port). A wildcard bind
+    (`0.0.0.0` / `::`) is probed on loopback, where the service also listens.
+
+    A plain loopback socket GET, no proxies and no redirects: this must stay on-device, and the
+    only thing that should answer here is our own server. Fail-soft: any socket error means "not
+    running", and we fall through to starting our own.
+    """
+    probe_host = "127.0.0.1" if host in ("0.0.0.0", "::", "") else host
+    request = f"GET /healthz HTTP/1.0\r\nHost: {probe_host}\r\nConnection: close\r\n\r\n"
+    try:
+        with socket.create_connection((probe_host, port), timeout=timeout) as sock:
+            sock.settimeout(timeout)
+            sock.sendall(request.encode("ascii"))
+            chunks: list[bytes] = []
+            while sum(len(c) for c in chunks) < 4096:
+                data = sock.recv(1024)
+                if not data:
+                    break
+                chunks.append(data)
+    except OSError:
+        return False
+    response = b"".join(chunks)
+    status_line = response.split(b"\r\n", 1)[0]
+    if b" 200 " not in status_line:
+        return False
+    body = response.split(b"\r\n\r\n", 1)[-1]
+    return b"ok" in body.lower()
+
 
 # Fetchers for the BYO-key engines, keyed by catalog id. Each takes an `api_key` keyword.
 _KEYED_FETCHERS = {
@@ -219,11 +255,21 @@ class LocalServerController(QObject):
         self._host = host
         self._port = port
         self._worker: _UvicornWorker | None = None
+        # True when an external server (the background service) already owns the port, so we are
+        # reusing it rather than running our own thread. We must never try to stop that process.
+        self._external = False
 
     @property
     def is_running(self) -> bool:
+        if self._external:
+            return True
         worker = self._worker
         return worker is not None and worker.isRunning()
+
+    @property
+    def is_external(self) -> bool:
+        """True when the running server is the background service, not one we started."""
+        return self._external
 
     @property
     def bound_url(self) -> str | None:
@@ -237,8 +283,18 @@ class LocalServerController(QObject):
         self._port = port
 
     def start(self) -> None:
-        """Spin up the server thread. No-op if already running."""
+        """Spin up the server thread, or reuse one the background service already runs.
+
+        No-op if already running. Before binding, probe the target port: if a SearchMob server
+        already answers there (the background service), reuse it instead of starting our own and
+        colliding on the port. In that case we emit `serverStarted` so the UI reflects the reachable
+        URL, but we never own or stop that process.
+        """
         if self.is_running:
+            return
+        if probe_local_server(self._host, self._port):
+            self._external = True
+            self.serverStarted.emit(self._port)
             return
         prefs = self._prefs_store.load()
         # Mirror the prefs history-enabled flag into the in-memory store the server hands to the
@@ -272,7 +328,16 @@ class LocalServerController(QObject):
         worker.start()
 
     def stop(self) -> None:
-        """Ask the server to exit and wait briefly for the thread to join."""
+        """Ask our server to exit and wait briefly for the thread to join.
+
+        If we are reusing the background service (`is_external`), there is nothing of ours to stop:
+        we detach our notion of it but leave the service process running, so closing the GUI keeps
+        search available.
+        """
+        if self._external:
+            self._external = False
+            self.serverStopped.emit()
+            return
         worker = self._worker
         if worker is None:
             return

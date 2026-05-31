@@ -81,14 +81,35 @@ def mechanism_label() -> str | None:
     }.get(_backend())
 
 
+def _running_frozen() -> bool:
+    """True when running as a packaged (Briefcase) app whose executable IS the app entry point.
+
+    In a packaged install `sys.executable` is the app binary (e.g. `/usr/bin/searchmob_desktop`),
+    not a Python interpreter: it routes its own argv straight to the Click CLI, so it must be
+    invoked as `<exe> serve ...` with NO `-m`. A normal source/venv run has a `python`-named
+    executable that DOES need `-m searchmob_desktop`. Getting this wrong is fatal for the service:
+    a frozen binary handed `-m` dies with "No such option: -m" and systemd restarts it forever.
+    """
+    if getattr(sys, "frozen", False):
+        return True
+    return not Path(sys.executable).name.lower().startswith("python")
+
+
 def server_command(host: str = "127.0.0.1", port: int = DEFAULT_PORT) -> list[str]:
     """The command a unit/agent/task runs to start the headless server.
 
-    Prefers the installed `searchmob-desktop` console script (pipx / source installs); otherwise
-    invokes the running interpreter with `-m searchmob_desktop`, which the bundled app supports.
+    Three cases: (1) an installed `searchmob-desktop` console script (pipx / source installs) is
+    invoked directly; (2) a packaged/frozen app is invoked as `<app-binary> serve ...` (its argv
+    routes to the CLI, so `-m` must NOT be added); (3) a plain `python` interpreter is invoked with
+    `-m searchmob_desktop serve ...`.
     """
     console = shutil.which("searchmob-desktop")
-    base = [console] if console else [sys.executable, "-m", "searchmob_desktop"]
+    if console:
+        base = [console]
+    elif _running_frozen():
+        base = [sys.executable]
+    else:
+        base = [sys.executable, "-m", "searchmob_desktop"]
     return [*base, "serve", "--host", host, "--port", str(port)]
 
 
@@ -174,6 +195,25 @@ def _systemd_status() -> ServiceStatus:
     return ServiceStatus(supported=True, installed=installed, enabled=enabled, active=active)
 
 
+def _enable_linger() -> bool:
+    """Enable systemd lingering for the current user; return True on success.
+
+    Without lingering, a *user* service only runs while the user has an active login session, so it
+    does not start at boot and stops when the desktop session ends. Enabling it is what makes "run
+    in the background / start with my system" mean boot, not just login. This is best-effort (modern
+    systemd lets a user linger themselves via polkit; older systems need root) and never blocks the
+    install: if it fails, the service still works for a logged-in session. We never *disable* linger
+    on remove, since other user services may rely on it.
+    """
+    user = os.environ.get("USER") or ""
+    if not user or not shutil.which("loginctl"):
+        return False
+    result = subprocess.run(
+        ["loginctl", "enable-linger", user], capture_output=True, text=True, check=False
+    )
+    return result.returncode == 0
+
+
 def _systemd_install(host: str, port: int) -> tuple[bool, str]:
     path = unit_path()
     try:
@@ -185,7 +225,14 @@ def _systemd_install(host: str, port: int) -> tuple[bool, str]:
     result = _systemctl("enable", "--now", SYSTEMD_UNIT)
     if result.returncode != 0:
         return (False, result.stderr.strip() or "systemctl could not enable the service.")
-    return (True, "Service installed; it will run in the background and start at login.")
+    # Linger makes it start at boot, not just at login; best-effort, the service works either way.
+    if _enable_linger():
+        return (True, "Service installed; it runs in the background and starts with your system.")
+    return (
+        True,
+        "Service installed; it runs in the background and starts when you log in. "
+        "To also start it at boot before you log in, run: loginctl enable-linger $USER",
+    )
 
 
 def _systemd_remove() -> tuple[bool, str]:
