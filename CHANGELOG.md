@@ -3,6 +3,33 @@
 All notable changes to SearchMob Desktop are documented here. The version scheme is Ubuntu-style
 `YY.MM.VV` and releases are tagged `vYY.MM.VV`.
 
+## 26.05.09 — 2026-05-30
+
+### Added
+- **Settings in the browser.** The served results UI (the surface most searches happen on) now has
+  its own Settings page, reachable from a link in the top bar and served even when only the
+  background service is running. It mirrors the desktop Settings where it is safe to do so over the
+  local connection: default sort, the AI-slop / low-quality filter mode, the Wikipedia summary card,
+  and upstream autocomplete; full management of your per-domain rules; create / edit / delete and
+  select **scopes** (lenses); **Goggles** import (paste or pick a file) and clear; and a view of your
+  recent search history with a clear button. Every change is owner-only (only this computer can open
+  or change it) and takes effect on the next search without restarting the server.
+
+### Fixed
+- **Results now open on a single click** in the app. The in-app results list previously needed a
+  double-click, so a single click looked like nothing happened; it now opens on one click, matching
+  the browser page (the right-click ranking menu and keyboard Enter are unchanged).
+- **The background service actually runs now (and starts at boot).** The installed service never
+  started: its command was built for a plain Python interpreter, but the packaged app is its own
+  executable, so it exited immediately and the system retried it forever. The command is now correct
+  for the packaged app, and installing the service also enables systemd "lingering" so it starts
+  with the system rather than only after you log in. This is what makes searching work with the app
+  window closed.
+- **The app and the background service no longer fight over the port.** When the service is already
+  running, opening the app now detects and reuses it instead of trying to start a second server on
+  the same port (which failed). The window shows it is using the background service, and closing the
+  window leaves search running.
+
 ## 26.05.08 — 2026-05-29
 
 ### Added
