@@ -15,6 +15,7 @@ from collections.abc import Awaitable, Callable, Sequence
 
 import uvicorn
 
+from searchmob_desktop.data.history import HistoryEntry
 from searchmob_desktop.engines import EngineFn
 from searchmob_desktop.engines.correct import SpellCorrector
 from searchmob_desktop.engines.rank import RankingRules
@@ -42,6 +43,8 @@ def serve(
     ranking_rules_saver: Callable[[RankingRules], bool] | None = None,
     prefs_provider: Callable[[], UserPreferences] | None = None,
     prefs_saver: Callable[[UserPreferences], bool] | None = None,
+    history_provider: Callable[[], list[HistoryEntry]] | None = None,
+    history_clearer: Callable[[], bool] | None = None,
     summary_provider: Callable[[str], Awaitable[SummaryBox | None]] | None = None,
     ai_slop_mode: str = "off",
     max_query_length: int = MAX_QUERY_LENGTH,
@@ -71,6 +74,8 @@ def serve(
         ranking_rules_saver=ranking_rules_saver,
         prefs_provider=prefs_provider,
         prefs_saver=prefs_saver,
+        history_provider=history_provider,
+        history_clearer=history_clearer,
         summary_provider=summary_provider,
         ai_slop_mode=ai_slop_mode,
         max_query_length=max_query_length,

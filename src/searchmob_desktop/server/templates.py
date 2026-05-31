@@ -16,6 +16,7 @@ from collections.abc import Callable, Iterable
 from html import escape
 from urllib.parse import quote_plus, urlsplit
 
+from searchmob_desktop.data.history import HistoryEntry
 from searchmob_desktop.engines import SearchResult
 from searchmob_desktop.engines.rank import Lens, RankingRules, RankRule, host_of_url
 from searchmob_desktop.engines.wiki_summary import SummaryBox
@@ -118,6 +119,31 @@ _PAGE_CSS = (
     ".settings .lensdel button{background:transparent;color:var(--muted);"
     "border:1px solid var(--border)}"
     ".settings .lensdel button:hover{border-color:#d33;color:#d33}"
+    ".settings .hint code{background:var(--chip-bg);color:var(--chip-fg);padding:1px 5px;"
+    "border-radius:5px;font-size:12px}"
+    ".settings .gogglelist,.settings .histlist{list-style:none;margin:0 0 12px;padding:0;"
+    "font-size:13px}"
+    ".settings .gogglelist li{display:flex;gap:8px;align-items:center;padding:5px 0;"
+    "border-bottom:1px solid var(--border)}"
+    ".settings .gogglelist .site{font-weight:600;word-break:break-all}"
+    ".settings .gogglelist .act{margin-left:auto;font-size:11px;color:var(--muted)}"
+    ".settings .histlist li{padding:4px 0;border-bottom:1px solid var(--border);"
+    "word-break:break-word}"
+    ".settings .goggleimport{display:flex;flex-direction:column;gap:8px}"
+    ".settings textarea{width:100%;padding:9px 11px;border:1px solid var(--border);"
+    "border-radius:8px;"
+    "background:var(--bg);color:var(--fg);font-size:13px;font-family:ui-monospace,monospace;"
+    "resize:vertical}"
+    ".settings .goggleimport .grow{display:flex;gap:10px;align-items:center;flex-wrap:wrap}"
+    ".settings .goggleimport button,.settings .goggleclear button,.settings .histclear button{"
+    "background:var(--accent);color:#fff;border:0;border-radius:18px;padding:8px 18px;"
+    "font-size:13px;"
+    "font-weight:600;cursor:pointer}"
+    ".settings .goggleclear button,.settings .histclear button{background:transparent;"
+    "color:var(--muted);border:1px solid var(--border)}"
+    ".settings .goggleclear button:hover,.settings .histclear button:hover{"
+    "border-color:#d33;color:#d33}"
+    ".settings .goggleclear,.settings .histclear{margin:0 0 8px}"
     ".searchbox{display:flex;align-items:stretch;background:var(--card);"
     "border:1px solid var(--border);border-radius:26px;box-shadow:var(--shadow);overflow:hidden}"
     ".searchbox input[type=text]{flex:1;min-width:0;border:0;outline:0;background:transparent;"
@@ -630,13 +656,97 @@ def _lenses_section(rules: RankingRules) -> str:
     return "".join(parts)
 
 
-def render_settings_page(prefs: UserPreferences, rules: RankingRules, saved: bool = False) -> str:
+# A goggle action maps to a rank effect; show it in plain words in the goggle list.
+_GOGGLE_ACTION_LABELS = {
+    RankRule.BLOCK: "discard",
+    RankRule.RAISE: "boost",
+    RankRule.LOWER: "downrank",
+    RankRule.PIN: "pin",
+}
+
+# Read a chosen .goggle file into the textarea so "upload" works without a multipart parser: the
+# file never leaves the browser; its text just fills the field the normal urlencoded POST sends.
+_GOGGLE_FILE_JS = (
+    "function smLoadGoggle(input){var f=input.files&&input.files[0];if(!f)return;"
+    "var r=new FileReader();r.onload=function(e){"
+    "document.getElementById('sm-goggle-text').value=e.target.result;};r.readAsText(f);}"
+)
+
+
+def _goggles_section(rules: RankingRules) -> str:
+    """The Goggles card: current goggle rules, a paste/upload import (append), and clear-all."""
+    parts = ['<section class="card"><h2>Goggles</h2>']
+    parts.append(
+        '<p class="hint">Brave-style goggle rules, applied on-device. '
+        "Example: <code>$discard,site=example.com</code> or <code>$boost,site=dev.to</code>.</p>"
+    )
+    if rules.goggles:
+        parts.append('<ul class="gogglelist">')
+        for goggle in rules.goggles:
+            action = _GOGGLE_ACTION_LABELS.get(goggle.action, goggle.action.value.lower())
+            parts.append(
+                f'<li><span class="site">{escape(goggle.site)}</span>'
+                f'<span class="act">{escape(action)}</span></li>'
+            )
+        parts.append("</ul>")
+        parts.append(
+            '<form class="goggleclear" action="/settings/goggles/clear" method="post">'
+            f'<button type="submit">Clear all {len(rules.goggles)} rules</button></form>'
+        )
+    else:
+        parts.append('<p class="hint">No goggle rules imported yet.</p>')
+    parts.append('<form class="goggleimport" action="/settings/goggles" method="post">')
+    parts.append(
+        '<textarea id="sm-goggle-text" name="goggles" rows="4" '
+        'placeholder="Paste goggle rules, one per line"></textarea>'
+    )
+    parts.append(
+        '<div class="grow"><input type="file" accept=".goggle,.txt,text/plain" '
+        'onchange="smLoadGoggle(this)"><button type="submit">Import (append)</button></div>'
+    )
+    parts.append("</form>")
+    parts.append("</section>")
+    return "".join(parts)
+
+
+def _history_section(history: list[HistoryEntry] | None, clearable: bool) -> str:
+    """The Search history card: recent queries and a clear-all button. Owner-only (loopback)."""
+    if history is None:
+        return ""
+    parts = ['<section class="card"><h2>Search history</h2>']
+    if history:
+        parts.append('<ul class="histlist">')
+        for entry in history:
+            parts.append(f"<li>{escape(entry.query)}</li>")
+        parts.append("</ul>")
+        if clearable:
+            parts.append(
+                '<form class="histclear" action="/settings/history/clear" method="post">'
+                '<button type="submit">Clear search history</button></form>'
+            )
+    else:
+        parts.append(
+            '<p class="hint">No search history (history is off, or nothing recorded yet).</p>'
+        )
+    parts.append("</section>")
+    return "".join(parts)
+
+
+def render_settings_page(
+    prefs: UserPreferences,
+    rules: RankingRules,
+    saved: bool = False,
+    history: list[HistoryEntry] | None = None,
+    history_clearable: bool = False,
+) -> str:
     """The browser Settings page: live preference toggles plus domain-rule and scope management.
 
     Owner-only (the server serves it to a loopback client and 404s otherwise). `saved` shows a brief
     confirmation after a successful POST. Mirrors the relevant parts of the desktop Settings dialog:
-    the preference toggles map to `UserPreferences` fields, while `rules` drives the domain-rule
-    list and the scope (lens) editor, both persisted to the encrypted ranking store.
+    the preference toggles map to `UserPreferences` fields; `rules` drives the domain-rule list, the
+    scope (lens) editor, and the goggles list (all persisted to the encrypted ranking store); and
+    `history`, when provided, shows recent queries with a clear-all button (`history_clearable`).
+    Passing `history=None` omits the history card entirely.
     """
     head = _page_head("Settings · SearchMob")
     parts: list[str] = []
@@ -686,12 +796,15 @@ def render_settings_page(prefs: UserPreferences, rules: RankingRules, saved: boo
     parts.append('<div class="actions"><button type="submit">Save</button></div>')
     parts.append("</form>")
 
-    # Domain rules and scopes are their own forms (each row posts independently), so they live
-    # outside the preferences form above.
+    # Domain rules, scopes, goggles, and history are their own forms (each posts independently), so
+    # they live outside the preferences form above.
     parts.append(_domain_rules_section(rules))
     parts.append(_lenses_section(rules))
+    parts.append(_goggles_section(rules))
+    parts.append(_history_section(history, history_clearable))
 
     parts.append("</div>")
     parts.append(f"<script>{_THEME_TOGGLE_JS}</script>")
+    parts.append(f"<script>{_GOGGLE_FILE_JS}</script>")
     parts.append("</body>")
     return "<!DOCTYPE html><html>" + head + "".join(parts) + "</html>"

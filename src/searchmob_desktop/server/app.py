@@ -47,6 +47,7 @@ from starlette.responses import (
 from starlette.routing import Route
 from starlette.types import ASGIApp
 
+from searchmob_desktop.data.history import HistoryEntry
 from searchmob_desktop.engines import EngineContext, EngineFn, SearchResult, aggregate
 from searchmob_desktop.engines.correct import SpellCorrector
 from searchmob_desktop.engines.rank import (
@@ -55,6 +56,7 @@ from searchmob_desktop.engines.rank import (
     RankRule,
     apply_ranking,
     host_of_url,
+    parse_goggles,
 )
 from searchmob_desktop.engines.rank.slop_blocklist import load_slop_domains
 from searchmob_desktop.engines.sort import SortMode, sort_results
@@ -79,6 +81,12 @@ MAX_QUERY_LENGTH = 512
 # Cap on the number of suggestions the suggestions endpoint may return. Same value as Android's
 # `MAX_SUGGESTIONS`; the provider is asked for at most this many and the result is also sliced.
 MAX_SUGGESTIONS = 8
+
+# Cap on imported goggle text (bytes of the form field). Goggle files are tiny in practice; the cap
+# stops a huge paste from being parsed into memory. Mirrors the in-app importer's intent.
+_MAX_GOGGLE_CHARS = 512 * 1024
+# How many recent history entries the served Settings page shows.
+_HISTORY_VIEW_LIMIT = 50
 
 _SUGGESTIONS_CONTENT_TYPE = "application/x-suggestions+json"
 _OPENSEARCH_CONTENT_TYPE = "application/opensearchdescription+xml"
@@ -127,6 +135,9 @@ class _SecurityHeadersMiddleware(BaseHTTPMiddleware):
             "/settings/prefs",
             "/settings/lens",
             "/settings/lens/delete",
+            "/settings/goggles",
+            "/settings/goggles/clear",
+            "/settings/history/clear",
         }
     )
 
@@ -324,6 +335,8 @@ def build_app(
     ranking_rules_saver: Callable[[RankingRules], bool] | None = None,
     prefs_provider: Callable[[], UserPreferences] | None = None,
     prefs_saver: Callable[[UserPreferences], bool] | None = None,
+    history_provider: Callable[[], list[HistoryEntry]] | None = None,
+    history_clearer: Callable[[], bool] | None = None,
     summary_provider: Callable[[str], Awaitable[SummaryBox | None]] | None = None,
     ai_slop_mode: str = "off",
     max_query_length: int = MAX_QUERY_LENGTH,
@@ -567,6 +580,31 @@ def build_app(
             ranking_rules_saver(rules_provider().without_lens(name))
         return RedirectResponse("/settings?saved=1", status_code=303)
 
+    async def import_goggles(request: Request) -> Response:
+        # Parse Brave-style goggle text and append the rules to the existing set (mirrors the in-app
+        # importer). The text is size-capped before parsing so a huge paste cannot exhaust memory.
+        if ranking_rules_saver is None:
+            return PlainTextResponse("Settings are read-only here.", status_code=503)
+        form = await _form(request)
+        text = form.get("goggles", "")[:_MAX_GOGGLE_CHARS]
+        parsed = parse_goggles(text)
+        if parsed:
+            current = rules_provider()
+            ranking_rules_saver(replace(current, goggles=current.goggles + tuple(parsed)))
+        return RedirectResponse("/settings?saved=1", status_code=303)
+
+    async def clear_goggles(request: Request) -> Response:
+        if ranking_rules_saver is None:
+            return PlainTextResponse("Settings are read-only here.", status_code=503)
+        ranking_rules_saver(replace(rules_provider(), goggles=()))
+        return RedirectResponse("/settings?saved=1", status_code=303)
+
+    async def clear_history(_request: Request) -> Response:
+        if history_clearer is None:
+            return PlainTextResponse("History is not available here.", status_code=503)
+        history_clearer()
+        return RedirectResponse("/settings?saved=1", status_code=303)
+
     async def settings_page(request: Request) -> Response:
         # Owner-only: the page is served to a loopback client when a prefs saver is wired. A network
         # visitor (or a build with no saver) gets 404 so the surface is invisible off-loopback.
@@ -574,7 +612,19 @@ def build_app(
             return PlainTextResponse("Not found", status_code=404)
         prefs = _load_prefs() or UserPreferences()
         saved = request.query_params.get("saved") == "1"
-        body = render_settings_page(prefs, rules_provider(), saved=saved)
+        history: list[HistoryEntry] | None = None
+        if history_provider is not None:
+            try:
+                history = list(history_provider())[:_HISTORY_VIEW_LIMIT]
+            except Exception:
+                history = []
+        body = render_settings_page(
+            prefs,
+            rules_provider(),
+            saved=saved,
+            history=history,
+            history_clearable=history_clearer is not None,
+        )
         return Response(body, media_type="text/html; charset=utf-8")
 
     _BOOL_FORM = {"on", "true", "1", "yes"}
@@ -655,6 +705,10 @@ def build_app(
         # the active-lens selector reuses /scope).
         Route("/settings/lens", set_lens, methods=["POST"]),
         Route("/settings/lens/delete", delete_lens, methods=["POST"]),
+        # Goggles import / clear and history clear (owner-only).
+        Route("/settings/goggles", import_goggles, methods=["POST"]),
+        Route("/settings/goggles/clear", clear_goggles, methods=["POST"]),
+        Route("/settings/history/clear", clear_history, methods=["POST"]),
     ]
     middleware = [
         Middleware(

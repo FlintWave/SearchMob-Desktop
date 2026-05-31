@@ -187,6 +187,13 @@ class _UvicornWorker(QThread):
                 return False
             return True
 
+        def _clear_history() -> bool:
+            try:
+                self._history_store.clear()
+            except Exception:
+                return False
+            return True
+
         app = build_app(
             self._engines,
             bound_port_getter=lambda: self._port,
@@ -201,6 +208,9 @@ class _UvicornWorker(QThread):
             # restart. Summary is always wired; the live `summary_enabled` pref gates it.
             prefs_provider=self._prefs_store.load,
             prefs_saver=_save_prefs,
+            # Recent history + clear for the served Settings page (owner-only / loopback).
+            history_provider=lambda: list(self._history_store.recent(50)),
+            history_clearer=_clear_history,
             summary_provider=summary_for_query,
             ai_slop_mode=self._prefs_store.load().ai_slop_mode,
             access_token=self._access_token,
