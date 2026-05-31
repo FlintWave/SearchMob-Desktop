@@ -24,13 +24,32 @@ privacy proxy, and the same store-nothing-by-default behavior.
   edit-distance over a bundled word list, optionally augmented by your own history) suggests a
   correction for misspelled queries. No query ever leaves the device for this.
 - **Result personalization ("filter bubbles"), local and private**: block / lower / raise / pin
-  results by domain (right-click a result), plus saved **scopes** (domain/keyword filters, with
-  ready-to-use samples) and imported Brave Goggles-format rules. Rules live in the encrypted vault
-  and are applied on-device to both the in-app and browser results; nothing is sent upstream.
+  results by domain (right-click a result), plus saved **scopes** (domain/keyword filters; the
+  ready-to-use samples are installed by default and selectable before you even search) and imported
+  Brave Goggles-format rules. Rules live in the encrypted vault and are applied on-device to both
+  the in-app and browser results; nothing is sent upstream.
+- **Search verticals**: category tabs for **Web**, **News**, **Forums**, and **Academic**. Each is a
+  scoped search over the same engines (a `site:` filter, no new third-party API) with a sensible
+  default sort. Available in the app and on the served page (`?vertical=`).
+- **Result sorting**: Freshest + Relevant (default), Date, or Relevance — in the app and via `?sort=`.
+- **Contextual Wikipedia summary** card above the results for entity-like queries (confidence-gated,
+  fail-soft), in the app and on the served page.
+- **AI-slop / low-quality filter**: a bundled, on-device domain blocklist that downranks (default) or
+  hides results from AI content farms; off / downrank / hide in Settings. No query leaves the device.
+- **Settings in the browser**: the served results page has its own owner-only (loopback) Settings
+  page mirroring the app — default sort, the slop filter, the summary card, suggestions, full
+  domain-rule and scope management, Goggles import, and history view/clear.
+- **Optional local-AI answer box** (desktop only): when a local model server (Ollama / LM Studio) is
+  running, a short cited answer summarizing your own results — off by default, loopback-only.
+- **MCP server** (`searchmob-desktop mcp`): exposes the metasearch as a Model Context Protocol
+  `web_search` tool over stdio, so a local AI agent (Claude Desktop, IDE assistants) can run its web
+  searches through SearchMob's private metasearch instead of a third-party search API. Opt-in; the
+  config snippet is in Settings → AI access.
 - **Outbound traffic disclosure**: the only outbound traffic is the searches you run, plus an
   optional once-a-day update check to GitHub that you can turn off in settings.
 - **Local HTTP server** so any browser can use SearchMob as its default search engine. Loopback-only
-  by default; opt-in network mode (`0.0.0.0`) for Tailscale or LAN use, with the same warning gate.
+  by default; opt-in network mode (`0.0.0.0`) for Tailscale or LAN use, behind a warning gate and an
+  access-token + DNS-rebind guard for off-device clients.
 - **Search-suggestions endpoint** (OpenSearch `application/x-suggestions+json`) advertised in the
   descriptor, sourced from local history plus an opt-in upstream.
 - **Store-nothing by default.** Opt-in encrypted history (SQLCipher + Argon2id); optional
@@ -40,7 +59,7 @@ privacy proxy, and the same store-nothing-by-default behavior.
 
 ## Install
 
-The latest release is `26.05.05` (see [`CHANGELOG.md`](CHANGELOG.md)). Two install paths:
+Grab the current version from the [latest GitHub Release](https://github.com/FlintWave/SearchMob-Desktop/releases/latest) (the version history is in [`CHANGELOG.md`](CHANGELOG.md)). Two install paths:
 
 ### End users: native installer (recommended)
 
@@ -97,6 +116,7 @@ searchmob-desktop --help
 searchmob-desktop search "privacy tools"   # one-shot metasearch, prints a table
 searchmob-desktop serve                    # run the local HTTP server (browser integration)
 searchmob-desktop gui                      # launch the desktop GUI
+searchmob-desktop mcp                      # run the MCP server (stdio) for a local AI agent
 searchmob-desktop vault --help             # manage the encrypted-storage vault
 searchmob-desktop --version
 ```

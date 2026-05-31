@@ -3,6 +3,28 @@
 All notable changes to SearchMob Desktop are documented here. The version scheme is Ubuntu-style
 `YY.MM.VV` and releases are tagged `vYY.MM.VV`.
 
+## 26.05.10 — 2026-05-31
+
+### Added
+- **MCP server** (`searchmob-desktop mcp`). Exposes the metasearch as a Model Context Protocol
+  `web_search` tool over stdio so a local AI agent (Claude Desktop, IDE assistants) can run its web
+  searches through SearchMob's private metasearch instead of a third-party search API. Opt-in and
+  loopback/stdio only; the ready-to-paste client config is in Settings -> AI access.
+- **Sample scopes are installed by default** (no "add them" step), and the scope selector is shown in
+  the app and on the served home page before you run a search.
+- **Link to the Android app** from the About dialog.
+
+### Changed
+- The URL tracker-stripping list now matches the Android app exactly (adds `gclsrc`, `msclkid`).
+
+### Fixed
+- **Accessibility of the served pages and the GUI.** Served pages declare `<html lang>`; search
+  inputs and the Sort/Scope selects have accessible names / associated labels; the vertical bar is a
+  labeled `nav` with `aria-current` on the active tab (no longer color-only) and a contrast-corrected
+  active chip; a visible keyboard focus ring and `prefers-reduced-motion` support were added. The
+  BYO API-key, trusted-hostname, and passphrase fields in Settings now have accessible names.
+- The MCP `web_search` tool clamps the query length, matching the HTTP server.
+
 ## 26.05.09 — 2026-05-30
 
 ### Added
