@@ -6,7 +6,7 @@ import pytest
 
 pytest.importorskip("PySide6")
 
-from searchmob_desktop.engines.rank import RankingRules, RankRule
+from searchmob_desktop.engines.rank import DEFAULT_SAMPLE_LENSES, RankingRules, RankRule
 from searchmob_desktop.gui import settings_dialog as sd
 from searchmob_desktop.prefs import JsonPreferencesStore
 
@@ -30,19 +30,13 @@ def _dialog(tmp_path, fake_vault):  # type: ignore[no-untyped-def]
     return sd.SettingsDialog(prefs_store=store)
 
 
-def test_add_sample_lenses_then_select_active(qapp, tmp_path, fake_vault, monkeypatch) -> None:  # type: ignore[no-untyped-def]
-    from PySide6.QtWidgets import QMessageBox
-
-    monkeypatch.setattr(QMessageBox, "information", lambda *a, **k: None)
+def test_select_active_sample_lens(qapp, tmp_path, fake_vault) -> None:  # type: ignore[no-untyped-def]
+    # The sample scopes are present by default (seeded by the ranking store); the dialog lists them
+    # and selecting one activates it, clearing it on "No scope".
+    fake_vault["rules"] = RankingRules(lenses=DEFAULT_SAMPLE_LENSES)
     dialog = _dialog(tmp_path, fake_vault)
-    changed: list[int] = []
-    dialog.rulesChanged.connect(lambda: changed.append(1))
+    assert dialog._lens_combo.count() == len(DEFAULT_SAMPLE_LENSES) + 1  # +1 for "No scope"
 
-    dialog._on_add_sample_lenses()
-    assert len(fake_vault["rules"].lenses) >= 3
-    assert changed  # rulesChanged fired
-
-    # Selecting index 1 activates the first lens; index 0 clears it.
     dialog._lens_combo.setCurrentIndex(1)
     assert fake_vault["rules"].active_lens == dialog._lens_combo.itemText(1)
     dialog._lens_combo.setCurrentIndex(0)

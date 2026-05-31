@@ -272,12 +272,20 @@ def _display_url(raw_url: str) -> str:
     return host + separator + separator.join(segments)
 
 
-def render_home_page(settings_link: bool = False) -> str:
+def render_home_page(
+    settings_link: bool = False,
+    rules: RankingRules | None = None,
+    editable: bool = False,
+) -> str:
     """The home page: a centered search box plus the OpenSearch link.
 
     `settings_link` adds a Settings link to the top bar; the server passes True only for the
-    loopback owner, since the Settings route is owner-only.
+    loopback owner, since the Settings route is owner-only. `rules` + `editable` add a scope (lens)
+    selector below the search box for the loopback owner, so a scope can be chosen before searching
+    (the selector renders only when at least one lens exists).
     """
+    active_rules = rules if rules is not None else RankingRules()
+    scope = _scope_bar(active_rules) if editable else ""
     head = _page_head("SearchMob")
     body = (
         '<body data-page="home">'
@@ -294,6 +302,7 @@ def render_home_page(settings_link: bool = False) -> str:
         'autocomplete="off" autofocus="autofocus">'
         '<input type="submit" value="Search">'
         "</form>"
+        f"{scope}"
         "</div>"
         f"<script>{_THEME_TOGGLE_JS}</script>"
         "</body>"

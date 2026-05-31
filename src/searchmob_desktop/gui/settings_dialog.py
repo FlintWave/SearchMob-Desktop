@@ -51,7 +51,6 @@ from searchmob_desktop.data.ranking_store import load_ranking_rules, save_rankin
 from searchmob_desktop.engines import make_privacy_client
 from searchmob_desktop.engines.local_llm import LlmBackend, detect_backends
 from searchmob_desktop.engines.rank import (
-    DEFAULT_SAMPLE_LENSES,
     RankingRules,
     parse_goggles,
 )
@@ -281,10 +280,6 @@ class SettingsDialog(QDialog):
         lens_row.addWidget(self._lens_combo, stretch=1)
         layout.addLayout(lens_row)
 
-        sample_btn = QPushButton("Add the built-in sample scopes")
-        sample_btn.clicked.connect(self._on_add_sample_lenses)
-        layout.addWidget(sample_btn)
-
         layout.addWidget(QLabel("Domain rules"))
         self._rules_list = QListWidget()
         self._rule_domains: list[str] = []
@@ -379,19 +374,6 @@ class SettingsDialog(QDialog):
         """AI-slop filter mode changed: persist it and re-rank the current results live."""
         self._save(replace(self._prefs, ai_slop_mode=str(self._slop_combo.currentData())))
         self.rulesChanged.emit()
-
-    def _on_add_sample_lenses(self) -> None:
-        existing = {lens.name for lens in self._ranking.lenses}
-        new = tuple(lens for lens in DEFAULT_SAMPLE_LENSES if lens.name not in existing)
-        if not new:
-            QMessageBox.information(self, "Sample scopes", "The sample scopes are already added.")
-            return
-        self._save_ranking(replace(self._ranking, lenses=self._ranking.lenses + new))
-        QMessageBox.information(
-            self,
-            "Sample scopes",
-            f"Added {len(new)} sample scope(s). Pick one in 'Active scope' to apply it.",
-        )
 
     def _on_remove_domain_rule(self) -> None:
         row = self._rules_list.currentRow()
