@@ -184,8 +184,15 @@ _PAGE_CSS = (
     ".verticalbar{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 16px}"
     ".verticalbar .chip{font-size:13px;padding:5px 14px;border:1px solid var(--border);"
     "border-radius:16px;background:var(--card);color:var(--muted);text-decoration:none}"
-    ".verticalbar .chip.active{background:var(--accent);border-color:var(--accent);color:#fff;"
+    # Active chip: a fixed dark-on-light-indigo pairing (>7:1 in both themes), since white-on-accent
+    # failed contrast in dark mode. aria-current also marks it, so the state is never color-only.
+    ".verticalbar .chip.active{background:#c7d0ff;border-color:#c7d0ff;color:#0a1a5c;"
     "font-weight:600}"
+    # Visible keyboard focus (the search input clears the default ring) + reduced-motion support.
+    "a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{"
+    "outline:2px solid var(--accent);outline-offset:2px}"
+    "@media(prefers-reduced-motion:reduce){.topbar{backdrop-filter:none}"
+    "*{animation-duration:.01ms!important;transition-duration:.01ms!important}}"
     ".scopebar{display:flex;align-items:center;gap:8px;margin:0 0 18px;font-size:13px;"
     "color:var(--muted)}"
     ".scopebar select{font-size:13px;padding:3px 6px;border:1px solid var(--border);"
@@ -298,7 +305,7 @@ def render_home_page(
         '<div class="brand">SearchMob</div>'
         '<p class="tagline">Private, on-device metasearch.</p>'
         '<form action="/search" method="get" class="searchbox">'
-        '<input type="text" name="q" placeholder="Search the web" '
+        '<input type="text" name="q" placeholder="Search the web" aria-label="Search" '
         'autocomplete="off" autofocus="autofocus">'
         '<input type="submit" value="Search">'
         "</form>"
@@ -307,7 +314,7 @@ def render_home_page(
         f"<script>{_THEME_TOGGLE_JS}</script>"
         "</body>"
     )
-    return f"<!DOCTYPE html><html>{head}{body}</html>"
+    return f"<!DOCTYPE html><html lang='en'>{head}{body}</html>"
 
 
 def _vertical_bar(query: str, vertical: str) -> str:
@@ -324,10 +331,15 @@ def _vertical_bar(query: str, vertical: str) -> str:
         ("forums", "Forums"),
         ("academic", "Academic"),
     ):
-        active = " active" if value == vertical else ""
+        is_active = value == vertical
+        active = " active" if is_active else ""
+        # aria-current marks the active category for assistive tech (not by color alone).
+        current = ' aria-current="page"' if is_active else ""
         href = f"/search?q={safe_q}&vertical={value}"
-        chips.append(f'<a class="chip{active}" href="{escape(href, quote=True)}">{label}</a>')
-    return '<nav class="verticalbar">' + "".join(chips) + "</nav>"
+        chips.append(
+            f'<a class="chip{active}"{current} href="{escape(href, quote=True)}">{label}</a>'
+        )
+    return '<nav class="verticalbar" aria-label="Search categories">' + "".join(chips) + "</nav>"
 
 
 def _sort_bar(query: str, sort_mode: str) -> str:
@@ -343,8 +355,10 @@ def _sort_bar(query: str, sort_mode: str) -> str:
     return (
         '<form class="scopebar" action="/search" method="get">'
         f'<input type="hidden" name="q" value="{escape(query, quote=True)}">'
-        "<label>Sort:</label>"
-        '<select name="sort" onchange="this.form.submit()">' + "".join(options) + "</select>"
+        '<label for="sm-sort">Sort:</label>'
+        '<select id="sm-sort" name="sort" onchange="this.form.submit()">'
+        + "".join(options)
+        + "</select>"
         '<noscript><button type="submit">Apply</button></noscript>'
         "</form>"
     )
@@ -364,8 +378,10 @@ def _scope_bar(rules: RankingRules) -> str:
     # onchange auto-submits when JS is on; the noscript button covers the JS-off case.
     return (
         '<form class="scopebar" action="/scope" method="post">'
-        "<label>Scope:</label>"
-        '<select name="lens" onchange="this.form.submit()">' + "".join(options) + "</select>"
+        '<label for="sm-scope">Scope:</label>'
+        '<select id="sm-scope" name="lens" onchange="this.form.submit()">'
+        + "".join(options)
+        + "</select>"
         '<noscript><button type="submit">Apply</button></noscript>'
         "</form>"
     )
@@ -460,7 +476,7 @@ def render_results_page(
     parts.append('<a href="/" class="logo">SearchMob</a>')
     parts.append('<form action="/search" method="get" class="searchbox">')
     parts.append(
-        '<input type="text" name="q" placeholder="Search the web" '
+        '<input type="text" name="q" placeholder="Search the web" aria-label="Search" '
         f'value="{escape(query, quote=True)}" autocomplete="off" spellcheck="false">'
     )
     parts.append('<input type="submit" value="Search">')
@@ -522,7 +538,7 @@ def render_results_page(
     parts.append("</div>")
     parts.append(f"<script>{_THEME_TOGGLE_JS}</script>")
     parts.append("</body>")
-    return "<!DOCTYPE html><html>" + head + "".join(parts) + "</html>"
+    return "<!DOCTYPE html><html lang='en'>" + head + "".join(parts) + "</html>"
 
 
 def _select(name: str, options: tuple[tuple[str, str], ...], current: str) -> str:
@@ -816,4 +832,4 @@ def render_settings_page(
     parts.append(f"<script>{_THEME_TOGGLE_JS}</script>")
     parts.append(f"<script>{_GOGGLE_FILE_JS}</script>")
     parts.append("</body>")
-    return "<!DOCTYPE html><html>" + head + "".join(parts) + "</html>"
+    return "<!DOCTYPE html><html lang='en'>" + head + "".join(parts) + "</html>"
