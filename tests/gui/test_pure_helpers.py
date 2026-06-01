@@ -52,6 +52,16 @@ def test_engine_catalog_respects_explicit_disable() -> None:
     assert is_engine_enabled("mwmbl", {"mwmbl": True}) is True
 
 
+def test_engine_catalog_api_engines_default_off() -> None:
+    # Key-requiring engines start off (they cannot run without a key); free engines start on.
+    assert is_engine_enabled("brave", None) is False
+    assert is_engine_enabled("mojeek-api", {}) is False
+    assert is_engine_enabled("kagi-api", None) is False
+    assert is_engine_enabled("wikipedia", None) is True
+    # An explicit enable still wins for an API engine.
+    assert is_engine_enabled("brave", {"brave": True}) is True
+
+
 def test_engine_catalog_lists_expected_engines() -> None:
     ids = {e.id for e in ENGINE_CATALOG}
     # The five free engines + the two BYO-key ones must be in the catalog so the settings UI

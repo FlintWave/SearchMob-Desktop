@@ -3,6 +3,21 @@
 All notable changes to SearchMob Desktop are documented here. The version scheme is Ubuntu-style
 `YY.MM.VV` and releases are tagged `vYY.MM.VV`.
 
+## 26.05.12 — 2026-05-31
+
+### Changed
+- **Settings dialog redesign.** The sections moved from a row of top tabs to a left-hand navigation
+  column, and the API keys are now entered inline on the **Search engines** page: each key-requiring
+  engine has its key field directly under its checkbox, grayed out until you check that engine. The
+  standalone "API keys" section is gone.
+- **Key-requiring engines are now unchecked by default.** The free engines stay on out of the box;
+  Brave / Mojeek API / Kagi start off and are turned on when you add their key (they could never run
+  without one anyway). Free engines are unaffected.
+
+### Fixed
+- Saving or clearing a **Kagi** key updated the right engine's status (previously it could update
+  Mojeek's), now that each engine owns its inline field.
+
 ## 26.05.11 — 2026-05-31
 
 ### Changed

@@ -206,6 +206,27 @@ QFrame#summaryCard {{
 }}
 QFrame#summaryCard QLabel {{ background: transparent; }}
 
+/* Settings dialog: left-hand navigation column. */
+QListWidget#settingsNav {{
+    background-color: {p.surface};
+    border: 1px solid {p.border};
+    border-radius: 10px;
+    padding: 4px;
+    outline: none;
+}}
+QListWidget#settingsNav::item {{
+    padding: 8px 12px;
+    border-radius: 7px;
+    color: {p.text};
+}}
+QListWidget#settingsNav::item:selected {{
+    background-color: {p.accent};
+    color: {p.on_accent};
+}}
+QListWidget#settingsNav::item:hover:!selected {{
+    background-color: {p.card_hover};
+}}
+
 /* Slim, modern scrollbars. */
 QScrollBar:vertical {{ background: transparent; width: 10px; margin: 2px; }}
 QScrollBar::handle:vertical {{ background: {p.border}; border-radius: 5px; min-height: 28px; }}
