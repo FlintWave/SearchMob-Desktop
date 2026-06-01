@@ -70,6 +70,11 @@ class UserPreferences:
     sort_mode: str = "fresh"
     # AI-slop / low-quality content filter: "downrank" (default, on), "hide", or "off".
     ai_slop_mode: str = "downrank"
+    # Extra domains the MCP `web_search` tool excludes from results handed to a local AI agent (the
+    # agent's own dedicated scope), on top of the always-applied AI-slop blocklist. Non-secret and
+    # kept here (not the encrypted vault) on purpose, so the filter still works when the headless
+    # MCP subprocess cannot unlock a zero-knowledge vault. Lowercased registrable domains, no path.
+    agent_safety_excludes: tuple[str, ...] = ()
     # Optional local-LLM answer box. Off by default and only ever talks to a model server running on
     # this machine (Ollama/LM Studio); nothing leaves the device. `llm_base_url` is the OpenAI-
     # compatible endpoint base; `llm_model` is the chosen model. Both empty until the user detects
@@ -147,7 +152,7 @@ def _from_dict(data: dict[str, Any]) -> UserPreferences:
             if isinstance(value, dict):
                 filtered[key] = {str(k): bool(v) for k, v in value.items()}
             continue
-        if key == "network_hostnames":
+        if key in ("network_hostnames", "agent_safety_excludes"):
             if isinstance(value, (list, tuple)):
                 filtered[key] = tuple(
                     str(item).strip().lower() for item in value if str(item).strip()
