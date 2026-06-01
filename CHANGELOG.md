@@ -3,6 +3,18 @@
 All notable changes to SearchMob Desktop are documented here. The version scheme is Ubuntu-style
 `YY.MM.VV` and releases are tagged `vYY.MM.VV`.
 
+## Unreleased
+
+### Changed
+- **The MCP `web_search` tool now runs in a dedicated, hardened "agent" scope.** Results handed to a
+  local AI agent always apply the AI-slop blocklist in *hide* mode (not just downrank), honor an
+  optional user-curated `agent_safety_excludes` domain list, and have their titles/snippets stripped
+  of control characters and length-capped, with non-`http(s)` links dropped. The agent scope is kept
+  in the non-secret prefs (not the encrypted vault), so it still applies when a zero-knowledge
+  passphrase keeps the headless MCP subprocess out of the vault. The user's search history is never
+  read or recorded by the tool, and its description now states accurately that vault-backed
+  personalization applies only when the vault is unlocked.
+
 ## 26.05.10 — 2026-05-31
 
 ### Added
