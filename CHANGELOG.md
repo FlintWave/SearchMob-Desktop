@@ -3,7 +3,7 @@
 All notable changes to SearchMob Desktop are documented here. The version scheme is Ubuntu-style
 `YY.MM.VV` and releases are tagged `vYY.MM.VV`.
 
-## Unreleased
+## 26.05.11 — 2026-05-31
 
 ### Changed
 - **The MCP `web_search` tool now runs in a dedicated, hardened "agent" scope.** Results handed to a
