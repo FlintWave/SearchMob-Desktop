@@ -79,6 +79,44 @@ def test_engine_toggle_persists_engine_enabled(qapp: object, tmp_path: Path) -> 
     assert store.load().engine_enabled.get("duckduckgo") is True
 
 
+def test_settings_uses_sidebar_nav_without_separate_api_keys_section(
+    qapp: object, tmp_path: Path
+) -> None:
+    from PySide6.QtWidgets import QListWidget
+
+    store = _store(tmp_path)
+    dialog = _dialog(store)
+    nav = dialog.findChild(QListWidget, "settingsNav")
+    assert nav is not None
+    titles = [nav.item(i).text() for i in range(nav.count())]
+    assert "Search engines" in titles
+    # The keys moved inline onto the engines page, so there is no standalone API keys section.
+    assert "API keys" not in titles
+    # One stacked page per nav row.
+    assert dialog._stack.count() == nav.count()
+
+
+def test_api_engine_key_field_grays_until_engine_checked(qapp: object, tmp_path: Path) -> None:
+    from searchmob_desktop.data.api_keys import BRAVE_KEY
+
+    store = _store(tmp_path)
+    dialog = _dialog(store)
+    brave = _checkbox_startswith(dialog, "Brave Search API")
+    field = dialog._key_inputs[BRAVE_KEY]
+
+    # API engines start unchecked, so the inline key field is disabled until you check the engine.
+    assert brave.isChecked() is False
+    assert field.isEnabled() is False
+
+    brave.setChecked(True)
+    assert field.isEnabled() is True
+    assert store.load().engine_enabled.get("brave") is True
+
+    brave.setChecked(False)
+    assert field.isEnabled() is False
+    assert store.load().engine_enabled.get("brave") is False
+
+
 def test_suggestions_toggle_persists(qapp: object, tmp_path: Path) -> None:
     store = _store(tmp_path)
     dialog = _dialog(store)

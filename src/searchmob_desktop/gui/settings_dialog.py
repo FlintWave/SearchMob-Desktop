@@ -32,7 +32,7 @@ from PySide6.QtWidgets import (
     QPlainTextEdit,
     QPushButton,
     QRadioButton,
-    QTabWidget,
+    QStackedWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -78,6 +78,15 @@ NETWORK_WARNING = (
 _BRAVE_KEY = BRAVE_KEY
 _MOJEEK_KEY = MOJEEK_KEY
 _KAGI_KEY = KAGI_KEY
+
+# Maps a key-requiring engine's catalog id to its encrypted-vault key, so the Search engines page
+# can render and wire each engine's inline API-key field generically (and so the save/clear path
+# updates the right engine's status rather than guessing from the key alone).
+_ENGINE_VAULT_KEYS: dict[str, str] = {
+    "brave": _BRAVE_KEY,
+    "mojeek-api": _MOJEEK_KEY,
+    "kagi-api": _KAGI_KEY,
+}
 
 # Upper bound on imported goggle / ranking-rules files. These are tiny in practice; the cap stops a
 # multi-GB file (malicious "community goggle" or a mistaken pick) from being read fully into memory.
@@ -129,7 +138,7 @@ class SettingsDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Settings")
         self.setModal(True)
-        self.resize(720, 640)
+        self.resize(780, 640)
 
         self._prefs_store = prefs_store
         self._server_controller = server_controller
@@ -143,22 +152,41 @@ class SettingsDialog(QDialog):
         self._ranking = load_ranking_rules()
 
         outer = QVBoxLayout(self)
-        self._tabs = QTabWidget(self)
-        self._tabs.addTab(self._build_appearance_tab(), "Appearance")
-        self._tabs.addTab(self._build_engines_tab(), "Search engines")
-        self._tabs.addTab(self._build_keys_tab(), "API keys")
-        self._tabs.addTab(self._build_ranking_tab(), "Result ranking")
-        self._local_ai_tab_index = self._tabs.addTab(self._build_local_ai_tab(), "Local AI")
-        self._tabs.addTab(self._build_ai_access_tab(), "AI access")
-        self._tabs.addTab(self._build_history_tab(), "Search history")
-        self._tabs.addTab(self._build_suggestions_tab(), "Suggestions")
-        self._tabs.addTab(self._build_updates_tab(), "Updates")
-        self._tabs.addTab(self._build_network_tab(), "Network")
-        self._tabs.addTab(self._build_device_tab(), "Device setup")
-        # Detect local models the first time the user opens the Local AI tab (not on every dialog
+
+        # Left-hand navigation column + stacked pages, instead of a row of top tabs: the section
+        # list reads top-to-bottom and leaves the full width for each page's controls. The API keys
+        # now live inline on the Search engines page (one field per engine), so there is no separate
+        # "API keys" section here. `pages` is the single source of order for both the nav and stack.
+        pages: list[tuple[str, QWidget]] = [
+            ("Appearance", self._build_appearance_tab()),
+            ("Search engines", self._build_engines_tab()),
+            ("Result ranking", self._build_ranking_tab()),
+            ("Local AI", self._build_local_ai_tab()),
+            ("AI access", self._build_ai_access_tab()),
+            ("Search history", self._build_history_tab()),
+            ("Suggestions", self._build_suggestions_tab()),
+            ("Updates", self._build_updates_tab()),
+            ("Network", self._build_network_tab()),
+            ("Device setup", self._build_device_tab()),
+        ]
+        self._local_ai_tab_index = [title for title, _ in pages].index("Local AI")
+
+        self._nav = QListWidget()
+        self._nav.setObjectName("settingsNav")
+        self._nav.setFixedWidth(168)
+        self._stack = QStackedWidget()
+        for title, widget in pages:
+            self._nav.addItem(title)
+            self._stack.addWidget(widget)
+        # Detect local models the first time the user opens the Local AI page (not on every dialog
         # construction, which would probe loopback during unrelated settings work and in tests).
-        self._tabs.currentChanged.connect(self._on_settings_tab_changed)
-        outer.addWidget(self._tabs)
+        self._nav.currentRowChanged.connect(self._on_nav_changed)
+        self._nav.setCurrentRow(0)
+
+        body = QHBoxLayout()
+        body.addWidget(self._nav)
+        body.addWidget(self._stack, stretch=1)
+        outer.addLayout(body)
 
         bottom = QHBoxLayout()
         bottom.addStretch(1)
@@ -212,34 +240,95 @@ class SettingsDialog(QDialog):
     def _build_engines_tab(self) -> QWidget:
         tab = QWidget()
         layout = QVBoxLayout(tab)
-        layout.addWidget(QLabel("Pick which engines run on every search."))
+        intro = QLabel(
+            "Pick which engines run on every search. The free engines are on by default. An engine "
+            "marked API needs a key: check it, then enter the key in the field that appears. Keys "
+            "are stored in your encrypted vault and never written in plain text."
+        )
+        intro.setWordWrap(True)
+        layout.addWidget(intro)
 
         existing = dict(self._prefs.engine_enabled) if self._prefs.engine_enabled else {}
-
-        def _make_toggle(engine_id: str, label: str, needs_key: bool) -> QCheckBox:
-            cb = QCheckBox(label + (" (needs an API key, below)" if needs_key else ""))
-            cb.setChecked(is_engine_enabled(engine_id, existing))
-
-            def _on_toggled(checked: bool) -> None:
-                current = dict(self._prefs.engine_enabled) if self._prefs.engine_enabled else {}
-                current[engine_id] = checked
-                self._save(replace(self._prefs, engine_enabled=current))
-
-            cb.toggled.connect(_on_toggled)
-            return cb
+        # Per-engine inline key widgets, so save/clear can target the right field/status.
+        self._key_inputs: dict[str, QLineEdit] = {}
+        self._key_status: dict[str, QLabel] = {}
 
         for entry in ENGINE_CATALOG:
-            layout.addWidget(_make_toggle(entry.id, entry.display_name, entry.requires_api_key))
+            layout.addWidget(self._build_engine_row(entry.id, entry.display_name, existing))
 
         note = QLabel(
-            "Engine changes apply to the next search. Restart the local server (if running) "
-            "to pick up the new engine list there too."
+            "Engine changes apply to the next search; restart the local server (if running) to "
+            "pick up the new list there too. The CLI also reads SEARCHMOB_BRAVE_API_KEY, "
+            "SEARCHMOB_MOJEEK_API_KEY, and SEARCHMOB_KAGI_API_KEY from the environment. Note: "
+            "Brave's API terms prohibit storing results, so enabling history with a Brave key may "
+            "save Brave results locally, which is your responsibility under Brave's terms."
         )
         note.setWordWrap(True)
         note.setProperty("role", "muted")
         layout.addWidget(note)
         layout.addStretch(1)
         return tab
+
+    def _build_engine_row(
+        self, engine_id: str, display_name: str, existing: dict[str, bool]
+    ) -> QWidget:
+        """One engine: a checkbox, plus (for key-requiring engines) an inline key field below it.
+
+        The key field and its buttons are grayed out until the engine is checked, so the only way to
+        type a key is to first enable the engine it belongs to.
+        """
+        row = QWidget()
+        col = QVBoxLayout(row)
+        col.setContentsMargins(0, 0, 0, 0)
+        col.setSpacing(4)
+
+        vault_key = _ENGINE_VAULT_KEYS.get(engine_id)
+        checked = is_engine_enabled(engine_id, existing)
+        cb = QCheckBox(display_name)
+        cb.setChecked(checked)
+        col.addWidget(cb)
+
+        if vault_key is None:
+            cb.toggled.connect(lambda on: self._persist_engine_enabled(engine_id, on))
+            return row
+
+        key_row = QHBoxLayout()
+        key_row.setContentsMargins(24, 0, 0, 0)  # indent under the checkbox
+        key_input = QLineEdit()
+        key_input.setEchoMode(QLineEdit.EchoMode.Password)
+        key_input.setPlaceholderText("API key")
+        key_input.setAccessibleName(f"{display_name} key")
+        save_btn = QPushButton("Save")
+        clear_btn = QPushButton("Clear")
+        save_btn.clicked.connect(lambda: self._save_api_key(vault_key, key_input))
+        clear_btn.clicked.connect(lambda: self._clear_api_key(vault_key, key_input))
+        status = QLabel("")
+        status.setProperty("role", "muted")
+        key_row.addWidget(key_input, stretch=1)
+        key_row.addWidget(save_btn)
+        key_row.addWidget(clear_btn)
+        key_row.addWidget(status)
+        col.addLayout(key_row)
+
+        self._key_inputs[vault_key] = key_input
+        self._key_status[vault_key] = status
+
+        controls = (key_input, save_btn, clear_btn, status)
+        for w in controls:
+            w.setEnabled(checked)
+
+        def _on_toggled(on: bool) -> None:
+            self._persist_engine_enabled(engine_id, on)
+            for widget in controls:
+                widget.setEnabled(on)
+
+        cb.toggled.connect(_on_toggled)
+        return row
+
+    def _persist_engine_enabled(self, engine_id: str, enabled: bool) -> None:
+        current = dict(self._prefs.engine_enabled) if self._prefs.engine_enabled else {}
+        current[engine_id] = enabled
+        self._save(replace(self._prefs, engine_enabled=current))
 
     # --- Result ranking ----------------------------------------------------------------------
 
@@ -453,86 +542,7 @@ class SettingsDialog(QDialog):
             QMessageBox.warning(self, "Import failed", str(exc))
             return None
 
-    # --- API keys ----------------------------------------------------------------------------
-
-    def _build_keys_tab(self) -> QWidget:
-        tab = QWidget()
-        layout = QVBoxLayout(tab)
-        layout.addWidget(
-            QLabel(
-                "Bring-your-own API keys. Keys are stored in your encrypted vault and never "
-                "appear in plain text on disk."
-            )
-        )
-
-        self._brave_status = QLabel(self._key_status_text("Brave Search", _BRAVE_KEY))
-        self._brave_input = QLineEdit()
-        self._brave_input.setEchoMode(QLineEdit.EchoMode.Password)
-        self._brave_input.setPlaceholderText("Brave Search API key")
-        self._brave_input.setAccessibleName("Brave Search API key")
-        layout.addWidget(self._brave_status)
-        layout.addWidget(self._brave_input)
-        brave_row = QHBoxLayout()
-        brave_save = QPushButton("Save Brave key")
-        brave_clear = QPushButton("Clear Brave key")
-        brave_save.clicked.connect(lambda: self._save_api_key(_BRAVE_KEY, self._brave_input))
-        brave_clear.clicked.connect(lambda: self._clear_api_key(_BRAVE_KEY, self._brave_input))
-        brave_row.addWidget(brave_save)
-        brave_row.addWidget(brave_clear)
-        brave_row.addStretch(1)
-        layout.addLayout(brave_row)
-        brave_caveat = QLabel(
-            "Note: Brave's Search API terms prohibit storing or caching results. If you enable "
-            "search history with a Brave key, Brave results may be saved locally — that is your "
-            "responsibility under Brave's terms."
-        )
-        brave_caveat.setWordWrap(True)
-        brave_caveat.setProperty("role", "muted")
-        layout.addWidget(brave_caveat)
-
-        self._mojeek_status = QLabel(self._key_status_text("Mojeek", _MOJEEK_KEY))
-        self._mojeek_input = QLineEdit()
-        self._mojeek_input.setEchoMode(QLineEdit.EchoMode.Password)
-        self._mojeek_input.setPlaceholderText("Mojeek API key")
-        self._mojeek_input.setAccessibleName("Mojeek Search API key")
-        layout.addWidget(self._mojeek_status)
-        layout.addWidget(self._mojeek_input)
-        mojeek_row = QHBoxLayout()
-        mojeek_save = QPushButton("Save Mojeek key")
-        mojeek_clear = QPushButton("Clear Mojeek key")
-        mojeek_save.clicked.connect(lambda: self._save_api_key(_MOJEEK_KEY, self._mojeek_input))
-        mojeek_clear.clicked.connect(lambda: self._clear_api_key(_MOJEEK_KEY, self._mojeek_input))
-        mojeek_row.addWidget(mojeek_save)
-        mojeek_row.addWidget(mojeek_clear)
-        mojeek_row.addStretch(1)
-        layout.addLayout(mojeek_row)
-
-        self._kagi_status = QLabel(self._key_status_text("Kagi", _KAGI_KEY))
-        self._kagi_input = QLineEdit()
-        self._kagi_input.setEchoMode(QLineEdit.EchoMode.Password)
-        self._kagi_input.setPlaceholderText("Kagi API key (from kagi.com/settings/api)")
-        self._kagi_input.setAccessibleName("Kagi Search API token")
-        layout.addWidget(self._kagi_status)
-        layout.addWidget(self._kagi_input)
-        kagi_row = QHBoxLayout()
-        kagi_save = QPushButton("Save Kagi key")
-        kagi_clear = QPushButton("Clear Kagi key")
-        kagi_save.clicked.connect(lambda: self._save_api_key(_KAGI_KEY, self._kagi_input))
-        kagi_clear.clicked.connect(lambda: self._clear_api_key(_KAGI_KEY, self._kagi_input))
-        kagi_row.addWidget(kagi_save)
-        kagi_row.addWidget(kagi_clear)
-        kagi_row.addStretch(1)
-        layout.addLayout(kagi_row)
-
-        note = QLabel(
-            "The CLI also reads SEARCHMOB_BRAVE_API_KEY, SEARCHMOB_MOJEEK_API_KEY, and "
-            "SEARCHMOB_KAGI_API_KEY from the environment. Either source is fine."
-        )
-        note.setWordWrap(True)
-        note.setProperty("role", "muted")
-        layout.addWidget(note)
-        layout.addStretch(1)
-        return tab
+    # --- API keys (rendered inline on the Search engines page) -------------------------------
 
     def _ensure_storage(self) -> StorageBootstrap | None:
         """Build (and bootstrap on first use) the vault. Returns `None` on failure.
@@ -576,18 +586,11 @@ class SettingsDialog(QDialog):
         prefs_file = _vault_prefs_path(storage.metadata_store)
         return EncryptedPreferences(prefs_file, dek_provider=storage.dek_provider())
 
-    def _key_status_text(self, label: str, key: str) -> str:
-        try:
-            metadata_store = BootstrapMetadataStore()
-            if not metadata_store.path.exists():
-                return f"{label}: not set"
-            # We do not pre-unlock here; the status is best-effort while the vault is locked.
-            prefs_file = _vault_prefs_path(metadata_store)
-            if not prefs_file.exists():
-                return f"{label}: not set"
-            return f"{label}: set"
-        except Exception:
-            return f"{label}: status unavailable"
+    def _set_key_status(self, key: str, text: str) -> None:
+        """Update the inline status label next to an engine's key field, if it exists."""
+        label = self._key_status.get(key)
+        if label is not None:
+            label.setText(text)
 
     def _save_api_key(self, key: str, input_widget: QLineEdit) -> None:
         value = input_widget.text().strip()
@@ -602,9 +605,7 @@ class SettingsDialog(QDialog):
             QMessageBox.warning(self, "Could not save key", str(exc))
             return
         input_widget.clear()
-        label = "Brave Search" if key == _BRAVE_KEY else "Mojeek"
-        status = self._brave_status if key == _BRAVE_KEY else self._mojeek_status
-        status.setText(f"{label}: set")
+        self._set_key_status(key, "Key saved.")
 
     def _clear_api_key(self, key: str, input_widget: QLineEdit) -> None:
         ep = self._vault_prefs()
@@ -616,9 +617,7 @@ class SettingsDialog(QDialog):
             QMessageBox.warning(self, "Could not clear key", str(exc))
             return
         input_widget.clear()
-        label = "Brave Search" if key == _BRAVE_KEY else "Mojeek"
-        status = self._brave_status if key == _BRAVE_KEY else self._mojeek_status
-        status.setText(f"{label}: cleared")
+        self._set_key_status(key, "Key cleared.")
 
     # --- Local AI ----------------------------------------------------------------------------
 
@@ -689,7 +688,10 @@ class SettingsDialog(QDialog):
         self._llm_combo.setCurrentIndex(target if target >= 0 else 0)
         self._llm_combo.blockSignals(False)
 
-    def _on_settings_tab_changed(self, index: int) -> None:
+    def _on_nav_changed(self, index: int) -> None:
+        if index < 0:
+            return
+        self._stack.setCurrentIndex(index)
         if index == self._local_ai_tab_index:
             self.maybe_detect_local_models()
 
