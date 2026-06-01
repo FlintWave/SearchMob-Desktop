@@ -35,8 +35,17 @@ trademark / licensing fixes.
 
 ## Future
 
-- **Code signing + notarization.** Authenticode (Windows) and Apple notarization (macOS) once the
-  signing secrets are wired into CI; today's installers are ad-hoc / unsigned.
+- **Code signing + notarization** *(deferred; needs paid credentials, revisit when budget allows).*
+  Today's installers are ad-hoc / unsigned, so macOS Gatekeeper and Windows SmartScreen warn on
+  first launch.
+  - **macOS:** an Apple Developer Program membership ($99/yr) and a *Developer ID Application*
+    certificate. Swap the build's `--adhoc-sign` for `--identity`; Briefcase then signs with the
+    hardened runtime, submits to Apple's notary service, and staples the ticket automatically. CI
+    needs three secrets (base64 `.p12`, its password, an App Store Connect API key) plus a
+    keychain-import step in the macOS job of `release.yml`. (Builds are already universal2 /
+    Intel + Apple Silicon, macOS 13+; only the signature is missing.)
+  - **Windows:** an Authenticode code-signing certificate from a CA (roughly $100 to $400/yr; an
+    EV cert builds SmartScreen reputation faster).
 - **Flatpak stability + Flathub.** The Flatpak build is currently best-effort in CI; harden it and
   consider publishing to Flathub.
 - **Network-mode rate limiting** on top of the existing access token.
