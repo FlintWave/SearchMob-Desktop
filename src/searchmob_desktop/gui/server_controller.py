@@ -20,7 +20,10 @@ from PySide6.QtCore import QObject, QThread, Signal
 
 from searchmob_desktop.data.api_keys import read_vault_api_keys, resolve_api_key
 from searchmob_desktop.data.history import HistoryStore, InMemoryHistoryStore
-from searchmob_desktop.data.personalization_store import load_personalization
+from searchmob_desktop.data.personalization_store import (
+    load_personalization,
+    save_personalization,
+)
 from searchmob_desktop.data.ranking_store import load_ranking_rules, save_ranking_rules
 from searchmob_desktop.engines import (
     EngineFn,
@@ -203,6 +206,13 @@ class _UvicornWorker(QThread):
                 return None
             return load_personalization()
 
+        def _save_personalization(model: PersonalizationModel) -> bool:
+            # Persist the model after an owner click on the served page. Only writes when enabled,
+            # so a stale click cannot resurrect learning the owner has turned off.
+            if not self._prefs_store.load().personalization_enabled:
+                return False
+            return save_personalization(model)
+
         app = build_app(
             self._engines,
             bound_port_getter=lambda: self._port,
@@ -214,7 +224,9 @@ class _UvicornWorker(QThread):
             ranking_rules_provider=load_ranking_rules,
             ranking_rules_saver=save_ranking_rules,
             # The learned click model, applied only for the loopback owner (never network visitors).
+            # The saver persists owner clicks on the served page back to the encrypted vault.
             personalization_provider=_personalization,
+            personalization_saver=_save_personalization,
             # Live prefs so the served Settings page reads and persists preferences without a
             # restart. Summary is always wired; the live `summary_enabled` pref gates it.
             prefs_provider=self._prefs_store.load,

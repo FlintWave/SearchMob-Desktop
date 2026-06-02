@@ -27,10 +27,12 @@ from __future__ import annotations
 import asyncio
 import inspect
 import json
+import secrets
 import socket
 import time
+from collections import OrderedDict
 from collections.abc import Awaitable, Callable, Sequence
-from dataclasses import asdict, replace
+from dataclasses import asdict, dataclass, replace
 from ipaddress import ip_address
 from urllib.parse import parse_qsl, urlsplit
 
@@ -60,6 +62,7 @@ from searchmob_desktop.engines.rank import (
     parse_goggles,
     personalize_reorder,
 )
+from searchmob_desktop.engines.rank.personalize import query_terms, update_from_click
 from searchmob_desktop.engines.rank.slop_blocklist import load_slop_domains
 from searchmob_desktop.engines.sort import SortMode, sort_results
 from searchmob_desktop.engines.verticals import Vertical, default_sort, transform_query
@@ -324,6 +327,22 @@ def _suggestions_body(query: str, suggestions: Sequence[str]) -> str:
 # through `aggregate`. The default plumbs through to the real `aggregate(ctx, engines)` call.
 _MetasearchFn = Callable[[EngineContext, Sequence[EngineFn]], Awaitable[list[SearchResult]]]
 
+# Upper bound on remembered result renders for owner click-tracking (one per recent owner search).
+# Small on purpose: only the most recent few pages need clickable tracking links at once.
+_RENDER_CACHE_MAX = 64
+
+
+@dataclass(frozen=True)
+class _RenderedResults:
+    """One owner-rendered result page: the query and the displayed (url, host) order.
+
+    Held briefly in memory so the owner-only `/click` endpoint can resolve a click to its result and
+    its skipped-above neighbors using server state, never a client-supplied URL. Never persisted.
+    """
+
+    query: str
+    items: list[tuple[str, str | None]]
+
 
 def build_app(
     engines: Sequence[EngineFn],
@@ -336,6 +355,7 @@ def build_app(
     ranking_rules_provider: Callable[[], RankingRules] | None = None,
     ranking_rules_saver: Callable[[RankingRules], bool] | None = None,
     personalization_provider: Callable[[], PersonalizationModel | None] | None = None,
+    personalization_saver: Callable[[PersonalizationModel], bool] | None = None,
     prefs_provider: Callable[[], UserPreferences] | None = None,
     prefs_saver: Callable[[UserPreferences], bool] | None = None,
     history_provider: Callable[[], list[HistoryEntry]] | None = None,
@@ -399,6 +419,10 @@ def build_app(
     static_rules = ranking_rules if ranking_rules is not None else RankingRules()
     rules_provider: Callable[[], RankingRules] = ranking_rules_provider or (lambda: static_rules)
 
+    # Per-app, in-memory map of recent owner renders (render id -> displayed order), used only to
+    # resolve owner clicks on the served page back to their result for the `/click` endpoint.
+    _render_cache: OrderedDict[str, _RenderedResults] = OrderedDict()
+
     def _load_prefs() -> UserPreferences | None:
         # Read live preferences per request so the served Settings toggles apply without a restart.
         # Fail-soft: any error reading prefs falls back to the static defaults passed to build_app.
@@ -414,7 +438,7 @@ def build_app(
         sort_mode: SortMode = SortMode.FRESH_RELEVANT,
         vertical: Vertical = Vertical.WEB,
         *,
-        owner: bool = False,
+        model: PersonalizationModel | None = None,
     ) -> list[SearchResult]:
         if not query.strip() or not engines:
             return []
@@ -428,16 +452,14 @@ def build_app(
         prefs = _load_prefs()
         slop_mode = prefs.ai_slop_mode if prefs is not None else ai_slop_mode
         # Sort (relevance/date/freshness blend), then nudge by the owner's learned click model (only
-        # for the loopback owner, never a network visitor), then apply the user's rules so the
-        # served results match the in-app results and PIN/RAISE preserve the order.
+        # when a model is passed, which the caller does for the loopback owner), then apply the
+        # user's rules so the served results match the in-app results and PIN/RAISE preserve order.
         now_ms = int(time.time() * 1000)
         ordered = sort_results(results, sort_mode, query, now_ms)
-        if owner and personalization_provider is not None:
-            model = personalization_provider()
-            if model is not None:
-                ordered = personalize_reorder(
-                    ordered, lambda r: host_of_url(r.url), query, model, now_ms
-                )
+        if model is not None:
+            ordered = personalize_reorder(
+                ordered, lambda r: host_of_url(r.url), query, model, now_ms
+            )
         return apply_ranking(
             ordered,
             rules_provider(),
@@ -446,6 +468,27 @@ def build_app(
             slop_domains=load_slop_domains(),
             slop_mode=slop_mode,
         )
+
+    def _owner_model(request: Request) -> PersonalizationModel | None:
+        # The learned model for the loopback owner, or None when off / disabled / not the owner.
+        # Used to personalize the owner's results and to gate click-tracking links and `/click`.
+        if personalization_provider is None or not _is_loopback_request(request):
+            return None
+        try:
+            return personalization_provider()
+        except Exception:
+            return None
+
+    def _register_render(query: str, results: list[SearchResult]) -> str:
+        # Remember the exact displayed order under a fresh, unguessable id so an owner click can be
+        # matched to its result (and its skipped-above neighbors) without trusting any client input.
+        # Bounded and in-memory only; never persisted.
+        rid = secrets.token_urlsafe(9)
+        items = [(r.url, host_of_url(r.url)) for r in results]
+        _render_cache[rid] = _RenderedResults(query=query, items=items)
+        while len(_render_cache) > _RENDER_CACHE_MAX:
+            _render_cache.popitem(last=False)  # evict the oldest render
+        return rid
 
     def _correction(query: str) -> str | None:
         # On-device "did you mean". `suggest` is fail-soft and already returns None when the
@@ -517,10 +560,15 @@ def build_app(
         # Fetch the contextual summary concurrently with the metasearch so the box never adds
         # latency to the results path.
         summary_task = asyncio.ensure_future(_maybe_summary(query))
-        results = await _run_metasearch(
-            query, sort_mode, vertical, owner=_is_loopback_request(request)
-        )
+        model = _owner_model(request)
+        results = await _run_metasearch(query, sort_mode, vertical, model=model)
         summary = await summary_task
+        # When personalization is on for the owner, route result links through `/click` so a click
+        # can train the model; everyone else (and a disabled owner) gets the plain destination link.
+        link_builder: Callable[[int, str], str] | None = None
+        if model is not None and results:
+            rid = _register_render(query, results)
+            link_builder = lambda pos, _url, _rid=rid: f"/click?rid={_rid}&pos={pos}"  # noqa: E731
         body = render_results_page(
             query,
             results,
@@ -532,8 +580,40 @@ def build_app(
             sort_mode=sort_mode.value,
             vertical=vertical.value,
             settings_link=_is_settings_owner(request),
+            link_builder=link_builder,
         )
         return Response(body, media_type="text/html; charset=utf-8")
+
+    async def click(request: Request) -> Response:
+        # Owner-only redirector that learns from a click on the served results page. It resolves the
+        # destination from server-side render state (never a caller-supplied URL), so it cannot be
+        # an open redirect, and it trains only the loopback owner's model.
+        if not _is_loopback_request(request):
+            return PlainTextResponse("not found", status_code=404)
+        render = _render_cache.get(request.query_params.get("rid", ""))
+        if render is None:
+            return RedirectResponse("/", status_code=303)
+        try:
+            pos = int(request.query_params.get("pos", ""))
+        except ValueError:
+            return RedirectResponse("/", status_code=303)
+        if pos < 0 or pos >= len(render.items):
+            return RedirectResponse("/", status_code=303)
+        dest_url, _host = render.items[pos]
+        if not is_safe_http_url(dest_url):
+            return RedirectResponse("/", status_code=303)
+        if personalization_provider is not None and personalization_saver is not None:
+            model = _owner_model(request)
+            if model is not None:
+                try:
+                    hosts = [host for _u, host in render.items]
+                    update_from_click(
+                        model, hosts, pos, query_terms(render.query), int(time.time() * 1000)
+                    )
+                    personalization_saver(model)
+                except Exception:
+                    pass  # Learning is best-effort; never block the navigation on it.
+        return RedirectResponse(dest_url, status_code=302)
 
     def _redirect_back(request: Request) -> Response:
         # Return to the page the POST came from when it is one of our own origins; else home. 303
@@ -683,9 +763,7 @@ def build_app(
         vertical = Vertical.from_value(request.query_params.get("vertical"))
         sort_param = request.query_params.get("sort")
         sort_mode = SortMode.from_value(sort_param) if sort_param else default_sort(vertical)
-        results = await _run_metasearch(
-            query, sort_mode, vertical, owner=_is_loopback_request(request)
-        )
+        results = await _run_metasearch(query, sort_mode, vertical, model=_owner_model(request))
         payload = {
             "query": query,
             "results": [asdict(result) for result in results],
@@ -720,6 +798,9 @@ def build_app(
         Route("/api/search", search_json, methods=["GET"]),
         Route("/opensearch.xml", opensearch_xml, methods=["GET"]),
         Route("/suggest", suggest, methods=["GET"]),
+        # Owner-only click redirector that trains the personalization model (loopback-only; a
+        # non-owner gets 404, and it only redirects to a server-recorded result URL).
+        Route("/click", click, methods=["GET"]),
         # Personalization edits from the served UI. Gated loopback-only + same-origin in the
         # middleware; no-op (503) when no saver is wired.
         Route("/rules/domain", set_domain_rule, methods=["POST"]),
