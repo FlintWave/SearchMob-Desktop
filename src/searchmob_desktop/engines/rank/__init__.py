@@ -12,12 +12,15 @@ from searchmob_desktop.engines.rank.goggles import matches as goggle_matches
 from searchmob_desktop.engines.rank.goggles import parse as parse_goggles
 from searchmob_desktop.engines.rank.lenses import DEFAULT_SAMPLE_LENSES
 from searchmob_desktop.engines.rank.model import GoggleRule, Lens, RankingRules, RankRule
+from searchmob_desktop.engines.rank.personalize import PersonalizationModel
+from searchmob_desktop.engines.rank.personalize import reorder as personalize_reorder
 from searchmob_desktop.engines.rank.ranker import apply_ranking, domain_match, host_of_url
 
 __all__ = [
     "DEFAULT_SAMPLE_LENSES",
     "GoggleRule",
     "Lens",
+    "PersonalizationModel",
     "RankRule",
     "RankingRules",
     "apply_ranking",
@@ -25,4 +28,5 @@ __all__ = [
     "goggle_matches",
     "host_of_url",
     "parse_goggles",
+    "personalize_reorder",
 ]

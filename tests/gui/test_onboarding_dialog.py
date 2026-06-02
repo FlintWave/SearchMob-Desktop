@@ -13,7 +13,7 @@ pytest.importorskip("PySide6")
 from pathlib import Path
 
 from searchmob_desktop import service
-from searchmob_desktop.gui.onboarding_dialog import OnboardingDialog
+from searchmob_desktop.gui.onboarding_dialog import ONBOARDING_VERSION, OnboardingDialog
 from searchmob_desktop.prefs import JsonPreferencesStore
 
 
@@ -26,13 +26,13 @@ def test_service_page_present_only_when_supported(
 ) -> None:
     monkeypatch.setattr(service, "is_supported", lambda: False)
     without = OnboardingDialog(prefs_store=_store(tmp_path))
-    assert without._stack.count() == 3  # Welcome, Privacy, Browser
+    assert without._stack.count() == 4  # Welcome, Privacy, Personalize, Browser
 
     monkeypatch.setattr(service, "is_supported", lambda: True)
     monkeypatch.setattr(service, "mechanism_label", lambda: "a systemd user service")
     monkeypatch.setattr(service, "status", lambda: service.ServiceStatus(True, False, False, False))
     with_service = OnboardingDialog(prefs_store=_store(tmp_path))
-    assert with_service._stack.count() == 4  # + Background service
+    assert with_service._stack.count() == 5  # + Background service
 
 
 def test_finish_persists_completed_flag(qapp: object, tmp_path: Path) -> None:
@@ -41,6 +41,23 @@ def test_finish_persists_completed_flag(qapp: object, tmp_path: Path) -> None:
     dialog = OnboardingDialog(prefs_store=store)
     dialog._finish()
     assert store.load().onboarding_completed is True
+
+
+def test_finish_stamps_onboarding_version(qapp: object, tmp_path: Path) -> None:
+    # Finishing records the revision so the wizard does not re-appear until a future bump.
+    store = _store(tmp_path)
+    assert store.load().onboarding_version == 0
+    OnboardingDialog(prefs_store=store)._finish()
+    assert store.load().onboarding_version == ONBOARDING_VERSION
+
+
+def test_personalize_page_toggle_persists_immediately(qapp: object, tmp_path: Path) -> None:
+    # The personalization opt-in writes through on toggle, so nothing is recorded unless it is on.
+    store = _store(tmp_path)
+    dialog = OnboardingDialog(prefs_store=store)
+    assert store.load().personalization_enabled is False
+    dialog._personalize_check.setChecked(True)
+    assert store.load().personalization_enabled is True
 
 
 def test_skip_also_persists_completed_flag(qapp: object, tmp_path: Path) -> None:

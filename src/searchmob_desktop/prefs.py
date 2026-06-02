@@ -52,6 +52,10 @@ class UserPreferences:
 
     theme: str = "system"
     history_enabled: bool = False
+    # Learn a bounded ranking boost from the owner's own result clicks (off by default, opt-in via
+    # the first-run wizard or Settings). The learned model is stored encrypted in the vault and is
+    # never trained by, nor applied for, network clients. See engines/rank/personalize.py.
+    personalization_enabled: bool = False
     network_access_enabled: bool = False
     # Shared secret appended as a `?token=` query param to gate the search/suggest routes when the
     # server is reachable off-loopback. Empty means "not yet generated"; it is minted lazily the
@@ -86,6 +90,10 @@ class UserPreferences:
     last_update_check_ms: int = 0
     # Set once the first-run setup wizard has been completed or skipped, so it never reappears.
     onboarding_completed: bool = False
+    # The onboarding revision the user last saw. The wizard re-appears once after an update that
+    # adds a step worth showing (when this is below the app's current ONBOARDING_VERSION), so
+    # existing users discover new opt-in features instead of only fresh installs seeing them.
+    onboarding_version: int = 0
     engine_enabled: Mapping[str, bool] = field(default_factory=dict)
 
     def with_update_check_stamped(self, now_ms: int) -> UserPreferences:

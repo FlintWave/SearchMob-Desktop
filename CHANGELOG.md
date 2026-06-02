@@ -3,6 +3,24 @@
 All notable changes to SearchMob Desktop are documented here. The version scheme is Ubuntu-style
 `YY.MM.VV` and releases are tagged `vYY.MM.VV`.
 
+## 26.06.00 — 2026-06-01
+
+### Added
+- **Personalized ranking that learns from your clicks.** SearchMob can now quietly move the sites
+  you tend to click higher, and it gets better the more you search. It learns on-device from a
+  position-bias-resistant "clicked over skipped-above" signal, applies a bounded boost (so engine
+  consensus stays primary and your pin/raise/lower/block rules always win), and includes exploration,
+  a cold-start gate, and time decay so it never collapses result diversity or acts on weak evidence.
+- **Opt-in, recommended, and honest about it.** The feature is off by default and offered as a
+  recommended step in the setup wizard and a toggle on the **Result ranking** settings page. What it
+  learns is encrypted in your vault, never leaves the device, and is never trained by, nor applied
+  for, other people on your network. You can **export, import, and reset** the learned model; the
+  export uses a portable format shared with the Android app, so you can back it up or move it between
+  devices.
+- **Setup wizard re-appears once after a feature update.** Existing users see the wizard again (now
+  framed as "What's new") when an update adds a step worth seeing, so new opt-in features are not
+  hidden from people who already onboarded.
+
 ## 26.05.12 — 2026-05-31
 
 ### Changed

@@ -117,6 +117,19 @@ def test_api_engine_key_field_grays_until_engine_checked(qapp: object, tmp_path:
     assert store.load().engine_enabled.get("brave") is False
 
 
+def test_personalization_toggle_persists(qapp: object, tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    dialog = _dialog(store)
+    cb = _checkbox_startswith(dialog, "Learn from my clicks")
+
+    # Off by default (store-nothing); toggling persists personalization_enabled both ways.
+    assert store.load().personalization_enabled is False
+    cb.setChecked(True)
+    assert store.load().personalization_enabled is True
+    cb.setChecked(False)
+    assert store.load().personalization_enabled is False
+
+
 def test_suggestions_toggle_persists(qapp: object, tmp_path: Path) -> None:
     store = _store(tmp_path)
     dialog = _dialog(store)
