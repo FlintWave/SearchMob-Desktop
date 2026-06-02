@@ -31,7 +31,7 @@
 
 - [x] 6.1 Add owner-only `/click` route in `server/app.py` with a bounded in-memory `rid -> ordered (url, host)` map; record the skip-above update and 302 to the recorded destination for `rid+pos`; 404 non-owner callers; add `/click` to the owner-gated paths.
 - [x] 6.2 Render result links as `/click?...` only for owner/loopback requests in `server/templates.py`; LAN clients keep bare `<a href>` and are never tracked or personalized.
-- [ ] 6.3 Tests: owner click records and redirects correctly; LAN client gets no tracking link and cannot forge `rid`/poison the model; bad `rid`/`pos` fail safe. Gate green; open PR D2.
+- [x] 6.3 Tests: owner click records and redirects correctly; LAN client gets no tracking link and cannot forge `rid`/poison the model; bad `rid`/`pos` fail safe. Gate green; open PR D2.
 
 ## 7. Android parity (separate PRs A1/A2, mobile repo)
 
