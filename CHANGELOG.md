@@ -17,6 +17,10 @@ All notable changes to SearchMob Desktop are documented here. The version scheme
   for, other people on your network. You can **export, import, and reset** the learned model; the
   export uses a portable format shared with the Android app, so you can back it up or move it between
   devices.
+- **Learns from the served browser page too.** When you search from your browser through the local
+  server, clicking a result trains the model the same way the in-app results do, through an
+  owner-only redirect that only ever sends you to the result you clicked. People on your network get
+  plain result links and never train or see your personalization.
 - **Setup wizard re-appears once after a feature update.** Existing users see the wizard again (now
   framed as "What's new") when an update adds a step worth seeing, so new opt-in features are not
   hidden from people who already onboarded.

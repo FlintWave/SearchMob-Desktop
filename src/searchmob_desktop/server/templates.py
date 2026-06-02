@@ -447,6 +447,7 @@ def render_results_page(
     sort_mode: str = "fresh",
     vertical: str = "web",
     settings_link: bool = False,
+    link_builder: Callable[[int, str], str] | None = None,
 ) -> str:
     """The results page. Empty/blank query -> a placeholder; otherwise -> the merged results.
 
@@ -510,14 +511,18 @@ def render_results_page(
         parts.append(_sort_bar(query, sort_mode))
         if editable:
             parts.append(_scope_bar(active_rules))
-        for result in results_list:
+        for index, result in enumerate(results_list):
             parts.append('<div class="result">')
             parts.append(f'<div class="url">{escape(_display_url(result.url))}</div>')
             if is_safe_http_url(result.url):
                 # rel=noreferrer backs up the Referrer-Policy header so the query (in the loopback
-                # URL) never leaks to the destination; noopener severs window.opener.
+                # URL) never leaks to the destination; noopener severs window.opener. When a
+                # link_builder is wired (owner + personalization on), the anchor points at the
+                # owner-only `/click` redirector so the click can train the model; otherwise it is
+                # the plain destination URL.
+                href = link_builder(index, result.url) if link_builder is not None else result.url
                 parts.append(
-                    f'<a href="{escape(result.url, quote=True)}" class="title" '
+                    f'<a href="{escape(href, quote=True)}" class="title" '
                     f'rel="noopener noreferrer">{escape(result.title)}</a>'
                 )
             else:
