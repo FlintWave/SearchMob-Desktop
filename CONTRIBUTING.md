@@ -42,3 +42,10 @@ searchmob-desktop --help              # invoke the CLI
 Releases follow Ubuntu-style `YY.MM.VV` versioning. Bump `__version__` in
 `src/searchmob_desktop/version.py`, tag `vYY.MM.VV`, and push the tag. The release workflow builds
 the native installers and uploads them to the GitHub Release.
+
+**Release candidates (testing without announcing a version).** To build real installers for testing
+without bumping the version that users are told about, push a tag with a `-rc` suffix, for example
+`v26.06.01-rc.1`. The same workflow runs, but the GitHub Release is published as a **pre-release**:
+it is not marked "Latest", so the once-a-day in-app update check (which reads `/releases/latest`)
+never offers it to users. Install the pre-release assets manually to test, then delete the
+pre-release (or let it sit) and cut the normal `vYY.MM.VV` tag when the work is ready to announce.
