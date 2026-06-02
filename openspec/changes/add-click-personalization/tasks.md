@@ -25,7 +25,7 @@
 
 - [x] 5.1 Pure-helper tests: update math, skip-above, decay, caps/eviction, boost clamping, cold-start no-op, epsilon bypass, JSON round-trip, cross-key parity inputs.
 - [x] 5.2 Settings/wizard persistence tests and an apply-pass test (learned domain rises within bounds, stays behind explicit pins).
-- [ ] 5.3 `ruff check` + `mypy` + `pytest` green (GUI tests with `QT_QPA_PLATFORM=offscreen`); bump version + CHANGELOG; open PR D1.
+- [x] 5.3 `ruff check` + `mypy` + `pytest` green (GUI tests with `QT_QPA_PLATFORM=offscreen`); bump version + CHANGELOG; open PR D1.
 
 ## 6. Served-page learning (PR D2)
 
