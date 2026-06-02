@@ -20,6 +20,7 @@ from PySide6.QtCore import QObject, QThread, Signal
 
 from searchmob_desktop.data.api_keys import read_vault_api_keys, resolve_api_key
 from searchmob_desktop.data.history import HistoryStore, InMemoryHistoryStore
+from searchmob_desktop.data.personalization_store import load_personalization
 from searchmob_desktop.data.ranking_store import load_ranking_rules, save_ranking_rules
 from searchmob_desktop.engines import (
     EngineFn,
@@ -35,6 +36,7 @@ from searchmob_desktop.engines import (
     make_privacy_client,
 )
 from searchmob_desktop.engines.correct import start_background_corrector
+from searchmob_desktop.engines.rank import PersonalizationModel
 from searchmob_desktop.engines.wiki_summary import summary_for_query
 from searchmob_desktop.gui.engines_catalog import ENGINE_CATALOG, is_engine_enabled
 from searchmob_desktop.prefs import JsonPreferencesStore, UserPreferences
@@ -194,6 +196,13 @@ class _UvicornWorker(QThread):
                 return False
             return True
 
+        def _personalization() -> PersonalizationModel | None:
+            # The learned model, only when the owner has opted in; None disables the boost. Read per
+            # request so toggling it in Settings takes effect without restarting the server.
+            if not self._prefs_store.load().personalization_enabled:
+                return None
+            return load_personalization()
+
         app = build_app(
             self._engines,
             bound_port_getter=lambda: self._port,
@@ -204,6 +213,8 @@ class _UvicornWorker(QThread):
             # restart; the saver persists in-browser edits back to the encrypted vault.
             ranking_rules_provider=load_ranking_rules,
             ranking_rules_saver=save_ranking_rules,
+            # The learned click model, applied only for the loopback owner (never network visitors).
+            personalization_provider=_personalization,
             # Live prefs so the served Settings page reads and persists preferences without a
             # restart. Summary is always wired; the live `summary_enabled` pref gates it.
             prefs_provider=self._prefs_store.load,

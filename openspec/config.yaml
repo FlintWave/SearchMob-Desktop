@@ -1,0 +1,57 @@
+schema: spec-driven
+
+context: |
+  PROJECT: SearchMob Desktop, the desktop companion to the SearchMob Android app. A private,
+  store-nothing metasearch app for Windows, macOS, and Linux. It recreates the experience of
+  running a local SearXNG instance as a native desktop app, with no SearchMob servers and no
+  telemetry. It is kept at FEATURE PARITY with the Android app (AI-only features are desktop-only).
+
+  LOCKED ARCHITECTURE DECISIONS (do not relitigate without explicit user approval):
+  - Stack: Python 3.12, PySide6 (Qt) GUI, Starlette + an embedded HTTP server for the served
+    results page and browser integration, httpx for engine fan-out, Typer CLI, Briefcase packaging.
+  - Search sourcing: FREE engines by default (DuckDuckGo, Wikipedia, Mojeek, Marginalia, Mwmbl),
+    optional bring-your-own API keys (Brave, Mojeek, Kagi) that are unchecked by default. NEVER
+    scrape Google. The app is a privacy proxy: upstream engines see no cookies, no referrer, a
+    rotated User-Agent, and no user/device identifier.
+  - Pipeline: per-engine adapters -> Aggregator (Reciprocal Rank Fusion + URL-dedup) ->
+    sort_results (RELEVANCE / DATE / FRESH_RELEVANT) -> apply_ranking (user domain rules: raise /
+    lower / pin / block, lenses, goggles, AI-slop blocklist). The same path serves both the GUI
+    and the served HTTP/browser page; an MCP server exposes a hardened agent-safety search scope.
+  - Storage / privacy: STORE NOTHING by default. Non-secret settings live in a plaintext
+    JsonPreferencesStore (prefs.json). Secret/personal state (BYO API keys, ranking rules, history)
+    lives in an encrypted vault: a random 256-bit DEK wrapped by the OS keyring, or by an Argon2id
+    passphrase in optional ZERO-KNOWLEDGE mode. Encrypted KV via EncryptedPreferences (AES-GCM);
+    history via SQLCipher. Search history is OPT-IN and off by default. open_os_vault() returns None
+    for a zero-knowledge vault headlessly, so vault-backed features are simply absent there.
+  - Network mode: the served HTTP server binds loopback by default; an optional LAN mode binds
+    0.0.0.0 behind a minted access token. The OWNER is the loopback client; only the owner may
+    mutate settings or see editable controls. is_loopback_host() / _is_owner() gate this. LAN
+    clients must never influence owner state.
+  - No telemetry, no analytics, no accounts, no device identifiers. The only outbound traffic is
+    the user's searches plus an optional once-a-day GitHub update check (routed through the proxy).
+
+  DISTRIBUTION & LICENSE:
+  - Open source on GitHub (owner: FlintWave, repo SearchMob-Desktop), distributed via GitHub
+    Releases (deb, rpm, dmg, msi, flatpak). License: AGPL-3.0-or-later.
+  - Ubuntu-style date versioning YY.MM.VV; release-please-style Conventional Commits; a v* tag
+    triggers the release workflow. Commit identity: FlintWave <flintwave@tuta.com>.
+
+  QUALITY GATE: ruff (lint + format) + mypy + pytest must be green before merge. GUI tests run with
+  QT_QPA_PLATFORM=offscreen. Build each feature on its own branch and test before merging to main.
+
+  WRITING STYLE (user requirement): no em-dashes or other LLM writing tells in any prose, code
+  comments, commit messages, or user-facing UI copy.
+
+rules:
+  proposal:
+    - State Why in terms of a locked goal (private / store-nothing / parity with Android / owner-safe).
+    - Include an explicit "Non-goals" section to keep scope tight.
+    - Note which engines, network surface, dependencies, or stored data the change introduces.
+  design:
+    - Call out privacy, vault/zero-knowledge, and owner-vs-network implications explicitly.
+    - "Keep parity with the Android app: shared concepts use the same names and JSON wire format."
+    - Prefer reusing patterns already fixed in the project context over re-deciding.
+  tasks:
+    - Order tasks so the change can be built on its own git branch and tested before merge.
+    - Include a verification task (unit tests and/or a run of the app) for every change.
+    - Keep task chunks small and individually checkable.

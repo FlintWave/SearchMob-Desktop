@@ -37,11 +37,22 @@ from PySide6.QtWidgets import (
 
 from searchmob_desktop.data.history import HistoryStore
 from searchmob_desktop.data.history_factory import build_history_store
+from searchmob_desktop.data.personalization_store import (
+    load_personalization,
+    save_personalization,
+)
 from searchmob_desktop.data.ranking_store import load_ranking_rules, save_ranking_rules
 from searchmob_desktop.engines import EngineContext, SearchResult, aggregate
 from searchmob_desktop.engines.correct import start_background_corrector
 from searchmob_desktop.engines.local_llm import LlmConfig, stream_answer
-from searchmob_desktop.engines.rank import RankRule, apply_ranking, host_of_url
+from searchmob_desktop.engines.rank import (
+    PersonalizationModel,
+    RankRule,
+    apply_ranking,
+    host_of_url,
+    personalize_reorder,
+)
+from searchmob_desktop.engines.rank.personalize import query_terms, update_from_click
 from searchmob_desktop.engines.rank.slop_blocklist import load_slop_domains
 from searchmob_desktop.engines.sort import SortMode, sort_results
 from searchmob_desktop.engines.verticals import Vertical, transform_query
@@ -49,6 +60,7 @@ from searchmob_desktop.engines.wiki_summary import SummaryBox, summary_for_query
 from searchmob_desktop.gui.about_dialog import AboutDialog
 from searchmob_desktop.gui.browser_setup_dialog import BrowserSetupDialog
 from searchmob_desktop.gui.history_dialog import HistoryDialog
+from searchmob_desktop.gui.onboarding_dialog import ONBOARDING_VERSION
 from searchmob_desktop.gui.results_view import ResultsView
 from searchmob_desktop.gui.server_controller import (
     LocalServerController,
@@ -103,6 +115,15 @@ class MainWindow(QMainWindow):
         # without re-searching.
         self._ranking_rules = load_ranking_rules()
         self._raw_results: list[SearchResult] = []
+        # The list currently shown (after sort + personalization + rules). Kept so a result click
+        # can learn from its displayed position (the personalization skip-above signal).
+        self._displayed_results: list[SearchResult] = []
+        # Opt-in click personalization: a learned, bounded ranking boost. Loaded from the vault only
+        # when enabled; an empty model is a harmless no-op when it is off.
+        self._personalization_enabled = prefs.personalization_enabled
+        self._personalization = (
+            load_personalization() if prefs.personalization_enabled else PersonalizationModel()
+        )
         # Result sort order ("fresh"/"date"/"relevance"); re-sorts in place without re-searching.
         self._sort_mode = SortMode.from_value(prefs.sort_mode)
         # Active search vertical (Web/News/Forums/Academic). Changing it re-runs the search because
@@ -243,6 +264,7 @@ class MainWindow(QMainWindow):
         self._empty_state = self._build_empty_state()
         self._results = ResultsView()
         self._results.ruleRequested.connect(self._on_rule_requested)
+        self._results.resultActivated.connect(self._on_result_activated)
         self._body.addWidget(self._empty_state)
         self._body.addWidget(self._results)
         self._body.setCurrentWidget(self._empty_state)
@@ -285,8 +307,9 @@ class MainWindow(QMainWindow):
         self._tray: QSystemTrayIcon | None = None
         self._setup_tray()
 
-        # First-run setup wizard: shown once, after the window is up, when not yet completed.
-        if not prefs.onboarding_completed:
+        # Setup wizard: shown on first run, and once more after an update that adds a step worth
+        # seeing (when the saved onboarding revision is behind the app's current one).
+        if not prefs.onboarding_completed or prefs.onboarding_version < ONBOARDING_VERSION:
             QTimer.singleShot(0, self._show_onboarding)
 
     def _show_onboarding(self) -> None:
@@ -560,9 +583,17 @@ class MainWindow(QMainWindow):
         """Sort, then re-rank the last raw results with the current rules; update view + status."""
         # Sort first (relevance/date/freshness blend), then bucket by the user's rules so PIN/RAISE
         # are honored while preserving the chosen order within each bucket.
-        ordered = sort_results(
-            self._raw_results, self._sort_mode, self._last_query, int(time.time() * 1000)
-        )
+        now_ms = int(time.time() * 1000)
+        ordered = sort_results(self._raw_results, self._sort_mode, self._last_query, now_ms)
+        # Then nudge by the learned click model (between sort and rules, so PIN/RAISE/BLOCK win).
+        if self._personalization_enabled:
+            ordered = personalize_reorder(
+                ordered,
+                lambda r: host_of_url(r.url),
+                self._last_query,
+                self._personalization,
+                now_ms,
+            )
         ranked = apply_ranking(
             ordered,
             self._ranking_rules,
@@ -571,6 +602,7 @@ class MainWindow(QMainWindow):
             slop_domains=load_slop_domains(),
             slop_mode=self._prefs_store.load().ai_slop_mode,
         )
+        self._displayed_results = ranked
         self._results.set_results(ranked)
         hidden = len(self._raw_results) - len(ranked)
         suffix = f" ({hidden} hidden by your rules)" if hidden > 0 else ""
@@ -628,6 +660,26 @@ class MainWindow(QMainWindow):
         save_ranking_rules(self._ranking_rules)
         if self._raw_results:
             self._apply_ranking_and_show()
+
+    def _on_result_activated(self, url: str, row: int) -> None:
+        """A result was opened: learn from the click (clicked over skipped-above) when enabled.
+
+        Uses the displayed order so the model sees the same ranks the user saw. Persisting to the
+        vault is best-effort; `save_personalization` is a no-op when the vault is unavailable.
+        """
+        if not self._personalization_enabled or not url:
+            return
+        if row < 0 or row >= len(self._displayed_results):
+            return
+        hosts = [host_of_url(r.url) for r in self._displayed_results]
+        update_from_click(
+            self._personalization,
+            hosts,
+            row,
+            query_terms(self._last_query),
+            int(time.time() * 1000),
+        )
+        save_personalization(self._personalization)
 
     def _maybe_show_correction(self) -> None:
         """Offer a 'Did you mean: X' link when the on-device corrector suggests one."""
@@ -764,6 +816,18 @@ class MainWindow(QMainWindow):
         dialog.themeChanged.connect(_on_theme_changed)
         dialog.rulesChanged.connect(_on_rules_changed)
         dialog.exec()
+
+        # The personalization toggle / export-import / reset may have changed in Settings; pick up
+        # the new enabled state and reload the model (so a live toggle takes effect immediately).
+        prefs_after = self._prefs_store.load()
+        self._personalization_enabled = prefs_after.personalization_enabled
+        self._personalization = (
+            load_personalization()
+            if prefs_after.personalization_enabled
+            else PersonalizationModel()
+        )
+        if self._raw_results:
+            self._apply_ranking_and_show()
 
     def _on_open_browser_setup(self) -> None:
         from searchmob_desktop.gui.browser_setup_dialog import choose_setup_host

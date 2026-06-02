@@ -52,11 +52,13 @@ from searchmob_desktop.engines import EngineContext, EngineFn, SearchResult, agg
 from searchmob_desktop.engines.correct import SpellCorrector
 from searchmob_desktop.engines.rank import (
     Lens,
+    PersonalizationModel,
     RankingRules,
     RankRule,
     apply_ranking,
     host_of_url,
     parse_goggles,
+    personalize_reorder,
 )
 from searchmob_desktop.engines.rank.slop_blocklist import load_slop_domains
 from searchmob_desktop.engines.sort import SortMode, sort_results
@@ -333,6 +335,7 @@ def build_app(
     ranking_rules: RankingRules | None = None,
     ranking_rules_provider: Callable[[], RankingRules] | None = None,
     ranking_rules_saver: Callable[[RankingRules], bool] | None = None,
+    personalization_provider: Callable[[], PersonalizationModel | None] | None = None,
     prefs_provider: Callable[[], UserPreferences] | None = None,
     prefs_saver: Callable[[UserPreferences], bool] | None = None,
     history_provider: Callable[[], list[HistoryEntry]] | None = None,
@@ -410,6 +413,8 @@ def build_app(
         query: str,
         sort_mode: SortMode = SortMode.FRESH_RELEVANT,
         vertical: Vertical = Vertical.WEB,
+        *,
+        owner: bool = False,
     ) -> list[SearchResult]:
         if not query.strip() or not engines:
             return []
@@ -422,9 +427,17 @@ def build_app(
         # effect on the next search; otherwise the static build-time value is used.
         prefs = _load_prefs()
         slop_mode = prefs.ai_slop_mode if prefs is not None else ai_slop_mode
-        # Sort (relevance/date/freshness blend), then apply the user's personalization rules so the
-        # served results match the in-app results and PIN/RAISE preserve the chosen order.
-        ordered = sort_results(results, sort_mode, query, int(time.time() * 1000))
+        # Sort (relevance/date/freshness blend), then nudge by the owner's learned click model (only
+        # for the loopback owner, never a network visitor), then apply the user's rules so the
+        # served results match the in-app results and PIN/RAISE preserve the order.
+        now_ms = int(time.time() * 1000)
+        ordered = sort_results(results, sort_mode, query, now_ms)
+        if owner and personalization_provider is not None:
+            model = personalization_provider()
+            if model is not None:
+                ordered = personalize_reorder(
+                    ordered, lambda r: host_of_url(r.url), query, model, now_ms
+                )
         return apply_ranking(
             ordered,
             rules_provider(),
@@ -462,6 +475,12 @@ def build_app(
         client_host = request.client.host if request.client is not None else ""
         return ranking_rules_saver is not None and is_loopback_host(client_host)
 
+    def _is_loopback_request(request: Request) -> bool:
+        # Loopback = the owner's own machine. Gates applying the learned personalization model so it
+        # never reorders results for a network visitor (and never exposes the owner's bubble).
+        client_host = request.client.host if request.client is not None else ""
+        return is_loopback_host(client_host)
+
     async def _maybe_summary(query: str) -> SummaryBox | None:
         if summary_provider is None or not query.strip():
             return None
@@ -498,7 +517,9 @@ def build_app(
         # Fetch the contextual summary concurrently with the metasearch so the box never adds
         # latency to the results path.
         summary_task = asyncio.ensure_future(_maybe_summary(query))
-        results = await _run_metasearch(query, sort_mode, vertical)
+        results = await _run_metasearch(
+            query, sort_mode, vertical, owner=_is_loopback_request(request)
+        )
         summary = await summary_task
         body = render_results_page(
             query,
@@ -662,7 +683,9 @@ def build_app(
         vertical = Vertical.from_value(request.query_params.get("vertical"))
         sort_param = request.query_params.get("sort")
         sort_mode = SortMode.from_value(sort_param) if sort_param else default_sort(vertical)
-        results = await _run_metasearch(query, sort_mode, vertical)
+        results = await _run_metasearch(
+            query, sort_mode, vertical, owner=_is_loopback_request(request)
+        )
         payload = {
             "query": query,
             "results": [asdict(result) for result in results],

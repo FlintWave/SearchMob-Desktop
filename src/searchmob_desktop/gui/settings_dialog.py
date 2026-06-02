@@ -48,6 +48,10 @@ from searchmob_desktop.data import (
 from searchmob_desktop.data.api_keys import BRAVE_KEY, KAGI_KEY, MOJEEK_KEY
 from searchmob_desktop.data.crypto.keyring_kek import KeyringKekStore
 from searchmob_desktop.data.crypto.wrap import KeyringDekWrapper
+from searchmob_desktop.data.personalization_store import (
+    load_personalization,
+    save_personalization,
+)
 from searchmob_desktop.data.ranking_store import load_ranking_rules, save_ranking_rules
 from searchmob_desktop.engines import make_privacy_client
 from searchmob_desktop.engines.local_llm import LlmBackend, detect_backends
@@ -55,6 +59,9 @@ from searchmob_desktop.engines.rank import (
     RankingRules,
     parse_goggles,
 )
+from searchmob_desktop.engines.rank.personalize import from_json as personalization_from_json
+from searchmob_desktop.engines.rank.personalize import reset as reset_personalization
+from searchmob_desktop.engines.rank.personalize import to_json as personalization_to_json
 from searchmob_desktop.gui.browser_setup_dialog import BrowserSetupDialog
 from searchmob_desktop.gui.engines_catalog import ENGINE_CATALOG, is_engine_enabled
 from searchmob_desktop.gui.theme import DARK, LIGHT, SYSTEM
@@ -344,6 +351,34 @@ class SettingsDialog(QDialog):
             )
         )
 
+        self._personalize_check = QCheckBox(
+            "Learn from my clicks to personalize ranking (recommended)"
+        )
+        self._personalize_check.setChecked(self._prefs.personalization_enabled)
+        self._personalize_check.toggled.connect(self._on_personalization_toggled)
+        layout.addWidget(self._personalize_check)
+        personalize_help = QLabel(
+            "Quietly moves the sites you tend to click higher, and gets better the more you "
+            "search. The learned model is encrypted in your vault, never leaves this device, and "
+            "is never trained by other people on your network. Export it to back it up or move it "
+            "to another device, or reset it any time."
+        )
+        personalize_help.setWordWrap(True)
+        personalize_help.setProperty("role", "muted")
+        layout.addWidget(personalize_help)
+        personalize_btns = QHBoxLayout()
+        export_model_btn = QPushButton("Export model...")
+        export_model_btn.clicked.connect(self._on_export_personalization)
+        import_model_btn = QPushButton("Import model...")
+        import_model_btn.clicked.connect(self._on_import_personalization)
+        reset_model_btn = QPushButton("Reset")
+        reset_model_btn.clicked.connect(self._on_reset_personalization)
+        personalize_btns.addWidget(export_model_btn)
+        personalize_btns.addWidget(import_model_btn)
+        personalize_btns.addWidget(reset_model_btn)
+        personalize_btns.addStretch(1)
+        layout.addLayout(personalize_btns)
+
         slop_row = QHBoxLayout()
         slop_row.addWidget(QLabel("Filter AI-generated / low-quality sites:"))
         self._slop_combo = QComboBox()
@@ -527,6 +562,68 @@ class SettingsDialog(QDialog):
             return
         self._save_ranking(RankingRules.from_json(text))
         QMessageBox.information(self, "Rules imported", "Your ranking rules were imported.")
+
+    # --- Click personalization ---------------------------------------------------------------
+
+    def _on_personalization_toggled(self, checked: bool) -> None:
+        """Enable/disable learning from clicks; the main window picks it up when Settings closes."""
+        self._save(replace(self._prefs, personalization_enabled=checked))
+
+    def _on_export_personalization(self) -> None:
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Export personalization", "searchmob-personalization.json", "JSON files (*.json)"
+        )
+        if not path:
+            return
+        try:
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write(personalization_to_json(load_personalization()))
+        except OSError as exc:
+            QMessageBox.warning(self, "Export failed", str(exc))
+            return
+        QMessageBox.information(
+            self, "Personalization exported", "Your learned ranking model was exported."
+        )
+
+    def _on_import_personalization(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Import personalization", "", "JSON files (*.json);;All files (*)"
+        )
+        if not path:
+            return
+        text = self._read_capped_text(path)
+        if text is None:
+            return
+        if not save_personalization(personalization_from_json(text)):
+            self._warn_vault_unavailable()
+            return
+        QMessageBox.information(
+            self, "Personalization imported", "Your learned ranking model was imported."
+        )
+
+    def _on_reset_personalization(self) -> None:
+        confirm = QMessageBox.question(
+            self,
+            "Reset personalization",
+            "Forget everything SearchMob has learned from your clicks? Your ranking rules and "
+            "scopes are not affected.",
+        )
+        if confirm != QMessageBox.StandardButton.Yes:
+            return
+        if not save_personalization(reset_personalization(load_personalization())):
+            self._warn_vault_unavailable()
+            return
+        QMessageBox.information(
+            self, "Personalization reset", "SearchMob forgot what it had learned from your clicks."
+        )
+
+    def _warn_vault_unavailable(self) -> None:
+        QMessageBox.warning(
+            self,
+            "Vault unavailable",
+            "The encrypted vault is unavailable, so the personalization model could not be saved. "
+            "Enable search history or save an API key first to initialize the vault.",
+        )
 
     def _read_capped_text(self, path: str) -> str | None:
         """Read a small import file, rejecting anything over the size cap. Warns on failure."""

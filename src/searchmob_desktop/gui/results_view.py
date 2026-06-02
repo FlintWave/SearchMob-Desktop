@@ -147,6 +147,9 @@ class ResultsView(QListView):
 
     # (domain, RankRule) chosen from a result's right-click menu.
     ruleRequested = Signal(str, RankRule)
+    # (url, row) emitted when a result is opened, so the window can learn from the click (the row is
+    # the displayed position, which the personalization model needs for its skip-above signal).
+    resultActivated = Signal(str, int)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -213,4 +216,6 @@ class ResultsView(QListView):
     def _on_activated(self, index: QModelIndex) -> None:
         url = str(index.data(_URL_ROLE) or "")
         if url:
+            # Tell the window first (so it can learn from the click) and then open the URL.
+            self.resultActivated.emit(url, index.row())
             QDesktopServices.openUrl(QUrl(url))

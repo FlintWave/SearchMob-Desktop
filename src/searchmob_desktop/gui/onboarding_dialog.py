@@ -13,6 +13,7 @@ from dataclasses import replace
 
 from PySide6.QtGui import QShowEvent
 from PySide6.QtWidgets import (
+    QCheckBox,
     QDialog,
     QFrame,
     QHBoxLayout,
@@ -30,6 +31,11 @@ from searchmob_desktop.gui.server_controller import LocalServerController
 from searchmob_desktop.prefs import JsonPreferencesStore
 from searchmob_desktop.server import local_hostnames
 
+# Bump this when the wizard gains a step worth re-showing to existing users (e.g. a new opt-in
+# feature). The wizard re-appears once for anyone whose saved `onboarding_version` is below this.
+# 1: added the click-personalization step.
+ONBOARDING_VERSION = 1
+
 
 class OnboardingDialog(QDialog):
     """The first-run wizard. Owns no state beyond the prefs flag it sets on completion."""
@@ -44,6 +50,9 @@ class OnboardingDialog(QDialog):
         self._prefs_store = prefs_store
         self._server_controller = server_controller
         self._prefs = prefs_store.load()
+        # A returning user (already onboarded once) is being re-shown the wizard after an update, so
+        # the welcome copy frames it as "what's new" rather than a first-time setup.
+        self._returning = self._prefs.onboarding_completed
 
         self.setWindowTitle("Welcome to SearchMob")
         self.setModal(True)
@@ -68,6 +77,7 @@ class OnboardingDialog(QDialog):
         self._stack = QStackedWidget(self)
         self._stack.addWidget(self._welcome_page())
         self._stack.addWidget(self._privacy_page())
+        self._stack.addWidget(self._personalize_page())
         self._stack.addWidget(self._browser_page())
         if service.is_supported():
             self._stack.addWidget(self._service_page())
@@ -122,6 +132,13 @@ class OnboardingDialog(QDialog):
         return page
 
     def _welcome_page(self) -> QWidget:
+        if self._returning:
+            return self._page(
+                "What's new in SearchMob",
+                "There is a new feature worth a look: SearchMob can now learn from your clicks to "
+                "personalize ranking, privately and on-device. Step through to turn it on, or skip "
+                "to keep things as they are. Your existing settings are unchanged.",
+            )
         return self._page(
             "Welcome to SearchMob",
             "Private, on-device metasearch. Your searches are aggregated from several engines "
@@ -136,6 +153,31 @@ class OnboardingDialog(QDialog):
             "device identifier, and the only outbound traffic is the searches you run plus an "
             "optional once-a-day update check you can turn off. You can optionally enable "
             "encrypted, zero-knowledge search history later in Settings.",
+        )
+
+    def _personalize_page(self) -> QWidget:
+        box = QFrame()
+        box.setFrameShape(QFrame.Shape.StyledPanel)
+        col = QVBoxLayout(box)
+        self._personalize_check = QCheckBox("Turn on personalized ranking (recommended)")
+        self._personalize_check.setChecked(self._prefs.personalization_enabled)
+        self._personalize_check.toggled.connect(self._on_personalize_toggled)
+        col.addWidget(self._personalize_check)
+        note = QLabel(
+            "It is as private as your data and device are: keep a strong vault passphrase and a "
+            "locked, encrypted device, and turn on zero-knowledge mode for the strongest "
+            "protection. You can reset or export it any time in Settings."
+        )
+        note.setWordWrap(True)
+        note.setProperty("role", "muted")
+        col.addWidget(note)
+        return self._page(
+            "Personalize your ranking (recommended)",
+            "SearchMob can learn which sites you click and quietly move the ones you prefer "
+            "higher. It gets better the more you search. Everything stays on this device: what it "
+            "learns is encrypted with your vault key, is never sent anywhere, and other people on "
+            "your network can never read it or change it.",
+            extra=box,
         )
 
     def _browser_page(self) -> QWidget:
@@ -189,6 +231,15 @@ class OnboardingDialog(QDialog):
         )
         BrowserSetupDialog(host=host, port=port, parent=self, token=token).exec()
 
+    def _on_personalize_toggled(self, checked: bool) -> None:
+        # Persist immediately (like the other opt-ins) so nothing is recorded unless the box is on.
+        try:
+            self._prefs_store.save(
+                replace(self._prefs_store.load(), personalization_enabled=checked)
+            )
+        except OSError:
+            pass  # Non-fatal: the Settings toggle offers another chance to enable it.
+
     def _install_service(self) -> None:
         host = "0.0.0.0" if self._prefs.network_access_enabled else "127.0.0.1"
         ok, message = service.install_and_enable(host=host)
@@ -217,7 +268,13 @@ class OnboardingDialog(QDialog):
 
     def _finish(self) -> None:
         try:
-            self._prefs_store.save(replace(self._prefs_store.load(), onboarding_completed=True))
+            self._prefs_store.save(
+                replace(
+                    self._prefs_store.load(),
+                    onboarding_completed=True,
+                    onboarding_version=ONBOARDING_VERSION,
+                )
+            )
         except OSError:
             pass  # Non-fatal: worst case the wizard shows again next launch.
         self.accept()
