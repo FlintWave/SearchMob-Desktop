@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-from PySide6.QtGui import QShowEvent
+from PySide6.QtGui import QGuiApplication, QShowEvent
 from PySide6.QtWidgets import (
     QCheckBox,
     QDialog,
@@ -50,11 +50,13 @@ class OnboardingDialog(QDialog):
         self._prefs_store = prefs_store
         self._server_controller = server_controller
         self._prefs = prefs_store.load()
-        # A returning user (already onboarded once) is being re-shown the wizard after an update, so
-        # the welcome copy frames it as "what's new" rather than a first-time setup.
+        # A returning user (already onboarded once) is re-shown the wizard after an update only to
+        # surface the new opt-in feature, so they get just that page, not the whole setup again.
         self._returning = self._prefs.onboarding_completed
 
-        self.setWindowTitle("Welcome to SearchMob")
+        self.setWindowTitle(
+            "What's new in SearchMob" if self._returning else "Welcome to SearchMob"
+        )
         self.setModal(True)
         self.resize(640, 560)
 
@@ -72,15 +74,19 @@ class OnboardingDialog(QDialog):
         top.addWidget(skip)
         outer.addLayout(top)
 
-        # Build the page list. The service page is included only on platforms that support one, so
-        # the wizard never shows steps a user cannot act on.
+        # Build the page list. A returning user (re-onboarded after an update) sees only the new
+        # feature; a first-run user gets the full setup with the personalization opt-in as the last
+        # step (not an early interruption). The service page is included only where supported.
         self._stack = QStackedWidget(self)
-        self._stack.addWidget(self._welcome_page())
-        self._stack.addWidget(self._privacy_page())
-        self._stack.addWidget(self._personalize_page())
-        self._stack.addWidget(self._browser_page())
-        if service.is_supported():
-            self._stack.addWidget(self._service_page())
+        if self._returning:
+            self._stack.addWidget(self._personalize_page())
+        else:
+            self._stack.addWidget(self._welcome_page())
+            self._stack.addWidget(self._privacy_page())
+            self._stack.addWidget(self._browser_page())
+            if service.is_supported():
+                self._stack.addWidget(self._service_page())
+            self._stack.addWidget(self._personalize_page())
         outer.addWidget(self._stack, stretch=1)
 
         nav = QHBoxLayout()
@@ -101,15 +107,24 @@ class OnboardingDialog(QDialog):
         """Center the wizard over the main window on first show.
 
         A parented modal is not reliably centered by every window manager (it can open in a corner),
-        so we position it explicitly over the parent's frame the first time it appears.
+        so we position it explicitly the first time it appears: over the parent's frame when the
+        parent is actually on screen, otherwise over the active screen as a fallback (the parent may
+        not be mapped yet when the wizard is shown right after launch).
         """
         super().showEvent(event)
+        if self._centered:
+            return
+        self._centered = True
+        geo = self.frameGeometry()
         parent = self.parentWidget()
-        if not self._centered and parent is not None:
-            geo = self.frameGeometry()
+        if parent is not None and parent.isVisible():
             geo.moveCenter(parent.frameGeometry().center())
-            self.move(geo.topLeft())
-            self._centered = True
+        else:
+            screen = self.screen() or QGuiApplication.primaryScreen()
+            if screen is None:
+                return
+            geo.moveCenter(screen.availableGeometry().center())
+        self.move(geo.topLeft())
 
     # --- Page builders -----------------------------------------------------------------------
 
@@ -132,13 +147,6 @@ class OnboardingDialog(QDialog):
         return page
 
     def _welcome_page(self) -> QWidget:
-        if self._returning:
-            return self._page(
-                "What's new in SearchMob",
-                "There is a new feature worth a look: SearchMob can now learn from your clicks to "
-                "personalize ranking, privately and on-device. Step through to turn it on, or skip "
-                "to keep things as they are. Your existing settings are unchanged.",
-            )
         return self._page(
             "Welcome to SearchMob",
             "Private, on-device metasearch. Your searches are aggregated from several engines "
