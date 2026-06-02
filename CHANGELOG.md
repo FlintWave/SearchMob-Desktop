@@ -3,6 +3,16 @@
 All notable changes to SearchMob Desktop are documented here. The version scheme is Ubuntu-style
 `YY.MM.VV` and releases are tagged `vYY.MM.VV`.
 
+## 26.06.01 — 2026-06-02
+
+### Fixed
+- **Setup wizard now opens centered over the main window** again, with a screen-centered fallback if
+  the main window is not yet on screen, fixing a 26.06.00 regression where it could open off-center.
+- **The "what's new" update prompt is no longer the first thing existing users see.** After an update
+  that adds a new opt-in setting, the wizard now shows returning users **only** the new feature's page
+  (with its toggle) so they can review and enable it, instead of replaying the whole first-run setup.
+  New installs see the personalization opt-in as the **last** step of setup rather than an early one.
+
 ## 26.06.00 — 2026-06-01
 
 ### Added

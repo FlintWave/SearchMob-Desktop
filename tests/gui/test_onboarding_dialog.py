@@ -60,6 +60,21 @@ def test_personalize_page_toggle_persists_immediately(qapp: object, tmp_path: Pa
     assert store.load().personalization_enabled is True
 
 
+def test_returning_user_sees_only_the_new_feature_page(qapp: object, tmp_path: Path) -> None:
+    # A re-onboarded user (already completed onboarding before the version bump) gets just the
+    # personalization page so they can activate the new feature, not the whole first-run setup.
+    from dataclasses import replace
+
+    store = _store(tmp_path)
+    store.save(replace(store.load(), onboarding_completed=True))
+    dialog = OnboardingDialog(prefs_store=store)
+    assert dialog._stack.count() == 1
+    # The single page carries the activation toggle (so they can turn the feature on).
+    assert dialog._personalize_check is not None
+    dialog._personalize_check.setChecked(True)
+    assert store.load().personalization_enabled is True
+
+
 def test_skip_also_persists_completed_flag(qapp: object, tmp_path: Path) -> None:
     # Skip is wired to the same _finish handler; a skipped wizard must not reappear.
     store = _store(tmp_path)

@@ -37,6 +37,23 @@ searchmob-desktop --help              # invoke the CLI
 - No em dashes (— –) anywhere in source, comments, docs, or UI strings; use plain punctuation.
 - Type-annotated where it helps the reader; `mypy --strict` runs in CI.
 
+## Surfacing new opt-in settings to existing users
+
+When a feature adds a new **opt-in setting that users should review and choose** (a privacy or
+ranking toggle, a new data-storing option, anything they would want to know exists), make the setup
+wizard show it to people who already onboarded, not just fresh installs:
+
+1. Add the feature's page to the wizard (`gui/onboarding_dialog.py`) and bump `ONBOARDING_VERSION`
+   in the same change.
+2. The wizard re-appears **once** for any user whose saved `onboarding_version` is behind, showing
+   **only** the new feature's page (with its activation toggle) so they can review and enable it.
+   New installs see the same page as the last step of first-run setup.
+3. Keep the toggle **off by default** and persist it the moment it is changed, so nothing is enabled
+   unless the user actually opts in.
+
+Treat this as part of "done" for any settings-bearing feature, and confirm it during release review.
+The Android app mirrors this with `ONBOARDING_VERSION` in `ui/onboarding/OnboardingState.kt`.
+
 ## Releases (maintainers)
 
 Releases follow Ubuntu-style `YY.MM.VV` versioning. Bump `__version__` in
