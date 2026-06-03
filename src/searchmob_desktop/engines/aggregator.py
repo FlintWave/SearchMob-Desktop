@@ -23,6 +23,12 @@ import httpx
 
 from searchmob_desktop.engines.normalize import normalize_url, strip_tracking_params
 from searchmob_desktop.engines.proxy import make_privacy_client
+from searchmob_desktop.engines.relevance import (
+    blended_score,
+    content_terms,
+    language_affinity,
+    lexical_score,
+)
 from searchmob_desktop.engines.snippet_date import parse_date
 from searchmob_desktop.engines.types import EngineContext, SearchResult
 
@@ -101,7 +107,20 @@ async def aggregate(ctx: EngineContext, engines: Sequence[EngineFn]) -> list[Sea
                 ):
                     existing.published = candidate
 
-    ranked = sorted(buckets.values(), key=lambda b: b.score, reverse=True)
+    # Fold a lexical query-match score into the RRF score so the final order leads with relevance
+    # (does the result actually contain the query's content words, especially the title) and keeps
+    # engine consensus as a strong secondary signal. Without this, near-tied RRF scores let an
+    # irrelevant result one engine ranked highly sit among the top hits.
+    terms = content_terms(ctx.query)
+
+    def _final_score(b: _Bucket) -> float:
+        return blended_score(
+            b.score,
+            lexical_score(b.title, b.snippet, terms),
+            language_affinity(ctx.query, b.title, b.snippet),
+        )
+
+    ranked = sorted(buckets.values(), key=_final_score, reverse=True)
     return [
         SearchResult(
             title=b.title,
