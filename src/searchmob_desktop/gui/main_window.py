@@ -45,6 +45,7 @@ from searchmob_desktop.data.personalization_store import (
 )
 from searchmob_desktop.data.ranking_store import load_ranking_rules, save_ranking_rules
 from searchmob_desktop.engines import (
+    DEFAULT_POOL_SIZE,
     EngineContext,
     SearchResult,
     aggregate,
@@ -729,7 +730,9 @@ class MainWindow(QMainWindow):
         # Scope the engine query for the active vertical; the summary, correction, and sort all keep
         # the original query so freshness keywords and entity lookups are unaffected by operators.
         ctx = EngineContext(
-            query=transform_query(query, self._vertical), max_results=10, timeout_seconds=5.0
+            query=transform_query(query, self._vertical),
+            max_results=DEFAULT_POOL_SIZE,
+            timeout_seconds=5.0,
         )
         summary_enabled = prefs.summary_enabled
 

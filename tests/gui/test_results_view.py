@@ -14,7 +14,11 @@ pytest.importorskip("PySide6")
 from searchmob_desktop.engines import SearchResult
 from searchmob_desktop.engines.rank import RankRule, host_of_url
 from searchmob_desktop.gui import results_view as results_view_module
-from searchmob_desktop.gui.results_view import ResultsView
+from searchmob_desktop.gui.results_view import (
+    _REVEAL_INITIAL,
+    _REVEAL_STEP,
+    ResultsView,
+)
 
 _RESULTS = [
     SearchResult(title="Alpha", url="https://alpha.example/a", snippet="s1", engine="ddg"),
@@ -22,10 +26,49 @@ _RESULTS = [
 ]
 
 
+def _many(n: int) -> list[SearchResult]:
+    return [
+        SearchResult(title=f"R{i}", url=f"https://e.example/{i}", snippet="s", engine="ddg")
+        for i in range(n)
+    ]
+
+
 def test_set_results_populates_and_count_matches(qapp: object) -> None:
     view = ResultsView()
     view.set_results(_RESULTS)
     assert view.result_count == 2
+
+
+def test_large_pool_reveals_only_the_initial_window(qapp: object) -> None:
+    """A pool bigger than the reveal window shows only the first window but holds the whole pool."""
+    view = ResultsView()
+    pool = _many(_REVEAL_INITIAL + 15)
+    view.set_results(pool)
+    assert view.result_count == _REVEAL_INITIAL
+    assert view.total_count == len(pool)
+
+
+def test_scrolling_to_the_bottom_reveals_the_next_window(qapp: object) -> None:
+    """Each near-bottom scroll grows the visible rows by a step until the pool is exhausted."""
+    view = ResultsView()
+    pool = _many(_REVEAL_INITIAL + _REVEAL_STEP + 3)
+    view.set_results(pool)
+    # The handler reveals when the scroll value is near the maximum; pass the maximum to force it.
+    view._maybe_reveal_more(view.verticalScrollBar().maximum())
+    assert view.result_count == _REVEAL_INITIAL + _REVEAL_STEP
+    # One more reveal exhausts the remaining tail and then stops growing.
+    view._maybe_reveal_more(view.verticalScrollBar().maximum())
+    assert view.result_count == len(pool)
+    view._maybe_reveal_more(view.verticalScrollBar().maximum())
+    assert view.result_count == len(pool)
+
+
+def test_clear_resets_the_pool_and_window(qapp: object) -> None:
+    view = ResultsView()
+    view.set_results(_many(20))
+    view.clear()
+    assert view.result_count == 0
+    assert view.total_count == 0
 
 
 def test_clear_empties_the_model(qapp: object) -> None:

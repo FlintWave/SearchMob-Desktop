@@ -50,7 +50,13 @@ from starlette.routing import Route
 from starlette.types import ASGIApp
 
 from searchmob_desktop.data.history import HistoryEntry
-from searchmob_desktop.engines import EngineContext, EngineFn, SearchResult, aggregate
+from searchmob_desktop.engines import (
+    DEFAULT_POOL_SIZE,
+    EngineContext,
+    EngineFn,
+    SearchResult,
+    aggregate,
+)
 from searchmob_desktop.engines.correct import SpellCorrector
 from searchmob_desktop.engines.rank import (
     Lens,
@@ -372,7 +378,7 @@ def build_app(
     ai_slop_mode: str = "off",
     max_query_length: int = MAX_QUERY_LENGTH,
     max_suggestions: int = MAX_SUGGESTIONS,
-    max_results: int = 10,
+    max_results: int = DEFAULT_POOL_SIZE,
     timeout_seconds: float = 5.0,
     metasearch: _MetasearchFn = aggregate,
     access_token: str | None = None,
