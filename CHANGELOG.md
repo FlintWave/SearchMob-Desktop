@@ -3,6 +3,14 @@
 All notable changes to SearchMob Desktop are documented here. The version scheme is Ubuntu-style
 `YY.MM.VV` and releases are tagged `vYY.MM.VV`.
 
+## 26.06.03 — 2026-06-03
+
+### Fixed
+- **The release link in the Settings "Check now" dialog is now an actual button.** When a newer
+  version is found, the dialog shows an **Open release page** button that opens it in your default
+  browser, instead of printing the URL as plain, unclickable text. The "could not reach GitHub"
+  dialog gets the same button to the releases page.
+
 ## 26.06.02 — 2026-06-03
 
 ### Added

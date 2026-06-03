@@ -15,8 +15,8 @@ from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import QThreadPool, Signal
-from PySide6.QtGui import QGuiApplication
+from PySide6.QtCore import QThreadPool, QUrl, Signal
+from PySide6.QtGui import QDesktopServices, QGuiApplication
 from PySide6.QtWidgets import (
     QButtonGroup,
     QCheckBox,
@@ -1093,19 +1093,20 @@ class SettingsDialog(QDialog):
             )
             self._save(self._prefs)
             if info is None:
-                QMessageBox.warning(
-                    self,
+                self._show_update_dialog(
+                    QMessageBox.Icon.Warning,
                     "Update check failed",
-                    f"Could not reach GitHub. Releases page: {RELEASES_PAGE_URL}",
+                    "Could not reach GitHub.",
+                    RELEASES_PAGE_URL,
                 )
                 return
             if info.is_newer_than(current):
                 v = info.latest_version
-                QMessageBox.information(
-                    self,
+                self._show_update_dialog(
+                    QMessageBox.Icon.Information,
                     "Update available",
-                    f"A newer version is available: "
-                    f"{v.year:02d}.{v.month:02d}.{v.build:02d}\n{info.release_url}",
+                    f"A newer version is available: {v.year:02d}.{v.month:02d}.{v.build:02d}.",
+                    info.release_url,
                 )
             else:
                 QMessageBox.information(
@@ -1116,11 +1117,32 @@ class SettingsDialog(QDialog):
 
         def _on_failed(message: str) -> None:
             self._check_now_btn.setEnabled(True)
-            QMessageBox.warning(self, "Update check failed", message)
+            self._show_update_dialog(
+                QMessageBox.Icon.Warning, "Update check failed", message, RELEASES_PAGE_URL
+            )
 
         worker.signals.finished.connect(_on_finished)
         worker.signals.failed.connect(_on_failed)
         worker.start(self._pool)
+
+    def _show_update_dialog(
+        self, icon: QMessageBox.Icon, title: str, message: str, url: str
+    ) -> None:
+        """A result dialog with a real 'Open release page' button that launches the browser.
+
+        The release URL used to be shown as plain (unclickable) text; this gives it an actionable
+        button so the user can reach the download in their default browser with one click.
+        """
+        box = QMessageBox(self)
+        box.setIcon(icon)
+        box.setWindowTitle(title)
+        box.setText(message)
+        open_button = box.addButton("Open release page", QMessageBox.ButtonRole.AcceptRole)
+        box.addButton(QMessageBox.StandardButton.Close)
+        box.setDefaultButton(open_button)
+        box.exec()
+        if box.clickedButton() is open_button:
+            QDesktopServices.openUrl(QUrl(url))
 
     # --- Network -----------------------------------------------------------------------------
 
