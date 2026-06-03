@@ -67,7 +67,13 @@ from searchmob_desktop.gui.engines_catalog import ENGINE_CATALOG, is_engine_enab
 from searchmob_desktop.gui.theme import DARK, LIGHT, SYSTEM
 from searchmob_desktop.gui.workers import AsyncWorker
 from searchmob_desktop.prefs import JsonPreferencesStore, UserPreferences
-from searchmob_desktop.update import RELEASES_PAGE_URL, UpdateInfo, fetch_latest
+from searchmob_desktop.update import (
+    RELEASES_PAGE_URL,
+    UpdateInfo,
+    VersionTag,
+    fetch_latest,
+    reconcile_pending_update,
+)
 from searchmob_desktop.version import __version__
 
 if TYPE_CHECKING:
@@ -145,7 +151,12 @@ class SettingsDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Settings")
         self.setModal(True)
-        self.resize(780, 640)
+        # Constrain the window to a 4:3 aspect ratio: open at 4:3 and keep height locked to 3/4 of
+        # the width as the user resizes (see resizeEvent). The guard flag prevents the resize we
+        # make inside resizeEvent from recursing.
+        self._adjusting_aspect = False
+        self.setMinimumSize(640, 480)  # 4:3
+        self.resize(800, 600)  # 4:3
 
         self._prefs_store = prefs_store
         self._server_controller = server_controller
@@ -203,6 +214,21 @@ class SettingsDialog(QDialog):
         outer.addLayout(bottom)
 
     # --- Persistence helper ------------------------------------------------------------------
+
+    def resizeEvent(self, event):  # type: ignore[no-untyped-def]
+        # Lock the window to 4:3: after any resize, snap the height to 3/4 of the current width. The
+        # reentrancy guard stops the resize() below from triggering this handler again in a loop.
+        super().resizeEvent(event)
+        if self._adjusting_aspect:
+            return
+        width = self.width()
+        target_height = round(width * 3 / 4)
+        if abs(target_height - self.height()) > 1:
+            self._adjusting_aspect = True
+            try:
+                self.resize(width, target_height)
+            finally:
+                self._adjusting_aspect = False
 
     def _save(self, new_prefs: UserPreferences) -> None:
         self._prefs = new_prefs
@@ -1044,8 +1070,6 @@ class SettingsDialog(QDialog):
         return tab
 
     def _on_check_now(self) -> None:
-        from searchmob_desktop.update import VersionTag
-
         # One check at a time: disabling the button stops rapid clicks from stacking concurrent
         # workers (and duplicate result dialogs). Re-enabled when the check finishes or fails.
         self._check_now_btn.setEnabled(False)
@@ -1058,18 +1082,23 @@ class SettingsDialog(QDialog):
 
         def _on_finished(info_obj: object) -> None:
             self._check_now_btn.setEnabled(True)
-            stamped = replace(self._prefs, last_update_check_ms=int(time.time() * 1000))
-            self._save(stamped)
-            if not isinstance(info_obj, UpdateInfo):
+            parsed = VersionTag.parse(__version__)
+            current = parsed.to_version_code() if parsed else 0
+            info = info_obj if isinstance(info_obj, UpdateInfo) else None
+            # Persist the throttle stamp and the pending-update fields together, so the in-app and
+            # served-page banners pick up (or clear) the result of this manual check on next read.
+            newer = info if (info is not None and info.is_newer_than(current)) else None
+            self._prefs = reconcile_pending_update(
+                self._prefs, newer, stamped=int(time.time() * 1000)
+            )
+            self._save(self._prefs)
+            if info is None:
                 QMessageBox.warning(
                     self,
                     "Update check failed",
                     f"Could not reach GitHub. Releases page: {RELEASES_PAGE_URL}",
                 )
                 return
-            info: UpdateInfo = info_obj
-            parsed = VersionTag.parse(__version__)
-            current = parsed.to_version_code() if parsed else 0
             if info.is_newer_than(current):
                 v = info.latest_version
                 QMessageBox.information(

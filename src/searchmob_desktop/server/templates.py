@@ -75,6 +75,14 @@ _PAGE_CSS = (
     ".settings-link:hover{border-color:var(--accent);color:var(--accent)}"
     ".settings-link+.theme-toggle{margin-left:0}"
     ".topbar .spacer{margin-left:auto}"
+    # Owner-only "update available" banner, pinned above the top bar. Accent fill so it reads as a
+    # notice without an icon set; the action is a high-contrast pill linking to the release.
+    ".updatebar{display:flex;align-items:center;gap:12px;padding:9px 18px;background:var(--accent);"
+    "color:#fff;font-size:13px}"
+    ".updatebar .msg{font-weight:600}"
+    ".updatebar .btn{margin-left:auto;background:#fff;color:var(--accent);border-radius:16px;"
+    "padding:5px 14px;font-weight:700;text-decoration:none;white-space:nowrap}"
+    ".updatebar .btn:hover{text-decoration:none;opacity:.92}"
     ".settings{max-width:680px;margin:0 auto;padding:24px 18px 60px}"
     ".settings h1{font-size:24px;margin:8px 0 18px}"
     ".settings .saved{color:#fff;background:var(--accent);display:inline-block;border-radius:6px;"
@@ -252,6 +260,25 @@ def _theme_toggle_button() -> str:
     )
 
 
+def _update_banner(banner: tuple[str, str] | None) -> str:
+    """An "update available" notice bar linking to the new release. Empty when `banner` is None.
+
+    `banner` is `(version, url)`. The server passes it only for the loopback owner (a network
+    visitor cannot install anything and should not see the owner's version), so this renderer just
+    formats it. The link opens the release page; the GUI offers the verified one-click install.
+    """
+    if banner is None:
+        return ""
+    version, url = banner
+    return (
+        '<div class="updatebar" role="status">'
+        f'<span class="msg">SearchMob {escape(version)} is available.</span>'
+        f'<a class="btn" href="{escape(url, quote=True)}" rel="noopener noreferrer">'
+        "Get the update</a>"
+        "</div>"
+    )
+
+
 def _settings_link(show: bool) -> str:
     """A Settings-page link, shown only to the loopback owner (the route itself is owner-only)."""
     if not show:
@@ -283,19 +310,22 @@ def render_home_page(
     settings_link: bool = False,
     rules: RankingRules | None = None,
     editable: bool = False,
+    update_banner: tuple[str, str] | None = None,
 ) -> str:
     """The home page: a centered search box plus the OpenSearch link.
 
     `settings_link` adds a Settings link to the top bar; the server passes True only for the
     loopback owner, since the Settings route is owner-only. `rules` + `editable` add a scope (lens)
     selector below the search box for the loopback owner, so a scope can be chosen before searching
-    (the selector renders only when at least one lens exists).
+    (the selector renders only when at least one lens exists). `update_banner` is `(version, url)`
+    for the owner-only "update available" notice (None to omit).
     """
     active_rules = rules if rules is not None else RankingRules()
     scope = _scope_bar(active_rules) if editable else ""
     head = _page_head("SearchMob")
     body = (
         '<body data-page="home">'
+        f"{_update_banner(update_banner)}"
         '<div class="topbar">'
         '<span class="logo">SearchMob</span>'
         f"{_settings_link(settings_link)}"
@@ -448,6 +478,7 @@ def render_results_page(
     vertical: str = "web",
     settings_link: bool = False,
     link_builder: Callable[[int, str], str] | None = None,
+    update_banner: tuple[str, str] | None = None,
 ) -> str:
     """The results page. Empty/blank query -> a placeholder; otherwise -> the merged results.
 
@@ -473,6 +504,7 @@ def render_results_page(
 
     parts: list[str] = []
     parts.append('<body data-page="results">')
+    parts.append(_update_banner(update_banner))
     parts.append('<div class="topbar">')
     parts.append('<a href="/" class="logo">SearchMob</a>')
     parts.append('<form action="/search" method="get" class="searchbox">')
