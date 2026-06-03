@@ -40,6 +40,12 @@ _URL_ROLE = Qt.ItemDataRole.UserRole + 2
 _SNIPPET_ROLE = Qt.ItemDataRole.UserRole + 3
 _ENGINE_ROLE = Qt.ItemDataRole.UserRole + 4
 
+# Infinite scroll: the view holds the whole ranked pool but only adds rows a window at a time,
+# growing as the user nears the bottom. No new search happens; the pool is already in memory.
+# Matches the served page and Android reveal sizes.
+_REVEAL_INITIAL = 10
+_REVEAL_STEP = 10
+
 
 class _ResultDelegate(QStyledItemDelegate):
     """Paint a result row: title (bold), URL (muted), snippet (small), engine (badge color)."""
@@ -162,6 +168,14 @@ class ResultsView(QListView):
         self.setMouseTracking(True)  # so hover repaints the card under the cursor
         self.setSpacing(4)
         self.setVerticalScrollMode(QListView.ScrollMode.ScrollPerPixel)
+        # The full ranked pool; `_revealed` rows of it are currently in the model.
+        self._all_results: list[SearchResult] = []
+        self._revealed = 0
+        # Grow the visible window when the user scrolls near the bottom, and top up when the list is
+        # too short to scroll (so a small pool past the initial window is still reachable).
+        scrollbar = self.verticalScrollBar()
+        scrollbar.valueChanged.connect(self._maybe_reveal_more)
+        scrollbar.rangeChanged.connect(self._fill_if_unscrollable)
         # Single left-click opens the result, matching the served page (a plain link) so a result
         # is never "unclickable". `clicked` is the single-click signal; `activated` is kept for the
         # keyboard path (Enter) and platforms whose style activates on a single click. Right-click
@@ -194,9 +208,16 @@ class ResultsView(QListView):
         menu.exec(event.globalPos())
 
     def set_results(self, results: Sequence[SearchResult]) -> None:
-        """Replace the model contents with `results`."""
+        """Hold the full ranked pool and reveal the first window; the rest loads in on scroll."""
+        self._all_results = list(results)
+        self._revealed = 0
         self._model.clear()
-        for item in results:
+        self._reveal(_REVEAL_INITIAL)
+
+    def _reveal(self, count: int) -> None:
+        """Append up to `count` more rows from the pool to the model."""
+        end = min(self._revealed + count, len(self._all_results))
+        for item in self._all_results[self._revealed : end]:
             row = QStandardItem()
             row.setData(item.title, _TITLE_ROLE)
             row.setData(item.url, _URL_ROLE)
@@ -205,13 +226,44 @@ class ResultsView(QListView):
             # Accessible / screen-reader label: title + url in one string.
             row.setData(f"{item.title}\n{item.url}", Qt.ItemDataRole.DisplayRole)
             self._model.appendRow(row)
+        self._revealed = end
+
+    def _has_more(self) -> bool:
+        return self._revealed < len(self._all_results)
+
+    def _maybe_reveal_more(self, value: int) -> None:
+        """Reveal the next window when the scroll position is within ~two rows of the bottom."""
+        if not self._has_more():
+            return
+        scrollbar = self.verticalScrollBar()
+        # `singleStep` is roughly one pixel in per-pixel mode, so use a fixed pixel threshold.
+        if value >= scrollbar.maximum() - 96:
+            self._reveal(_REVEAL_STEP)
+
+    def _fill_if_unscrollable(self, _minimum: int, maximum: int) -> None:
+        """If the revealed rows do not fill the viewport, reveal more so the tail stays reachable.
+
+        Without this, a pool slightly larger than the initial window but too short to scroll would
+        strand its tail (no scroll events fire to trigger the next reveal). Only acts on a shown
+        view (a hidden one has no viewport to fill, and would otherwise reveal the whole pool).
+        """
+        if maximum == 0 and self.isVisible() and self._has_more():
+            self._reveal(_REVEAL_STEP)
 
     def clear(self) -> None:
+        self._all_results = []
+        self._revealed = 0
         self._model.clear()
 
     @property
     def result_count(self) -> int:
+        """Number of rows currently revealed in the model (not the full pool size)."""
         return self._model.rowCount()
+
+    @property
+    def total_count(self) -> int:
+        """Size of the full ranked pool held for incremental reveal."""
+        return len(self._all_results)
 
     def _on_activated(self, index: QModelIndex) -> None:
         url = str(index.data(_URL_ROLE) or "")

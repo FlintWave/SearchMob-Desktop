@@ -16,7 +16,7 @@ from collections.abc import Awaitable, Callable, Sequence
 import uvicorn
 
 from searchmob_desktop.data.history import HistoryEntry
-from searchmob_desktop.engines import EngineFn
+from searchmob_desktop.engines import DEFAULT_POOL_SIZE, EngineFn
 from searchmob_desktop.engines.correct import SpellCorrector
 from searchmob_desktop.engines.rank import RankingRules
 from searchmob_desktop.engines.wiki_summary import SummaryBox
@@ -49,7 +49,7 @@ def serve(
     ai_slop_mode: str = "off",
     max_query_length: int = MAX_QUERY_LENGTH,
     max_suggestions: int = MAX_SUGGESTIONS,
-    max_results: int = 10,
+    max_results: int = DEFAULT_POOL_SIZE,
     timeout_seconds: float = 5.0,
     access_token: str | None = None,
     allowed_hosts: frozenset[str] = frozenset(),

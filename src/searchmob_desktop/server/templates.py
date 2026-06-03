@@ -171,6 +171,10 @@ _PAGE_CSS = (
     ".didyoumean{font-size:15px;margin:2px 0 18px}"
     ".didyoumean a{font-weight:600;font-style:italic}"
     ".result{margin:0 0 26px}"
+    # Infinite scroll hides results past the first reveal window; the reveal script unhides them in
+    # batches as the sentinel scrolls into view. With JS off, the rule is harmless and all show.
+    ".result.is-collapsed{display:none}"
+    ".reveal-sentinel{height:1px}"
     ".result .url{color:var(--url);font-size:13px;white-space:nowrap;overflow:hidden;"
     "text-overflow:ellipsis}"
     ".result .title{display:block;font-size:20px;line-height:1.3;margin:1px 0 3px}"
@@ -233,6 +237,29 @@ _THEME_TOGGLE_JS = (
     "document.documentElement.setAttribute('data-theme',n);"
     "try{localStorage.setItem('sm-theme',n);}catch(e){}label();};"
     "label();"
+    "})();"
+)
+
+# Infinite scroll: the page renders the whole ranked pool but hides results past the first window;
+# this watches a sentinel at the bottom and unhides the next batch as it scrolls into view. No new
+# request (the pool is already in the page), nothing stored, and with JS off every result shows.
+_REVEAL_SIZE = 10
+_REVEAL_STEP = 10
+_REVEAL_JS = (
+    "(function(){"
+    f"var step={_REVEAL_STEP};"
+    "var sentinel=document.querySelector('.reveal-sentinel');"
+    "if(!sentinel)return;"
+    "function more(){"
+    "var h=document.querySelectorAll('.result.is-collapsed');"
+    "for(var i=0;i<step&&i<h.length;i++){h[i].classList.remove('is-collapsed');}"
+    "if(document.querySelectorAll('.result.is-collapsed').length===0){"
+    "o.disconnect();sentinel.remove();}"
+    "}"
+    "var o=new IntersectionObserver(function(es){"
+    "es.forEach(function(e){if(e.isIntersecting){more();}});"
+    "},{rootMargin:'300px'});"
+    "o.observe(sentinel);"
     "})();"
 )
 
@@ -544,7 +571,11 @@ def render_results_page(
         if editable:
             parts.append(_scope_bar(active_rules))
         for index, result in enumerate(results_list):
-            parts.append('<div class="result">')
+            # Results past the first reveal window start collapsed; the reveal script unhides them
+            # in batches on scroll. The full list is still in the DOM, so click positions (and the
+            # owner's /click training links) stay aligned with the rendered order.
+            collapsed = " is-collapsed" if index >= _REVEAL_SIZE else ""
+            parts.append(f'<div class="result{collapsed}">')
             parts.append(f'<div class="url">{escape(_display_url(result.url))}</div>')
             if is_safe_http_url(result.url):
                 # rel=noreferrer backs up the Referrer-Policy header so the query (in the loopback
@@ -571,8 +602,12 @@ def render_results_page(
             if editable:
                 parts.append(_rank_controls(result.url, active_rules))
             parts.append("</div>")
+        if len(results_list) > _REVEAL_SIZE:
+            parts.append('<div class="reveal-sentinel" aria-hidden="true"></div>')
 
     parts.append("</div>")
+    if len(results_list) > _REVEAL_SIZE:
+        parts.append(f"<script>{_REVEAL_JS}</script>")
     parts.append(f"<script>{_THEME_TOGGLE_JS}</script>")
     parts.append("</body>")
     return "<!DOCTYPE html><html lang='en'>" + head + "".join(parts) + "</html>"

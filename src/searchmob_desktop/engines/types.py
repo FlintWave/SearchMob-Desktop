@@ -13,6 +13,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+# The ranked POOL size a search holds, distinct from the REVEAL window the UI shows first. The
+# aggregator ranks and returns up to this many merged results; the GUI, served page, and Android
+# list reveal a smaller window and grow it on scroll (infinite scroll) without re-querying. Kept
+# modest so the per-engine fan-out stays bounded; a short first page just contributes less.
+DEFAULT_POOL_SIZE = 40
+
 
 @dataclass(frozen=True, slots=True)
 class SearchResult:

@@ -27,6 +27,7 @@ from searchmob_desktop.data.crypto.wrap import KeyringDekWrapper
 from searchmob_desktop.data.history_factory import build_history_store
 from searchmob_desktop.data.ranking_store import load_ranking_rules, save_ranking_rules
 from searchmob_desktop.engines import (
+    DEFAULT_POOL_SIZE,
     EngineContext,
     EngineFn,
     aggregate,
@@ -124,7 +125,9 @@ def _build_engines() -> list[EngineFn]:
 @app.command()
 def search(
     query: str = typer.Argument(..., help="What to search for."),
-    max_results: int = typer.Option(10, "--max-results", "-n", help="Max merged results to show."),
+    max_results: int = typer.Option(
+        DEFAULT_POOL_SIZE, "--max-results", "-n", help="Size of the ranked result pool to show."
+    ),
     timeout: float = typer.Option(5.0, "--timeout", help="Per-engine HTTP timeout, in seconds."),
 ) -> None:
     """Run a one-shot metasearch across the configured engines and print the merged results.
@@ -156,7 +159,7 @@ def serve(
     port: int = typer.Option(8787, help="Bind port."),
     timeout: float = typer.Option(5.0, "--timeout", help="Per-engine HTTP timeout, in seconds."),
     max_results: int = typer.Option(
-        10, "--max-results", "-n", help="Max merged results returned per query."
+        DEFAULT_POOL_SIZE, "--max-results", "-n", help="Size of the ranked result pool per query."
     ),
 ) -> None:
     """Start the local HTTP server so a browser can use SearchMob as its search engine.

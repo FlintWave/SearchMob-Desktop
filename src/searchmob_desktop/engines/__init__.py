@@ -18,10 +18,15 @@ from searchmob_desktop.engines.mojeek_api import fetch_mojeek_api
 from searchmob_desktop.engines.mwmbl import fetch_mwmbl
 from searchmob_desktop.engines.normalize import normalize_url, strip_tracking_params
 from searchmob_desktop.engines.proxy import USER_AGENTS, make_privacy_client
-from searchmob_desktop.engines.types import EngineContext, SearchResult
+from searchmob_desktop.engines.types import (
+    DEFAULT_POOL_SIZE,
+    EngineContext,
+    SearchResult,
+)
 from searchmob_desktop.engines.wikipedia import fetch_wikipedia
 
 __all__ = [
+    "DEFAULT_POOL_SIZE",
     "USER_AGENTS",
     "EngineContext",
     "EngineFn",
