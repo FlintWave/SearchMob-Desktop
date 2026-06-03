@@ -3,6 +3,16 @@
 All notable changes to SearchMob Desktop are documented here. The version scheme is Ubuntu-style
 `YY.MM.VV` and releases are tagged `vYY.MM.VV`.
 
+## 26.06.04 — 2026-06-03
+
+### Changed
+- **More relevant results.** Ranking now scores how well each result actually matches your query, not
+  just which engines returned it, so off-topic pages that happened to rank highly on one engine are
+  pushed down. Results written in a different alphabet than your query (for example Cyrillic results
+  for a Latin-script search) are demoted, in whatever language you search in. The adjustment only
+  ever moves weaker or wrong-language results down; it never promotes keyword-stuffed pages over the
+  results several engines agree on, and your pin/raise/lower/block rules still take precedence.
+
 ## 26.06.03 — 2026-06-03
 
 ### Fixed
