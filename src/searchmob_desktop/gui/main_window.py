@@ -10,9 +10,11 @@ the GUI thread via the worker's `finished` signal.
 from __future__ import annotations
 
 import asyncio
+import sys
 import time
 from html import escape
 from importlib.resources import as_file, files
+from pathlib import Path
 
 from PySide6.QtCore import Qt, QThreadPool, QTimer, QUrl, Signal
 from PySide6.QtGui import QAction, QDesktopServices, QIcon, QKeySequence
@@ -42,7 +44,12 @@ from searchmob_desktop.data.personalization_store import (
     save_personalization,
 )
 from searchmob_desktop.data.ranking_store import load_ranking_rules, save_ranking_rules
-from searchmob_desktop.engines import EngineContext, SearchResult, aggregate
+from searchmob_desktop.engines import (
+    EngineContext,
+    SearchResult,
+    aggregate,
+    make_privacy_client,
+)
 from searchmob_desktop.engines.correct import start_background_corrector
 from searchmob_desktop.engines.local_llm import LlmConfig, stream_answer
 from searchmob_desktop.engines.rank import (
@@ -71,6 +78,14 @@ from searchmob_desktop.gui.theme import DARK_PALETTE, active_palette, apply_them
 from searchmob_desktop.gui.workers import AsyncWorker
 from searchmob_desktop.prefs import JsonPreferencesStore
 from searchmob_desktop.server import LOOPBACK_HOST
+from searchmob_desktop.update import (
+    VersionTag,
+    check_if_due,
+    fetch_latest,
+    reconcile_pending_update,
+)
+from searchmob_desktop.update_download import default_download_dir, download_and_verify
+from searchmob_desktop.version import __version__
 
 
 def app_icon() -> QIcon:
@@ -159,6 +174,13 @@ class MainWindow(QMainWindow):
         outer = QVBoxLayout(central)
         outer.setContentsMargins(20, 16, 20, 12)
         outer.setSpacing(12)
+
+        # "Update available" banner, pinned at the very top (hidden until a check finds a newer
+        # release). Surfaced from persisted prefs on launch and from the background check below.
+        self._pending_update: tuple[str, str] | None = None
+        self._update_notified = False
+        self._update_banner = self._build_update_banner()
+        outer.addWidget(self._update_banner)
 
         # Search bar row: a roomy field with a prominent accent-filled action button.
         search_row = QHBoxLayout()
@@ -311,6 +333,11 @@ class MainWindow(QMainWindow):
         # seeing (when the saved onboarding revision is behind the app's current one).
         if not prefs.onboarding_completed or prefs.onboarding_version < ONBOARDING_VERSION:
             QTimer.singleShot(0, self._show_onboarding)
+
+        # Surface a pending update found by an earlier check (persisted in prefs). A fresh throttled
+        # check is kicked off on first show (see showEvent), so it only runs for a real launch.
+        self._update_check_started = False
+        self._surface_pending_update_from_prefs(prefs)
 
     def _show_onboarding(self) -> None:
         from searchmob_desktop.gui.onboarding_dialog import OnboardingDialog
@@ -484,6 +511,9 @@ class MainWindow(QMainWindow):
 
         tray.setContextMenu(menu)
         tray.activated.connect(self._on_tray_activated)
+        # Clicking the "update available" notification starts the update. messageClicked does not
+        # say which fired, so _on_notification_clicked no-ops unless an update is actually pending.
+        tray.messageClicked.connect(self._on_notification_clicked)
         tray.show()
         self._tray = tray
 
@@ -506,6 +536,179 @@ class MainWindow(QMainWindow):
     def _quit_from_tray(self) -> None:
         self._really_quit = True
         self.close()
+
+    # --- Update notifier ---------------------------------------------------------------------
+
+    def _build_update_banner(self) -> QFrame:
+        """A dismissible "update available" bar with an Update button and a close affordance."""
+        bar = QFrame()
+        bar.setObjectName("updateBanner")
+        row = QHBoxLayout(bar)
+        row.setContentsMargins(14, 8, 8, 8)
+        row.setSpacing(10)
+        self._update_label = QLabel("An update is available.")
+        self._update_btn = QPushButton("Update")
+        self._update_btn.clicked.connect(self._on_update_clicked)
+        dismiss = QPushButton("✕")  # MULTIPLICATION X, a compact close glyph
+        dismiss.setProperty("role", "dismiss")
+        dismiss.setToolTip("Dismiss until the next check")
+        dismiss.setFixedWidth(34)
+        dismiss.clicked.connect(self._update_banner_dismiss)
+        row.addWidget(self._update_label, stretch=1)
+        row.addWidget(self._update_btn)
+        row.addWidget(dismiss)
+        bar.hide()
+        return bar
+
+    @staticmethod
+    def _current_version_code() -> int:
+        parsed = VersionTag.parse(__version__)
+        return parsed.to_version_code() if parsed is not None else 0
+
+    def _surface_pending_update_from_prefs(self, prefs: object) -> None:
+        """Show the banner for a prefs-recorded pending update, if still newer than this build."""
+        version = getattr(prefs, "pending_update_version", "")
+        url = getattr(prefs, "pending_update_url", "")
+        if not version or not url:
+            return
+        parsed = VersionTag.parse(version)
+        if parsed is None or parsed.to_version_code() <= self._current_version_code():
+            return
+        # Notify on launch too: the app being open with an update available is exactly the case the
+        # system notification is for. _surface_update guards against repeating it within a session.
+        self._surface_update(version, url, notify=True)
+
+    def _surface_update(self, version: str, url: str, *, notify: bool) -> None:
+        """Show/refresh the banner and optionally post a one-per-session system notification."""
+        self._pending_update = (version, url)
+        self._update_label.setText(f"SearchMob {version} is available.")
+        self._update_btn.setEnabled(True)
+        self._update_btn.setText("Update")
+        self._update_banner.show()
+        if notify and not self._update_notified:
+            self._update_notified = True
+            self._post_update_notification(version)
+
+    def _post_update_notification(self, version: str) -> None:
+        """Post a native system notification through the tray icon, when one is available."""
+        if self._tray is not None and QSystemTrayIcon.supportsMessages():
+            self._tray.showMessage(
+                "Update available",
+                f"SearchMob {version} is available. Click here to update.",
+                app_icon(),
+                8000,
+            )
+
+    def _on_notification_clicked(self) -> None:
+        """The tray notification was clicked: bring the window forward and start the update."""
+        if self._pending_update is None:
+            return
+        self._show_from_tray()
+        self._on_update_clicked()
+
+    def _update_banner_dismiss(self) -> None:
+        # Hide for this session only. The pending record stays in prefs, so the banner returns on
+        # the next launch or check until the user actually updates.
+        self._update_banner.hide()
+
+    def showEvent(self, event):  # type: ignore[no-untyped-def]
+        # Kick off the throttled update check the first time the window is shown (a real launch),
+        # not on construction, so headless/widget tests that never show it stay offline.
+        super().showEvent(event)
+        if not self._update_check_started:
+            self._update_check_started = True
+            QTimer.singleShot(0, self._start_update_check)
+
+    def _start_update_check(self) -> None:
+        """Run the throttled GitHub check off-thread; surface a newer release if found."""
+
+        async def _probe() -> object:
+            prefs = self._prefs_store.load()
+            now_ms = int(time.time() * 1000)
+            info, stamped = await check_if_due(
+                prefs,
+                self._current_version_code(),
+                now_ms=now_ms,
+                client_factory=lambda: make_privacy_client(4.0),
+            )
+            return prefs, info, stamped
+
+        worker: AsyncWorker[object] = AsyncWorker(_probe)
+        worker.signals.finished.connect(self._on_update_check_done)
+        worker.signals.failed.connect(lambda _msg: None)  # fail-soft: a check error stays silent
+        worker.start(self._pool)
+
+    def _on_update_check_done(self, payload: object) -> None:
+        """Persist the check result (stamp + pending fields) and surface a newer release."""
+        if not (isinstance(payload, tuple) and len(payload) == 3):
+            return
+        prefs, info, stamped = payload
+        reconciled = reconcile_pending_update(prefs, info, stamped=stamped)
+        if reconciled != prefs:
+            try:
+                self._prefs_store.save(reconciled)
+            except OSError:
+                pass
+        if info is not None:
+            self._surface_update(info.latest_version.formatted(), info.release_url, notify=True)
+
+    def _on_update_clicked(self) -> None:
+        """Fetch-and-hand-off: download + verify the installer, or open the release page."""
+        if self._pending_update is None:
+            return
+        version, url = self._pending_update
+        self._update_btn.setEnabled(False)
+        self._update_label.setText(f"Downloading SearchMob {version} …")
+        system = sys.platform
+
+        async def _run() -> object:
+            # A generous read timeout: the installer is large, and httpx applies the timeout per
+            # network operation (max gap between bytes), not to the whole transfer.
+            async with make_privacy_client(60.0) as client:
+                info = await fetch_latest(client)
+                if info is None:
+                    return ("page", url)
+                asset = info.asset_for_system(system)
+                sums = info.checksums_asset()
+                if asset is None or sums is None:
+                    # Linux (multiple package formats) or a release without a usable asset/checksum:
+                    # hand off to the release page so the user picks the right download.
+                    return ("page", info.release_url)
+                path = await download_and_verify(client, asset, sums, default_download_dir())
+                return ("file", str(path))
+
+        worker: AsyncWorker[object] = AsyncWorker(_run)
+        worker.signals.finished.connect(
+            lambda payload, v=version, u=url: self._on_update_download_done(payload, v, u)
+        )
+        worker.signals.failed.connect(
+            lambda msg, v=version, u=url: self._on_update_download_failed(msg, v, u)
+        )
+        worker.start(self._pool)
+
+    def _on_update_download_done(self, payload: object, version: str, url: str) -> None:
+        self._update_btn.setEnabled(True)
+        self._update_label.setText(f"SearchMob {version} is available.")
+        kind, value = payload if isinstance(payload, tuple) and len(payload) == 2 else ("page", url)
+        if kind == "file":
+            # Hand off to the OS: opening the installer mounts the .dmg / launches the .msi. While
+            # builds are unsigned, Gatekeeper / SmartScreen will still prompt; that is unavoidable.
+            if not QDesktopServices.openUrl(QUrl.fromLocalFile(value)):
+                # Could not auto-open it: reveal the folder so the user can run it themselves.
+                QDesktopServices.openUrl(QUrl.fromLocalFile(str(Path(value).parent)))
+            self.statusBar().showMessage(f"Downloaded installer: {value}")
+        else:
+            QDesktopServices.openUrl(QUrl(value))
+
+    def _on_update_download_failed(self, message: str, version: str, url: str) -> None:
+        self._update_btn.setEnabled(True)
+        self._update_label.setText(f"SearchMob {version} is available.")
+        QMessageBox.warning(
+            self,
+            "Update download failed",
+            f"{message}\n\nOpening the release page so you can download it manually.",
+        )
+        QDesktopServices.openUrl(QUrl(url))
 
     # --- Search ------------------------------------------------------------------------------
 
@@ -820,6 +1023,13 @@ class MainWindow(QMainWindow):
         # The personalization toggle / export-import / reset may have changed in Settings; pick up
         # the new enabled state and reload the model (so a live toggle takes effect immediately).
         prefs_after = self._prefs_store.load()
+        # A "Check now" in Settings may have found (or cleared) a pending update; reflect it without
+        # re-notifying (the user is already here). Hide the banner if the pending record is gone.
+        if prefs_after.pending_update_version and prefs_after.pending_update_url:
+            self._surface_pending_update_from_prefs(prefs_after)
+        else:
+            self._pending_update = None
+            self._update_banner.hide()
         self._personalization_enabled = prefs_after.personalization_enabled
         self._personalization = (
             load_personalization()

@@ -12,11 +12,15 @@ from searchmob_desktop.prefs import UserPreferences
 from searchmob_desktop.update import (
     LATEST_RELEASE_API_URL,
     RELEASES_PAGE_URL,
+    SHA256SUMS_ASSET_NAME,
+    ReleaseAsset,
     UpdateInfo,
     VersionTag,
+    asset_for_system,
     check_if_due,
     fetch_latest,
     is_update_check_due,
+    reconcile_pending_update,
 )
 
 # --- VersionTag.parse -------------------------------------------------------------------------
@@ -54,6 +58,11 @@ def test_version_tag_parse_rejects_malformed(raw: str) -> None:
 
 def test_version_code_formula_matches_android() -> None:
     assert VersionTag(26, 5, 1).to_version_code() == 260501
+
+
+def test_version_tag_formatted_is_zero_padded() -> None:
+    assert VersionTag(26, 6, 1).formatted() == "26.06.01"
+    assert VersionTag(26, 12, 10).formatted() == "26.12.10"
 
 
 def test_is_newer_than_compares_codes() -> None:
@@ -130,6 +139,141 @@ async def test_fetch_latest_returns_none_on_oversized_body() -> None:
     respx.get(LATEST_RELEASE_API_URL).respond(200, content=big)
     async with httpx.AsyncClient() as client:
         assert await fetch_latest(client) is None
+
+
+# --- assets -----------------------------------------------------------------------------------
+
+
+def _release_json_with_assets() -> dict[str, object]:
+    return {
+        "tag_name": "v26.07.00",
+        "html_url": "https://example.test/r/v26.07.00",
+        "assets": [
+            {
+                "name": "SearchMob-26.07.00.dmg",
+                "browser_download_url": "https://example.test/dl/app.dmg",
+                "size": 12345,
+            },
+            {
+                "name": "SearchMob-26.07.00.msi",
+                "browser_download_url": "https://example.test/dl/app.msi",
+            },
+            {
+                "name": "SearchMob_26.07.00_amd64.deb",
+                "browser_download_url": "https://example.test/dl/app.deb",
+            },
+            {
+                "name": "SHA256SUMS",
+                "browser_download_url": "https://example.test/dl/SHA256SUMS",
+            },
+            # Malformed entries (missing url / not a dict) are skipped, not fatal.
+            {"name": "broken-no-url"},
+            "not-a-dict",
+        ],
+    }
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_fetch_latest_parses_assets() -> None:
+    respx.get(LATEST_RELEASE_API_URL).respond(200, json=_release_json_with_assets())
+    async with httpx.AsyncClient() as client:
+        info = await fetch_latest(client)
+    assert info is not None
+    names = [a.name for a in info.assets]
+    assert names == [
+        "SearchMob-26.07.00.dmg",
+        "SearchMob-26.07.00.msi",
+        "SearchMob_26.07.00_amd64.deb",
+        "SHA256SUMS",
+    ]
+    assert info.assets[0].size == 12345
+    assert info.assets[1].size == 0  # missing size defaults to 0
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_fetch_latest_tolerates_missing_assets_field() -> None:
+    respx.get(LATEST_RELEASE_API_URL).respond(200, json={"tag_name": "v26.07.00"})
+    async with httpx.AsyncClient() as client:
+        info = await fetch_latest(client)
+    assert info is not None
+    assert info.assets == ()
+
+
+def _info_with_assets() -> UpdateInfo:
+    return UpdateInfo(
+        latest_version=VersionTag(26, 7, 0),
+        release_url="https://example.test/r",
+        assets=(
+            ReleaseAsset("SearchMob.dmg", "https://example.test/app.dmg"),
+            ReleaseAsset("SearchMob.msi", "https://example.test/app.msi"),
+            ReleaseAsset("SearchMob.deb", "https://example.test/app.deb"),
+            ReleaseAsset(SHA256SUMS_ASSET_NAME, "https://example.test/SHA256SUMS"),
+        ),
+    )
+
+
+def test_asset_for_system_picks_dmg_on_macos() -> None:
+    asset = _info_with_assets().asset_for_system("darwin")
+    assert asset is not None and asset.name == "SearchMob.dmg"
+
+
+def test_asset_for_system_picks_msi_on_windows() -> None:
+    asset = _info_with_assets().asset_for_system("win32")
+    assert asset is not None and asset.name == "SearchMob.msi"
+
+
+def test_asset_for_system_returns_none_on_linux() -> None:
+    # Linux ships several package formats; the GUI falls back to the release page rather than guess.
+    assert _info_with_assets().asset_for_system("linux") is None
+
+
+def test_asset_for_system_returns_none_when_no_match() -> None:
+    assets = (ReleaseAsset("only.deb", "https://example.test/app.deb"),)
+    assert asset_for_system(assets, "darwin") is None
+
+
+def test_checksums_asset_found_and_absent() -> None:
+    assert _info_with_assets().checksums_asset() is not None
+    no_sums = UpdateInfo(VersionTag(26, 7, 0), "u", assets=(ReleaseAsset("a.dmg", "u"),))
+    assert no_sums.checksums_asset() is None
+
+
+# --- reconcile_pending_update -----------------------------------------------------------------
+
+
+def test_reconcile_sets_pending_when_update_found() -> None:
+    prefs = UserPreferences(last_update_check_ms=0)
+    info = UpdateInfo(VersionTag(26, 7, 0), "https://example.test/r/v26.07.00")
+    out = reconcile_pending_update(prefs, info, stamped=10**12)
+    assert out.pending_update_version == "26.07.00"
+    assert out.pending_update_url == "https://example.test/r/v26.07.00"
+    assert out.last_update_check_ms == 10**12
+
+
+def test_reconcile_clears_pending_when_check_ran_and_up_to_date() -> None:
+    prefs = UserPreferences(
+        last_update_check_ms=0,
+        pending_update_version="26.07.00",
+        pending_update_url="https://example.test/old",
+    )
+    out = reconcile_pending_update(prefs, None, stamped=10**12)
+    assert out.pending_update_version == ""
+    assert out.pending_update_url == ""
+    assert out.last_update_check_ms == 10**12
+
+
+def test_reconcile_leaves_pending_untouched_when_throttled() -> None:
+    # A throttled no-op (stamped == existing last check) must not wipe a still-valid banner.
+    prefs = UserPreferences(
+        last_update_check_ms=555,
+        pending_update_version="26.07.00",
+        pending_update_url="https://example.test/r",
+    )
+    out = reconcile_pending_update(prefs, None, stamped=555)
+    assert out.pending_update_version == "26.07.00"
+    assert out == prefs
 
 
 # --- throttle ---------------------------------------------------------------------------------

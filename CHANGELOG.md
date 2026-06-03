@@ -3,6 +3,21 @@
 All notable changes to SearchMob Desktop are documented here. The version scheme is Ubuntu-style
 `YY.MM.VV` and releases are tagged `vYY.MM.VV`.
 
+## Unreleased
+
+### Added
+- **You now actually get told when an update is out.** When SearchMob is open and a newer release is
+  available, it posts a system notification and shows a banner across the top of the window; the
+  served search pages show the same banner (only to you, on this device, never to other people on
+  your network). The check still runs about once a day through the privacy proxy and stays opt-out.
+- **One-click update.** Clicking **Update** (in the banner or the notification) downloads the right
+  installer for your OS, verifies it against the release's published SHA-256 checksums, and hands it
+  to your system installer. On Linux, which ships several package formats, it opens the release page
+  so you can pick the one you use. The web banner links straight to the release.
+
+### Changed
+- The **Settings** window is now constrained to a 4:3 aspect ratio.
+
 ## 26.06.01 — 2026-06-02
 
 ### Fixed

@@ -197,6 +197,31 @@ QFrame[role="caveat"] {{
 }}
 QLabel[role="caveat-text"] {{ color: {p.danger_text}; }}
 
+/* "Update available" banner, pinned at the top of the window. Accent fill so it reads as a
+   notice; the Update button keeps its primary styling against it. */
+QFrame#updateBanner {{
+    background-color: {p.accent};
+    border: none;
+    border-radius: 10px;
+}}
+QFrame#updateBanner QLabel {{ background: transparent; color: {p.on_accent}; font-weight: 600; }}
+QFrame#updateBanner QPushButton {{
+    background-color: {p.on_accent};
+    color: {p.accent};
+    border: none;
+    border-radius: 9px;
+    padding: 7px 16px;
+    font-weight: 700;
+}}
+QFrame#updateBanner QPushButton:hover {{ background-color: {p.card_hover}; }}
+QFrame#updateBanner QPushButton[role="dismiss"] {{
+    background: transparent;
+    color: {p.on_accent};
+    padding: 6px 10px;
+    font-weight: 700;
+}}
+QFrame#updateBanner QPushButton[role="dismiss"]:hover {{ background-color: {p.accent_hover}; }}
+
 /* Contextual Wikipedia summary card, above the results. */
 QFrame#summaryCard {{
     background-color: {p.card};

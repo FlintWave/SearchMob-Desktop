@@ -57,6 +57,7 @@ from searchmob_desktop.update import (
     VersionTag,
     check_if_due,
     fetch_latest,
+    reconcile_pending_update,
 )
 from searchmob_desktop.version import __version__
 
@@ -252,7 +253,8 @@ def _run_update_check_in_background(prefs_store: JsonPreferencesStore) -> None:
     """Fire-and-forget the throttled GitHub update check on a thread.
 
     Never blocks server startup, never crashes the CLI: a bare `except Exception` swallows
-    anything bubbling out (network, serialization, prefs IO). Prints an update banner via
+    anything bubbling out (network, serialization, prefs IO). Persists the throttle stamp and the
+    pending-update fields (which the served-page banner reads) and prints an update banner via
     `console` if a newer release is found; otherwise stays silent.
     """
 
@@ -268,8 +270,9 @@ def _run_update_check_in_background(prefs_store: JsonPreferencesStore) -> None:
                     client_factory=lambda: make_privacy_client(4.0),
                 )
             )
-            if stamped != prefs.last_update_check_ms:
-                prefs_store.save(prefs.with_update_check_stamped(stamped))
+            reconciled = reconcile_pending_update(prefs, info, stamped=stamped)
+            if reconciled != prefs:
+                prefs_store.save(reconciled)
             if info is not None:
                 _print_update_available(info)
         except Exception:

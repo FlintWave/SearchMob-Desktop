@@ -74,6 +74,8 @@ from searchmob_desktop.server.templates import (
     render_results_page,
     render_settings_page,
 )
+from searchmob_desktop.update import VersionTag
+from searchmob_desktop.version import __version__
 
 LOOPBACK_HOST = "127.0.0.1"
 DEFAULT_PORT = 8787
@@ -95,6 +97,12 @@ _HISTORY_VIEW_LIMIT = 50
 
 _SUGGESTIONS_CONTENT_TYPE = "application/x-suggestions+json"
 _OPENSEARCH_CONTENT_TYPE = "application/opensearchdescription+xml"
+
+# The running app's version code, used to decide whether a persisted pending-update record is still
+# newer than what is installed (so the owner-only banner self-clears after an in-place update even
+# before the next background check rewrites prefs). 0 if the version string is unparseable.
+_parsed_version = VersionTag.parse(__version__)
+_CURRENT_VERSION_CODE = _parsed_version.to_version_code() if _parsed_version is not None else 0
 
 
 # A source of autocomplete suggestions for a partial query. Implementations MUST be fail-soft:
@@ -506,6 +514,7 @@ def build_app(
             settings_link=_is_settings_owner(request),
             rules=rules_provider(),
             editable=_is_owner(request),
+            update_banner=_owner_update_banner(request),
         )
         return Response(body, media_type="text/html; charset=utf-8")
 
@@ -523,6 +532,23 @@ def build_app(
         # never reorders results for a network visitor (and never exposes the owner's bubble).
         client_host = request.client.host if request.client is not None else ""
         return is_loopback_host(client_host)
+
+    def _owner_update_banner(request: Request) -> tuple[str, str] | None:
+        # The "update available" banner is owner-only: a network visitor cannot install anything and
+        # should not learn the owner's version. Read live from prefs (set by the background check),
+        # and only show it when the pending version still parses newer than what is installed.
+        if not _is_loopback_request(request):
+            return None
+        prefs = _load_prefs()
+        if prefs is None:
+            return None
+        version, url = prefs.pending_update_version, prefs.pending_update_url
+        if not version or not url:
+            return None
+        parsed = VersionTag.parse(version)
+        if parsed is None or parsed.to_version_code() <= _CURRENT_VERSION_CODE:
+            return None
+        return version, url
 
     async def _maybe_summary(query: str) -> SummaryBox | None:
         if summary_provider is None or not query.strip():
@@ -581,6 +607,7 @@ def build_app(
             vertical=vertical.value,
             settings_link=_is_settings_owner(request),
             link_builder=link_builder,
+            update_banner=_owner_update_banner(request),
         )
         return Response(body, media_type="text/html; charset=utf-8")
 

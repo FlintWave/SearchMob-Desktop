@@ -88,6 +88,12 @@ class UserPreferences:
     llm_model: str = ""
     update_check_enabled: bool = True
     last_update_check_ms: int = 0
+    # The newest published release the last update check found (empty when none / up to date). These
+    # drive the in-app and served-page "update available" banners and the tray notification so a
+    # found update survives a restart until a later check supersedes or clears it. Non-secret: just
+    # a version string and the release URL. Set/cleared via update.reconcile_pending_update.
+    pending_update_version: str = ""
+    pending_update_url: str = ""
     # Set once the first-run setup wizard has been completed or skipped, so it never reappears.
     onboarding_completed: bool = False
     # The onboarding revision the user last saw. The wizard re-appears once after an update that

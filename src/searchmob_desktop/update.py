@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Final
 
 import httpx
@@ -31,11 +31,15 @@ __all__ = [
     "LATEST_RELEASE_API_URL",
     "MAX_RESPONSE_BYTES",
     "RELEASES_PAGE_URL",
+    "SHA256SUMS_ASSET_NAME",
+    "ReleaseAsset",
     "UpdateInfo",
     "VersionTag",
+    "asset_for_system",
     "check_if_due",
     "fetch_latest",
     "is_update_check_due",
+    "reconcile_pending_update",
 ]
 
 LATEST_RELEASE_API_URL: Final = (
@@ -46,10 +50,16 @@ RELEASES_PAGE_URL: Final = "https://github.com/FlintWave/SearchMob-Desktop/relea
 # Throttle window: about one calendar day. Mirrors the Android default.
 DEFAULT_INTERVAL_MS: Final = 24 * 3600 * 1000
 
-# Bounded body read: a GitHub release JSON is a few KiB; anything past 16 KiB
-# is treated as suspect rather than parsed. Matches the bounded-read pattern
+# Bounded body read: a GitHub release JSON carries the tag plus the per-platform asset list
+# (installer download URLs + the SHA256SUMS entry), so it runs larger than the tag-only payload
+# the first cut parsed. 64 KiB comfortably covers a release with a dozen assets while still
+# treating anything past it as suspect rather than parsing it. Matches the bounded-read pattern
 # the security audit codified on the Android side.
-MAX_RESPONSE_BYTES: Final = 16 * 1024
+MAX_RESPONSE_BYTES: Final = 64 * 1024
+
+# The integrity-anchor asset published alongside the installers (see the release workflow). The
+# updater verifies a downloaded installer's SHA-256 against the matching line in this file.
+SHA256SUMS_ASSET_NAME: Final = "SHA256SUMS"
 
 
 @dataclass(frozen=True, slots=True)
@@ -67,6 +77,10 @@ class VersionTag:
 
     def to_version_code(self) -> int:
         return self.year * 10000 + self.month * 100 + self.build
+
+    def formatted(self) -> str:
+        """The canonical `YY.MM.VV` string (zero-padded), matching the version-file format."""
+        return f"{self.year:02d}.{self.month:02d}.{self.build:02d}"
 
     @classmethod
     def parse(cls, tag: str) -> VersionTag | None:
@@ -93,14 +107,60 @@ class VersionTag:
 
 
 @dataclass(frozen=True, slots=True)
+class ReleaseAsset:
+    """One published installer (or the SHA256SUMS file) attached to a GitHub release."""
+
+    name: str
+    download_url: str
+    size: int = 0
+
+
+@dataclass(frozen=True, slots=True)
 class UpdateInfo:
-    """A newer release the user could download."""
+    """A newer release the user could download, plus its published assets."""
 
     latest_version: VersionTag
     release_url: str
+    assets: tuple[ReleaseAsset, ...] = ()
 
     def is_newer_than(self, current_code: int) -> bool:
         return self.latest_version.to_version_code() > current_code
+
+    def asset_for_system(self, system: str) -> ReleaseAsset | None:
+        """The single installer asset for the running platform, or None when it is ambiguous.
+
+        macOS picks the `.dmg`, Windows the `.msi`. Linux is deliberately left to fall back to the
+        release page: this build ships `.deb`, `.rpm`, and `.flatpak`, and nothing in a running
+        instance reliably says which one the user installed, so guessing risks the wrong package.
+        """
+        return asset_for_system(self.assets, system)
+
+    def checksums_asset(self) -> ReleaseAsset | None:
+        """The SHA256SUMS asset used to verify a downloaded installer's integrity, if published."""
+        for asset in self.assets:
+            if asset.name == SHA256SUMS_ASSET_NAME:
+                return asset
+        return None
+
+
+def asset_for_system(assets: tuple[ReleaseAsset, ...], system: str) -> ReleaseAsset | None:
+    """Pick the installer asset matching `system` (a `sys.platform` string), or None.
+
+    Returns the first asset whose name ends with the platform's installer suffix: `.dmg` on macOS
+    (`darwin`), `.msi` on Windows (`win32`/`win...`). Any other platform (Linux included) returns
+    None so the caller opens the release page instead of downloading a possibly-wrong package.
+    """
+    sys_lower = system.lower()
+    if sys_lower.startswith("darwin"):
+        suffix = ".dmg"
+    elif sys_lower.startswith("win"):
+        suffix = ".msi"
+    else:
+        return None
+    for asset in assets:
+        if asset.name.lower().endswith(suffix):
+            return asset
+    return None
 
 
 async def fetch_latest(
@@ -139,7 +199,36 @@ async def fetch_latest(
     if version is None:
         return None
     release_url = html_url if isinstance(html_url, str) and html_url else RELEASES_PAGE_URL
-    return UpdateInfo(latest_version=version, release_url=release_url)
+    return UpdateInfo(
+        latest_version=version,
+        release_url=release_url,
+        assets=_parse_assets(payload.get("assets")),
+    )
+
+
+def _parse_assets(raw: Any) -> tuple[ReleaseAsset, ...]:
+    """Parse the release `assets` array into `ReleaseAsset`s, skipping malformed entries.
+
+    Fail-soft like the rest of the parser: a non-list, or an entry missing a usable name or
+    `browser_download_url`, is simply dropped rather than raising.
+    """
+    if not isinstance(raw, list):
+        return ()
+    assets: list[ReleaseAsset] = []
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        name = entry.get("name")
+        url = entry.get("browser_download_url")
+        if not isinstance(name, str) or not name:
+            continue
+        if not isinstance(url, str) or not url:
+            continue
+        size = entry.get("size")
+        assets.append(
+            ReleaseAsset(name=name, download_url=url, size=size if isinstance(size, int) else 0)
+        )
+    return tuple(assets)
 
 
 def is_update_check_due(
@@ -192,3 +281,27 @@ async def check_if_due(
     if info is None or not info.is_newer_than(current_code):
         return None, now_ms
     return info, now_ms
+
+
+def reconcile_pending_update(
+    prefs: UserPreferences, info: UpdateInfo | None, *, stamped: int
+) -> UserPreferences:
+    """Fold a check result into prefs: stamp the check time and set/clear the pending-update fields.
+
+    `info` is the newer-than-current release (as returned by `check_if_due`), or None. `stamped` is
+    that call's returned timestamp. The pending fields drive the GUI/web banners, so they must both
+    appear when an update is found AND disappear once a check confirms the user is current (e.g.
+    after they updated). They are only cleared when a check actually ran (`stamped` advanced), so a
+    throttled no-op never wipes a still-valid banner.
+    """
+    checked = stamped != prefs.last_update_check_ms
+    base = replace(prefs, last_update_check_ms=stamped) if checked else prefs
+    if info is not None:
+        return replace(
+            base,
+            pending_update_version=info.latest_version.formatted(),
+            pending_update_url=info.release_url,
+        )
+    if checked:
+        return replace(base, pending_update_version="", pending_update_url="")
+    return base
