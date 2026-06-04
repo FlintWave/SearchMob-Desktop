@@ -43,6 +43,12 @@ from searchmob_desktop.engines import (
 )
 from searchmob_desktop.engines.correct import start_background_corrector
 from searchmob_desktop.engines.proxy import make_privacy_client
+from searchmob_desktop.engines.rank import (
+    RankingRules,
+    apply_ranking,
+    host_of_url,
+    parse_scope_token,
+)
 from searchmob_desktop.engines.wiki_summary import summary_for_query
 from searchmob_desktop.prefs import JsonPreferencesStore, UserPreferences
 from searchmob_desktop.server import is_loopback_host
@@ -136,14 +142,33 @@ def search(
     engines are enabled by setting `SEARCHMOB_BRAVE_API_KEY` and / or `SEARCHMOB_MOJEEK_API_KEY` in
     the environment; with no key set the corresponding engine is silently skipped (zero HTTP).
     """
-    ctx = EngineContext(query=query, max_results=max_results, timeout_seconds=timeout)
+    # An inline `+name` token applies a saved scope to this one search (e.g. `keyboards +research`).
+    # It is additive and never persisted: we read the defined scopes only to resolve the token, run
+    # the search on the cleaned query, and (when matched) filter the pool through just that scope so
+    # the CLI stays otherwise-raw. An unmatched `+word` is left in the query as an ordinary term.
+    rules = load_ranking_rules()
+    cleaned, scope = parse_scope_token(query, rules)
+
+    ctx = EngineContext(query=cleaned, max_results=max_results, timeout_seconds=timeout)
     results = asyncio.run(aggregate(ctx, _build_engines()))
+
+    if scope is not None:
+        matched = next((lens for lens in rules.lenses if lens.name == scope), None)
+        if matched is not None:
+            results = apply_ranking(
+                results,
+                RankingRules(lenses=(matched,), active_lens=scope),
+                host_of=lambda r: host_of_url(r.url),
+                text_of=lambda r: f"{r.title} {r.snippet}",
+            )
 
     if not results:
         console.print("[yellow]No results.[/]")
         raise typer.Exit(code=1)
 
-    table = Table(title=f"Results for {query!r}", show_lines=False)
+    if scope is not None:
+        console.print(f"[dim]Scope: {scope}[/]")
+    table = Table(title=f"Results for {cleaned!r}", show_lines=False)
     table.add_column("Rank", justify="right", style="cyan", no_wrap=True)
     table.add_column("Title", style="bold")
     table.add_column("URL", style="blue")

@@ -66,6 +66,7 @@ from searchmob_desktop.engines.rank import (
     apply_ranking,
     host_of_url,
     parse_goggles,
+    parse_scope_token,
     personalize_reorder,
 )
 from searchmob_desktop.engines.rank.personalize import query_terms, update_from_click
@@ -453,6 +454,7 @@ def build_app(
         vertical: Vertical = Vertical.WEB,
         *,
         model: PersonalizationModel | None = None,
+        active_lens: str | None = None,
     ) -> list[SearchResult]:
         if not query.strip() or not engines:
             return []
@@ -474,9 +476,14 @@ def build_app(
             ordered = personalize_reorder(
                 ordered, lambda r: host_of_url(r.url), query, model, now_ms
             )
+        # An inline `+name` scope token (parsed from the query at the route) overrides the saved
+        # active scope for this one request only; the persisted selection is never written.
+        rules = rules_provider()
+        if active_lens is not None:
+            rules = rules.with_active_lens(active_lens)
         return apply_ranking(
             ordered,
-            rules_provider(),
+            rules,
             host_of=lambda r: host_of_url(r.url),
             text_of=lambda r: f"{r.title} {r.snippet}",
             slop_domains=load_slop_domains(),
@@ -576,7 +583,11 @@ def build_app(
         return prefs_saver is not None and is_loopback_host(client_host)
 
     async def search_html(request: Request) -> Response:
-        query = _clamp(request.query_params.get("q"))
+        raw_query = _clamp(request.query_params.get("q"))
+        # An inline `+name` token applies a saved scope to this one search, additively and without
+        # persisting it. The engines, summary, and correction run on the cleaned query; the original
+        # text is echoed in the box so the token round-trips and re-running re-applies the scope.
+        query, scope = parse_scope_token(raw_query, rules_provider())
         vertical = Vertical.from_value(request.query_params.get("vertical"))
         # An explicit `?sort=` wins. Absent it, a non-default vertical keeps its sensible default
         # (e.g. News favors Date); the plain Web view honors the user's configured default sort from
@@ -593,7 +604,7 @@ def build_app(
         # latency to the results path.
         summary_task = asyncio.ensure_future(_maybe_summary(query))
         model = _owner_model(request)
-        results = await _run_metasearch(query, sort_mode, vertical, model=model)
+        results = await _run_metasearch(query, sort_mode, vertical, model=model, active_lens=scope)
         summary = await summary_task
         # When personalization is on for the owner, route result links through `/click` so a click
         # can train the model; everyone else (and a disabled owner) gets the plain destination link.
@@ -602,7 +613,7 @@ def build_app(
             rid = _register_render(query, results)
             link_builder = lambda pos, _url, _rid=rid: f"/click?rid={_rid}&pos={pos}"  # noqa: E731
         body = render_results_page(
-            query,
+            raw_query,
             results,
             is_safe_http_url,
             correction=_correction(query),
@@ -792,13 +803,18 @@ def build_app(
         return RedirectResponse("/settings?saved=1", status_code=303)
 
     async def search_json(request: Request) -> Response:
-        query = _clamp(request.query_params.get("q"))
+        raw_query = _clamp(request.query_params.get("q"))
+        # Same inline `+name` scope token as the HTML route: applied to this request only, with the
+        # engines/correction run on the cleaned query and the original echoed back as `query`.
+        query, scope = parse_scope_token(raw_query, rules_provider())
         vertical = Vertical.from_value(request.query_params.get("vertical"))
         sort_param = request.query_params.get("sort")
         sort_mode = SortMode.from_value(sort_param) if sort_param else default_sort(vertical)
-        results = await _run_metasearch(query, sort_mode, vertical, model=_owner_model(request))
+        results = await _run_metasearch(
+            query, sort_mode, vertical, model=_owner_model(request), active_lens=scope
+        )
         payload = {
-            "query": query,
+            "query": raw_query,
             "results": [asdict(result) for result in results],
             "correction": _correction(query),
         }

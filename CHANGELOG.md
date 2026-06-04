@@ -12,6 +12,11 @@ All notable changes to SearchMob Desktop are documented here. The version scheme
   theme fills the light slot and which fills the dark slot; the quick toggle swaps between them. A
   Text size control raises or lowers the interface and result text in 2pt steps from a 12pt base, and
   the choices are remembered. Reused palettes are credited in `CREDITS.md`.
+- **Inline scope tokens.** Add a `+name` word to a search to run that one query through a saved scope,
+  for example `mechanical keyboards +research`. The token is matched by the scope name's first word
+  (case-insensitive), applied to that search only, and stripped from the query; an unmatched `+word`
+  is left alone as an ordinary term. Works on the command line and on the served `/search` and
+  `/api/search` endpoints, without changing your saved scope selection.
 
 ### Changed
 - **More results with infinite scroll.** Each search now keeps a larger ranked pool and reveals it a
