@@ -51,6 +51,12 @@ class UserPreferences:
     """
 
     theme: str = "system"
+    # Two-slot theming: `theme` is the mode (light/dark/system); these pick which named theme fills
+    # the light slot and the dark slot. Defaults keep the original SearchMob look for upgraders.
+    light_theme: str = "searchmob-light"
+    dark_theme: str = "searchmob-dark"
+    # Base interface font size, in points (12pt default, stepped by 2 via the A-/A+ controls).
+    font_point_size: int = 12
     history_enabled: bool = False
     # Learn a bounded ranking boost from the owner's own result clicks (off by default, opt-in via
     # the first-run wizard or Settings). The learned model is stored encrypted in the vault and is

@@ -3,6 +3,21 @@
 All notable changes to SearchMob Desktop are documented here. The version scheme is Ubuntu-style
 `YY.MM.VV` and releases are tagged `vYY.MM.VV`.
 
+## [Unreleased]
+
+### Added
+- **A theme library with a font-size control.** Settings now offers a slate of themes (the original
+  SearchMob Light/Dark plus GitHub, One Dark, Dracula, Tokyo Night, Catppuccin, Gruvbox, Nord, Rose
+  Pine, and two high-contrast accessibility themes), on both the app and the served page. Pick which
+  theme fills the light slot and which fills the dark slot; the quick toggle swaps between them. A
+  Text size control raises or lowers the interface and result text in 2pt steps from a 12pt base, and
+  the choices are remembered. Reused palettes are credited in `CREDITS.md`.
+
+### Changed
+- **More results with infinite scroll.** Each search now keeps a larger ranked pool and reveals it a
+  window at a time as you scroll, in the app and on the served page, without issuing a new search
+  while pooled results remain.
+
 ## 26.06.04 — 2026-06-03
 
 ### Changed

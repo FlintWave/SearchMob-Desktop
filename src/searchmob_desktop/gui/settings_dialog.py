@@ -64,7 +64,18 @@ from searchmob_desktop.engines.rank.personalize import reset as reset_personaliz
 from searchmob_desktop.engines.rank.personalize import to_json as personalization_to_json
 from searchmob_desktop.gui.browser_setup_dialog import BrowserSetupDialog
 from searchmob_desktop.gui.engines_catalog import ENGINE_CATALOG, is_engine_enabled
-from searchmob_desktop.gui.theme import DARK, LIGHT, SYSTEM
+from searchmob_desktop.gui.theme import (
+    DARK,
+    DARK_THEME_IDS,
+    FONT_STEP_PT,
+    LIGHT,
+    LIGHT_THEME_IDS,
+    MAX_FONT_PT,
+    MIN_FONT_PT,
+    SYSTEM,
+    THEMES,
+    clamp_font_pt,
+)
 from searchmob_desktop.gui.workers import AsyncWorker
 from searchmob_desktop.prefs import JsonPreferencesStore, UserPreferences
 from searchmob_desktop.update import (
@@ -256,7 +267,7 @@ class SettingsDialog(QDialog):
             group.addButton(radio)
             layout.addWidget(radio)
 
-        def _on_changed() -> None:
+        def _on_mode_changed() -> None:
             for value, radio in radios:
                 if radio.isChecked():
                     self._save(replace(self._prefs, theme=value))
@@ -264,7 +275,73 @@ class SettingsDialog(QDialog):
                     return
 
         for _, radio in radios:
-            radio.toggled.connect(_on_changed)
+            radio.toggled.connect(_on_mode_changed)
+
+        # Named-theme pickers: which theme fills the light slot and which fills the dark slot. The
+        # mode radios above choose between them; the quick toolbar toggle swaps the same two.
+        light_combo = QComboBox()
+        for theme_id in LIGHT_THEME_IDS:
+            light_combo.addItem(THEMES[theme_id].name, theme_id)
+        light_combo.setCurrentIndex(max(0, light_combo.findData(self._prefs.light_theme)))
+        dark_combo = QComboBox()
+        for theme_id in DARK_THEME_IDS:
+            dark_combo.addItem(THEMES[theme_id].name, theme_id)
+        dark_combo.setCurrentIndex(max(0, dark_combo.findData(self._prefs.dark_theme)))
+
+        def _on_light_theme(index: int) -> None:
+            theme_id = light_combo.itemData(index)
+            if isinstance(theme_id, str):
+                self._save(replace(self._prefs, light_theme=theme_id))
+                self.themeChanged.emit(self._prefs.theme)
+
+        def _on_dark_theme(index: int) -> None:
+            theme_id = dark_combo.itemData(index)
+            if isinstance(theme_id, str):
+                self._save(replace(self._prefs, dark_theme=theme_id))
+                self.themeChanged.emit(self._prefs.theme)
+
+        light_combo.currentIndexChanged.connect(_on_light_theme)
+        dark_combo.currentIndexChanged.connect(_on_dark_theme)
+
+        light_row = QHBoxLayout()
+        light_row.addWidget(QLabel("Light theme"))
+        light_row.addWidget(light_combo, 1)
+        layout.addLayout(light_row)
+        dark_row = QHBoxLayout()
+        dark_row.addWidget(QLabel("Dark theme"))
+        dark_row.addWidget(dark_combo, 1)
+        layout.addLayout(dark_row)
+
+        # Text size: a comfortable 12pt base stepped by 2pt; leans larger rather than cramped.
+        layout.addWidget(QLabel("Text size"))
+        size_row = QHBoxLayout()
+        smaller = QPushButton("A-")
+        larger = QPushButton("A+")
+        size_label = QLabel()
+
+        def _refresh_size() -> None:
+            pt = clamp_font_pt(self._prefs.font_point_size)
+            size_label.setText(f"{pt} pt")
+            smaller.setEnabled(pt > MIN_FONT_PT)
+            larger.setEnabled(pt < MAX_FONT_PT)
+
+        def _step_size(delta: int) -> None:
+            pt = clamp_font_pt(self._prefs.font_point_size + delta)
+            if pt == self._prefs.font_point_size:
+                return
+            self._save(replace(self._prefs, font_point_size=pt))
+            _refresh_size()
+            self.themeChanged.emit(self._prefs.theme)
+
+        smaller.clicked.connect(lambda: _step_size(-FONT_STEP_PT))
+        larger.clicked.connect(lambda: _step_size(FONT_STEP_PT))
+        _refresh_size()
+        size_row.addWidget(smaller)
+        size_row.addWidget(size_label)
+        size_row.addWidget(larger)
+        size_row.addStretch(1)
+        layout.addLayout(size_row)
+
         layout.addStretch(1)
         return tab
 
