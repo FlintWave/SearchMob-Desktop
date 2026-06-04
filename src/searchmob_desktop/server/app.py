@@ -604,9 +604,7 @@ def build_app(
         # latency to the results path.
         summary_task = asyncio.ensure_future(_maybe_summary(query))
         model = _owner_model(request)
-        results = await _run_metasearch(
-            query, sort_mode, vertical, model=model, active_lens=scope
-        )
+        results = await _run_metasearch(query, sort_mode, vertical, model=model, active_lens=scope)
         summary = await summary_task
         # When personalization is on for the owner, route result links through `/click` so a click
         # can train the model; everyone else (and a disabled owner) gets the plain destination link.
