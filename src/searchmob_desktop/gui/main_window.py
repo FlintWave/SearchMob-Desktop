@@ -75,7 +75,7 @@ from searchmob_desktop.gui.server_controller import (
     build_engines_from_prefs,
 )
 from searchmob_desktop.gui.settings_dialog import SettingsDialog
-from searchmob_desktop.gui.theme import DARK_PALETTE, active_palette, apply_theme
+from searchmob_desktop.gui.theme import DARK, active_theme, apply_theme
 from searchmob_desktop.gui.workers import AsyncWorker
 from searchmob_desktop.prefs import JsonPreferencesStore
 from searchmob_desktop.server import LOOPBACK_HOST
@@ -974,23 +974,34 @@ class MainWindow(QMainWindow):
 
     def _update_theme_button(self) -> None:
         """Label the toggle with the theme it switches to: a sun for Light, a moon for Dark."""
-        is_dark = active_palette() == DARK_PALETTE
+        is_dark = active_theme().mode == DARK
         self._theme_btn.setText("☀ Light" if is_dark else "☾ Dark")
 
     def _on_toggle_theme(self) -> None:
-        """Flip between light and dark, persist the choice, and re-style the app live."""
+        """Flip the mode between light and dark, persist it, and re-style the app live.
+
+        The picker chooses which named theme fills each slot; this just swaps which slot is shown,
+        so toggling moves between the user's chosen light and dark themes.
+        """
         from dataclasses import replace
 
-        new_theme = "light" if active_palette() == DARK_PALETTE else "dark"
+        prefs = self._prefs_store.load()
+        new_mode = "light" if active_theme().mode == DARK else "dark"
         try:
-            self._prefs_store.save(replace(self._prefs_store.load(), theme=new_theme))
+            self._prefs_store.save(replace(prefs, theme=new_mode))
         except OSError:
             pass
         from PySide6.QtWidgets import QApplication
 
         app = QApplication.instance()
         if app is not None:
-            apply_theme(app, new_theme)  # type: ignore[arg-type]
+            apply_theme(
+                app,  # type: ignore[arg-type]
+                new_mode,
+                prefs.light_theme,
+                prefs.dark_theme,
+                prefs.font_point_size,
+            )
         self._update_theme_button()
 
     def _on_open_settings(self) -> None:
@@ -1001,13 +1012,21 @@ class MainWindow(QMainWindow):
             parent=self,
         )
 
-        def _on_theme_changed(theme: str) -> None:
+        def _on_theme_changed(_theme: str) -> None:
             from PySide6.QtWidgets import QApplication
 
             app = QApplication.instance()
             if app is not None:
+                # Reload prefs so a changed slot theme or font size (not just the mode) is applied.
                 # `QApplication.instance()` returns `QCoreApplication`; cast for the type checker.
-                apply_theme(app, theme)  # type: ignore[arg-type]
+                prefs = self._prefs_store.load()
+                apply_theme(
+                    app,  # type: ignore[arg-type]
+                    prefs.theme,
+                    prefs.light_theme,
+                    prefs.dark_theme,
+                    prefs.font_point_size,
+                )
             # Keep the homepage toggle's sun/moon label in sync with the Settings change.
             self._update_theme_button()
 

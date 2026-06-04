@@ -13,6 +13,7 @@ the URL passes the http/https scheme allowlist (see `app.is_safe_http_url`).
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable
+from functools import lru_cache
 from html import escape
 from urllib.parse import quote_plus, urlsplit
 
@@ -20,6 +21,14 @@ from searchmob_desktop.data.history import HistoryEntry
 from searchmob_desktop.engines import SearchResult
 from searchmob_desktop.engines.rank import Lens, RankingRules, RankRule, host_of_url
 from searchmob_desktop.engines.wiki_summary import SummaryBox
+from searchmob_desktop.gui.theme import (
+    DEFAULT_DARK_ID,
+    DEFAULT_LIGHT_ID,
+    LIGHT,
+    THEMES,
+    Palette,
+    Theme,
+)
 from searchmob_desktop.prefs import UserPreferences
 
 # The per-result domain actions offered in the served UI, in display order. Mirrors the in-app
@@ -31,33 +40,44 @@ _RANK_ACTIONS: tuple[tuple[RankRule, str], ...] = (
     (RankRule.PIN, "Pin"),
 )
 
-# Self-contained stylesheet: no external fonts / CDNs / runtime fetches. Light defaults plus a
-# `prefers-color-scheme: dark` media query; a `[data-theme]` attribute on the root overrides both
-# so the JS toggle is authoritative. Kept tight on whitespace to keep the served bytes small.
+
+# The CSS custom properties served per theme, derived from each GUI `Palette` so the browser look
+# matches the shell exactly. The shadow tracks the mode (deeper on dark); `--topbar` is the page
+# background with an alpha byte so the sticky bar reads through the backdrop blur.
+def _theme_vars(theme: Theme) -> str:
+    """The `--bg`/`--fg`/... custom-property declarations for one theme's palette."""
+    p: Palette = theme.palette
+    shadow = "0 1px 6px rgba(32,33,36,.12)" if theme.mode == LIGHT else "0 1px 6px rgba(0,0,0,.5)"
+    return (
+        f"--bg:{p.bg};--fg:{p.text};--muted:{p.muted};--border:{p.border};--card:{p.surface};"
+        f"--link:{p.accent};--url:{p.url};--snippet:{p.muted};"
+        f"--chip-bg:{p.card_hover};--chip-fg:{p.muted};"
+        f"--accent:{p.accent};--shadow:{shadow};--topbar:{p.bg}ee;"
+    )
+
+
+@lru_cache(maxsize=1)
+def _theme_css() -> str:
+    """The generated theme blocks: `:root` (default light), the dark media query, and one
+    `[data-theme="<id>"]` block per theme. Cached since `THEMES` is constant for the process."""
+    parts = [
+        ":root{" + _theme_vars(THEMES[DEFAULT_LIGHT_ID]) + "}",
+        "@media (prefers-color-scheme:dark){:root{" + _theme_vars(THEMES[DEFAULT_DARK_ID]) + "}}",
+    ]
+    for theme in THEMES.values():
+        parts.append(f'[data-theme="{theme.id}"]{{' + _theme_vars(theme) + "}")
+    return "".join(parts)
+
+
+# Self-contained stylesheet: no external fonts / CDNs / runtime fetches. The per-theme variable
+# blocks (`:root`, the `prefers-color-scheme: dark` media query, and a `[data-theme]` override per
+# theme so the JS picker is authoritative) are prepended at render time from `_theme_css`. This is
+# the static remainder; kept tight on whitespace to keep the served bytes small.
 _PAGE_CSS = (
     "*{box-sizing:border-box}"
     "html,body{margin:0;padding:0}"
-    ":root{"
-    "--bg:#ffffff;--fg:#202124;--muted:#5f6368;--border:#dfe1e5;--card:#ffffff;"
-    "--link:#1a0dab;--url:#0b8043;--snippet:#4d5156;--chip-bg:#f1f3f4;--chip-fg:#5f6368;"
-    "--accent:#3d5afe;--shadow:0 1px 6px rgba(32,33,36,.12);--topbar:#ffffffee;"
-    "}"
-    "@media (prefers-color-scheme:dark){:root{"
-    "--bg:#0e0f13;--fg:#e3e5e8;--muted:#9aa0a6;--border:#2a2c33;--card:#15171c;"
-    "--link:#8ab4f8;--url:#5fd07f;--snippet:#bdc1c6;--chip-bg:#1f2127;--chip-fg:#c5c8ce;"
-    "--accent:#8c9eff;--shadow:0 1px 6px rgba(0,0,0,.5);--topbar:#0e0f13ee;"
-    "}}"
-    '[data-theme="light"]{'
-    "--bg:#ffffff;--fg:#202124;--muted:#5f6368;--border:#dfe1e5;--card:#ffffff;"
-    "--link:#1a0dab;--url:#0b8043;--snippet:#4d5156;--chip-bg:#f1f3f4;--chip-fg:#5f6368;"
-    "--accent:#3d5afe;--shadow:0 1px 6px rgba(32,33,36,.12);--topbar:#ffffffee;"
-    "}"
-    '[data-theme="dark"]{'
-    "--bg:#0e0f13;--fg:#e3e5e8;--muted:#9aa0a6;--border:#2a2c33;--card:#15171c;"
-    "--link:#8ab4f8;--url:#5fd07f;--snippet:#bdc1c6;--chip-bg:#1f2127;--chip-fg:#c5c8ce;"
-    "--accent:#8c9eff;--shadow:0 1px 6px rgba(0,0,0,.5);--topbar:#0e0f13ee;"
-    "}"
-    "body{background:var(--bg);color:var(--fg);line-height:1.5;"
+    "html{font-size:12pt}"
+    "body{background:var(--bg);color:var(--fg);line-height:1.5;font-size:1rem;"
     'font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;}'
     "a{color:var(--link);text-decoration:none}"
     "a:hover{text-decoration:underline}"
@@ -84,23 +104,29 @@ _PAGE_CSS = (
     "padding:5px 14px;font-weight:700;text-decoration:none;white-space:nowrap}"
     ".updatebar .btn:hover{text-decoration:none;opacity:.92}"
     ".settings{max-width:680px;margin:0 auto;padding:24px 18px 60px}"
-    ".settings h1{font-size:24px;margin:8px 0 18px}"
+    ".settings h1{font-size:1.5rem;margin:8px 0 18px}"
     ".settings .saved{color:#fff;background:var(--accent);display:inline-block;border-radius:6px;"
     "padding:4px 12px;font-size:13px;margin:0 0 16px}"
     ".settings .card{background:var(--card);border:1px solid var(--border);border-radius:12px;"
     "padding:16px 18px;margin:0 0 16px}"
-    ".settings .card h2{font-size:15px;margin:0 0 14px;color:var(--accent)}"
+    ".settings .card h2{font-size:.9375rem;margin:0 0 14px;color:var(--accent)}"
     ".settings .field{margin:0 0 14px}"
-    ".settings .field>label{display:block;font-size:13px;margin:0 0 6px;font-weight:600}"
+    ".settings .field>label{display:block;font-size:.8125rem;margin:0 0 6px;font-weight:600}"
     ".settings select{width:100%;padding:9px 12px;border:1px solid var(--border);border-radius:8px;"
-    "background:var(--bg);color:var(--fg);font-size:14px}"
-    ".settings .checkrow{display:flex;align-items:center;gap:9px;font-size:14px;margin:0 0 10px;"
+    "background:var(--bg);color:var(--fg);font-size:.875rem}"
+    ".settings .checkrow{display:flex;align-items:center;gap:9px;font-size:.875rem;margin:0 0 10px;"
     "cursor:pointer}"
-    ".settings .hint{font-size:12px;color:var(--muted);margin:6px 0 0}"
+    ".settings .hint{font-size:.75rem;color:var(--muted);margin:6px 0 0}"
     ".settings .actions{margin-top:6px}"
     ".settings .actions button{background:var(--accent);color:#fff;border:0;border-radius:22px;"
-    "padding:10px 26px;font-size:15px;font-weight:600;cursor:pointer}"
+    "padding:10px 26px;font-size:.9375rem;font-weight:600;cursor:pointer}"
     ".settings .card h3.sub{font-size:13px;margin:16px 0 8px;color:var(--muted)}"
+    # Appearance: the text-size A-/A+ stepper. Square buttons flanking the current point size.
+    ".settings .sizerow{display:flex;align-items:center;gap:10px}"
+    ".settings .sizerow button{width:40px;height:40px;border:1px solid var(--border);"
+    "border-radius:8px;background:var(--bg);color:var(--fg);font-size:1rem;cursor:pointer}"
+    ".settings .sizerow button:hover{border-color:var(--accent);color:var(--accent)}"
+    ".settings .sizerow .sizeval{font-size:.875rem;color:var(--muted);min-width:54px}"
     ".settings .rulelist{list-style:none;margin:0 0 14px;padding:0}"
     ".settings .rulelist li{display:flex;align-items:center;gap:8px;flex-wrap:wrap;"
     "padding:8px 0;border-bottom:1px solid var(--border)}"
@@ -155,30 +181,30 @@ _PAGE_CSS = (
     ".searchbox{display:flex;align-items:stretch;background:var(--card);"
     "border:1px solid var(--border);border-radius:26px;box-shadow:var(--shadow);overflow:hidden}"
     ".searchbox input[type=text]{flex:1;min-width:0;border:0;outline:0;background:transparent;"
-    "color:var(--fg);font-size:16px;padding:13px 18px}"
+    "color:var(--fg);font-size:1rem;padding:13px 18px}"
     ".searchbox input[type=submit]{border:0;background:var(--accent);color:#fff;padding:0 22px;"
-    "cursor:pointer;font-size:15px;font-weight:600}"
+    "cursor:pointer;font-size:.9375rem;font-weight:600}"
     ".searchbox input[type=submit]:hover{filter:brightness(1.07)}"
     ".home{max-width:600px;margin:0 auto;padding:13vh 20px 0;text-align:center}"
-    ".home .brand{font-size:48px;font-weight:800;color:var(--accent);letter-spacing:-1.5px}"
-    ".home .tagline{color:var(--muted);margin:8px 0 28px;font-size:15px}"
+    ".home .brand{font-size:3rem;font-weight:800;color:var(--accent);letter-spacing:-1.5px}"
+    ".home .tagline{color:var(--muted);margin:8px 0 28px;font-size:.9375rem}"
     ".home .searchbox{max-width:560px;margin:0 auto;text-align:left}"
     ".topbar .searchbox{flex:1;max-width:620px}"
     ".topbar .searchbox input[type=text]{padding:9px 16px}"
     ".topbar .searchbox input[type=submit]{padding:0 16px}"
     ".results{max-width:660px;margin:0 auto;padding:18px 20px 64px}"
-    ".results .meta{color:var(--muted);font-size:13px;margin:2px 0 20px}"
-    ".didyoumean{font-size:15px;margin:2px 0 18px}"
+    ".results .meta{color:var(--muted);font-size:.8125rem;margin:2px 0 20px}"
+    ".didyoumean{font-size:.9375rem;margin:2px 0 18px}"
     ".didyoumean a{font-weight:600;font-style:italic}"
     ".result{margin:0 0 26px}"
     # Infinite scroll hides results past the first reveal window; the reveal script unhides them in
     # batches as the sentinel scrolls into view. With JS off, the rule is harmless and all show.
     ".result.is-collapsed{display:none}"
     ".reveal-sentinel{height:1px}"
-    ".result .url{color:var(--url);font-size:13px;white-space:nowrap;overflow:hidden;"
+    ".result .url{color:var(--url);font-size:.8125rem;white-space:nowrap;overflow:hidden;"
     "text-overflow:ellipsis}"
-    ".result .title{display:block;font-size:20px;line-height:1.3;margin:1px 0 3px}"
-    ".result .snippet{margin:2px 0 7px;color:var(--snippet);font-size:14px}"
+    ".result .title{display:block;font-size:1.25rem;line-height:1.3;margin:1px 0 3px}"
+    ".result .snippet{margin:2px 0 7px;color:var(--snippet);font-size:.875rem}"
     ".engines{display:flex;flex-wrap:wrap;gap:6px}"
     ".chip{background:var(--chip-bg);color:var(--chip-fg);font-size:11px;padding:2px 9px;"
     "border-radius:10px}"
@@ -219,23 +245,45 @@ _PAGE_CSS = (
     "@media (max-width:560px){.topbar .logo{display:none}}"
 )
 
-# Runs in <head> before first paint to restore the saved theme (avoids the flash of wrong theme).
-_THEME_INIT_JS = (
-    "(function(){try{var t=localStorage.getItem('sm-theme');"
-    "if(t){document.documentElement.setAttribute('data-theme',t);}}catch(e){}})();"
+# The two-slot defaults and font bounds, mirrored from the GUI (`searchmob_desktop.gui.theme`) so
+# the served prefs match the shell. Emitted as JS literals into the shared resolve helpers below.
+_JS_DEFAULT_LIGHT_ID = DEFAULT_LIGHT_ID
+_JS_DEFAULT_DARK_ID = DEFAULT_DARK_ID
+_JS_MIN_FONT = 8
+_JS_MAX_FONT = 24
+_JS_STEP_FONT = 2
+
+# Shared client-side resolve helpers, inlined into every page's theme scripts. `smOsDark` reads the
+# OS scheme; `smSlots` reads the two slot ids (each defaulting to its SearchMob default);
+# `smResolve` turns a mode (light/dark/system/absent) plus the slots into the active theme id (null
+# when no mode is stored, so the CSS :root/@media defaults stand); `smApply` sets data-theme + font.
+_THEME_RESOLVE_JS = (
+    "function smGet(k){try{return localStorage.getItem(k);}catch(e){return null;}}"
+    "function smOsDark(){return !!(window.matchMedia&&"
+    "matchMedia('(prefers-color-scheme: dark)').matches);}"
+    f"function smSlots(){{return {{light:smGet('sm-light-theme')||'{_JS_DEFAULT_LIGHT_ID}',"
+    f"dark:smGet('sm-dark-theme')||'{_JS_DEFAULT_DARK_ID}'}};}}"
+    "function smResolve(){var m=smGet('sm-theme');var s=smSlots();"
+    "if(m==='light')return s.light;if(m==='dark')return s.dark;"
+    "if(m==='system')return smOsDark()?s.dark:s.light;return null;}"
+    "function smApply(){var id=smResolve();var r=document.documentElement;"
+    "if(id)r.setAttribute('data-theme',id);else r.removeAttribute('data-theme');"
+    "var f=smGet('sm-font');if(f)r.style.fontSize=f+'pt';}"
 )
 
-# Defines smToggle() (flips + persists the theme) and labels the button with the alternative theme.
+# Runs in <head> before first paint to restore the saved theme + font (avoids the flash of wrong
+# theme/size). Resolves the active slot id from the mode and applies it, plus any saved font size.
+_THEME_INIT_JS = "(function(){try{" + _THEME_RESOLVE_JS + "smApply();}catch(e){}})();"
+
+# Defines smToggle() (flips the effective mode light<->dark, persists it, re-applies the resolved
+# slot) and labels the quick toggle button with the alternative theme.
 _THEME_TOGGLE_JS = (
-    "(function(){"
-    "function resolved(){var d=document.documentElement.getAttribute('data-theme');if(d)return d;"
-    "return (window.matchMedia&&matchMedia('(prefers-color-scheme: dark)').matches)?"
-    "'dark':'light';}"
+    "(function(){" + _THEME_RESOLVE_JS + "function eff(){var m=smGet('sm-theme');"
+    "if(m==='light')return 'light';if(m==='dark')return 'dark';return smOsDark()?'dark':'light';}"
     "function label(){var b=document.getElementById('sm-theme-btn');"
-    "if(b)b.textContent=resolved()==='dark'?'\\u2600 Light':'\\u263e Dark';}"
-    "window.smToggle=function(){var n=resolved()==='dark'?'light':'dark';"
-    "document.documentElement.setAttribute('data-theme',n);"
-    "try{localStorage.setItem('sm-theme',n);}catch(e){}label();};"
+    "if(b)b.textContent=eff()==='dark'?'\\u2600 Light':'\\u263e Dark';}"
+    "window.smToggle=function(){var n=eff()==='dark'?'light':'dark';"
+    "try{localStorage.setItem('sm-theme',n);}catch(e){}smApply();label();};"
     "label();"
     "})();"
 )
@@ -273,7 +321,7 @@ def _page_head(title_text: str) -> str:
         f"<title>{escape(title_text)}</title>"
         '<link rel="search" type="application/opensearchdescription+xml" '
         'title="SearchMob" href="/opensearch.xml">'
-        f"<style>{_PAGE_CSS}</style>"
+        f"<style>{_theme_css()}{_PAGE_CSS}</style>"
         f"<script>{_THEME_INIT_JS}</script>"
         "</head>"
     )
@@ -829,6 +877,84 @@ def _history_section(history: list[HistoryEntry] | None, clearable: bool) -> str
     return "".join(parts)
 
 
+# The mode options for the Appearance picker. `system` follows the OS scheme; absent value (a
+# never-touched picker) is treated as system by the controls JS.
+_THEME_MODE_OPTIONS: tuple[tuple[str, str], ...] = (
+    ("light", "Light"),
+    ("dark", "Dark"),
+    ("system", "Follow system"),
+)
+
+
+def _appearance_section() -> str:
+    """The Appearance card: mode + the two slot theme pickers + an A-/A+ text-size stepper.
+
+    All client-side (localStorage); the controls JS below wires the selects and buttons. The slot
+    selects are filled from `THEMES` so the served list matches the GUI's, partitioned by mode.
+    """
+    mode_opts = "".join(
+        f'<option value="{value}">{escape(label)}</option>' for value, label in _THEME_MODE_OPTIONS
+    )
+    light_opts = "".join(
+        f'<option value="{escape(t.id, quote=True)}">{escape(t.name)}</option>'
+        for t in THEMES.values()
+        if t.mode == LIGHT
+    )
+    dark_opts = "".join(
+        f'<option value="{escape(t.id, quote=True)}">{escape(t.name)}</option>'
+        for t in THEMES.values()
+        if t.mode != LIGHT
+    )
+    return (
+        '<section class="card"><h2>Appearance</h2>'
+        '<div class="field"><label for="sm-mode">Mode</label>'
+        f'<select id="sm-mode">{mode_opts}</select></div>'
+        '<div class="field"><label for="sm-light-theme">Light theme</label>'
+        f'<select id="sm-light-theme">{light_opts}</select></div>'
+        '<div class="field"><label for="sm-dark-theme">Dark theme</label>'
+        f'<select id="sm-dark-theme">{dark_opts}</select></div>'
+        '<div class="field"><label>Text size</label>'
+        '<div class="sizerow">'
+        '<button type="button" id="sm-font-dec" aria-label="Smaller text">A-</button>'
+        '<span class="sizeval" id="sm-font-val"></span>'
+        '<button type="button" id="sm-font-inc" aria-label="Larger text">A+</button>'
+        "</div></div>"
+        "</section>"
+    )
+
+
+# Wires the Appearance card to localStorage (settings page only). On load it sets each control to
+# its stored value; on change it persists and live-applies via the shared resolve helpers. Font is
+# clamped to the 8..24/step-2 bounds. No server round-trip: served prefs have always been local.
+_THEME_CONTROLS_JS = (
+    "(function(){"
+    + _THEME_RESOLVE_JS
+    + f"var MIN={_JS_MIN_FONT},MAX={_JS_MAX_FONT},STEP={_JS_STEP_FONT},DEF=12;"
+    "function font(){var f=parseInt(smGet('sm-font'),10);"
+    "return isNaN(f)?DEF:Math.max(MIN,Math.min(MAX,f));}"
+    "function set(k,v){try{localStorage.setItem(k,v);}catch(e){}}"
+    "var mode=document.getElementById('sm-mode');"
+    "var li=document.getElementById('sm-light-theme');"
+    "var di=document.getElementById('sm-dark-theme');"
+    "var val=document.getElementById('sm-font-val');"
+    "var dec=document.getElementById('sm-font-dec');"
+    "var inc=document.getElementById('sm-font-inc');"
+    "function showFont(){if(val)val.textContent=font()+' pt';}"
+    "var s=smSlots();"
+    "if(mode)mode.value=smGet('sm-theme')||'system';"
+    "if(li)li.value=s.light;if(di)di.value=s.dark;"
+    "showFont();"
+    "if(mode)mode.addEventListener('change',function(){set('sm-theme',mode.value);smApply();});"
+    "if(li)li.addEventListener('change',function(){set('sm-light-theme',li.value);smApply();});"
+    "if(di)di.addEventListener('change',function(){set('sm-dark-theme',di.value);smApply();});"
+    "function step(d){var n=Math.max(MIN,Math.min(MAX,font()+d*STEP));"
+    "set('sm-font',n);smApply();showFont();}"
+    "if(dec)dec.addEventListener('click',function(){step(-1);});"
+    "if(inc)inc.addEventListener('click',function(){step(1);});"
+    "})();"
+)
+
+
 def render_settings_page(
     prefs: UserPreferences,
     rules: RankingRules,
@@ -857,6 +983,11 @@ def render_settings_page(
     parts.append("<h1>Settings</h1>")
     if saved:
         parts.append('<p class="saved" role="status">Saved.</p>')
+
+    # The Appearance card is client-side only (localStorage), so it sits above the prefs form rather
+    # than inside it; nothing here posts to the server.
+    parts.append(_appearance_section())
+
     parts.append('<form action="/settings/prefs" method="post">')
 
     parts.append('<section class="card">')
@@ -902,6 +1033,7 @@ def render_settings_page(
 
     parts.append("</div>")
     parts.append(f"<script>{_THEME_TOGGLE_JS}</script>")
+    parts.append(f"<script>{_THEME_CONTROLS_JS}</script>")
     parts.append(f"<script>{_GOGGLE_FILE_JS}</script>")
     parts.append("</body>")
     return "<!DOCTYPE html><html lang='en'>" + head + "".join(parts) + "</html>"

@@ -30,7 +30,13 @@ def run_gui(argv: list[str] | None = None) -> int:
     # If there is already a running QApplication (e.g. tests), reuse it but still apply theme.
     prefs_store = JsonPreferencesStore()
     prefs = prefs_store.load()
-    apply_theme(app, prefs.theme)  # type: ignore[arg-type]
+    apply_theme(
+        app,  # type: ignore[arg-type]
+        prefs.theme,
+        prefs.light_theme,
+        prefs.dark_theme,
+        prefs.font_point_size,
+    )
 
     window = MainWindow(prefs_store=prefs_store)
     window.show()
