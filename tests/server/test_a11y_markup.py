@@ -14,8 +14,16 @@ def _is_safe(_url: str) -> bool:
 
 
 def test_pages_declare_a_language() -> None:
-    assert "<html lang='en'>" in render_home_page()
-    assert "<html lang='en'>" in render_results_page("hi", [], _is_safe)
+    assert '<html lang="en">' in render_home_page()
+    assert '<html lang="en">' in render_results_page("hi", [], _is_safe)
+
+
+def test_pages_carry_locale_and_direction() -> None:
+    # A non-default locale sets the lang attribute; an RTL locale also sets dir="rtl".
+    assert '<html lang="es">' in render_home_page(locale="es")
+    assert 'dir="rtl"' not in render_home_page(locale="es")
+    ar = render_results_page("hi", [], _is_safe, locale="ar")
+    assert '<html lang="ar" dir="rtl">' in ar
 
 
 def test_search_input_has_an_accessible_name() -> None:

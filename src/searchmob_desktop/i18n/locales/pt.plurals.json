@@ -1,0 +1,38 @@
+{
+  "Clear all {n} rules": {
+    "one": "Apagar todas as {n} regras",
+    "other": "Remover todas as {n} regras"
+  },
+  "Found {n} models. Pick one to turn on the answer box.": {
+    "other": "Encontrados {n} modelos. Selecione um para ativar a caixa de resposta.",
+    "one": "Não foram encontrados modelos. Selecione um para ativar a caixa de resposta."
+  },
+  "Imported {n} rules.": {
+    "one": "Foram importadas {n} regras.",
+    "other": "Importadas {n} regras."
+  },
+  "{n} entries exported.": {
+    "one": "{n} entradas exportadas.",
+    "other": "{n} entradas exportadas."
+  },
+  "{n} goggle rules imported.": {
+    "one": "{n} regras do Goggle importadas.",
+    "other": "{n} regras do Goggle importadas."
+  },
+  "{n} hidden by your rules": {
+    "one": "{n} oculto pelas suas regras",
+    "other": "{n} ocultos pelas suas regras"
+  },
+  "{n} new entries imported.": {
+    "one": "{n} novos itens importados.",
+    "other": "{n} novos itens importados."
+  },
+  "{n} results": {
+    "one": "{n} resultados",
+    "other": "{n} resultados"
+  },
+  "{n} saved searches.": {
+    "one": "{n} pesquisas salvas.",
+    "other": "{n} pesquisas salvas."
+  }
+}

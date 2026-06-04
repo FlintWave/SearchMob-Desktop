@@ -1,0 +1,38 @@
+{
+  "Clear all {n} rules": {
+    "one": "Clear all {n} rule",
+    "other": "Clear all {n} rules"
+  },
+  "Found {n} models. Pick one to turn on the answer box.": {
+    "one": "Found {n} model. Pick one to turn on the answer box.",
+    "other": "Found {n} models. Pick one to turn on the answer box."
+  },
+  "Imported {n} rules.": {
+    "one": "Imported {n} rule.",
+    "other": "Imported {n} rules."
+  },
+  "{n} entries exported.": {
+    "one": "{n} entry exported.",
+    "other": "{n} entries exported."
+  },
+  "{n} goggle rules imported.": {
+    "one": "{n} goggle rule imported.",
+    "other": "{n} goggle rules imported."
+  },
+  "{n} hidden by your rules": {
+    "one": "{n} hidden by your rules",
+    "other": "{n} hidden by your rules"
+  },
+  "{n} new entries imported.": {
+    "one": "{n} new entry imported.",
+    "other": "{n} new entries imported."
+  },
+  "{n} results": {
+    "one": "{n} result",
+    "other": "{n} results"
+  },
+  "{n} saved searches.": {
+    "one": "{n} saved search.",
+    "other": "{n} saved searches."
+  }
+}

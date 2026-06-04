@@ -1,0 +1,29 @@
+{
+  "Clear all {n} rules": {
+    "other": "Hapus semua {{n}} aturan."
+  },
+  "Found {n} models. Pick one to turn on the answer box.": {
+    "other": "Tidak ditemukan {n} model. Pilih salah satu untuk mengaktifkan kotak jawaban."
+  },
+  "Imported {n} rules.": {
+    "other": "{n} aturan telah diimpor."
+  },
+  "{n} entries exported.": {
+    "other": "{n} entri telah diekspor."
+  },
+  "{n} goggle rules imported.": {
+    "other": "{n} aturan Goggle telah diimpor."
+  },
+  "{n} hidden by your rules": {
+    "other": "{n} disembunyikan oleh aturan Anda"
+  },
+  "{n} new entries imported.": {
+    "other": "{n} entri baru telah diimpor."
+  },
+  "{n} results": {
+    "other": "{n} hasil"
+  },
+  "{n} saved searches.": {
+    "other": "{n} pencarian tersimpan."
+  }
+}

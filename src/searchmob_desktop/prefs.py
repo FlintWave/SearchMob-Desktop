@@ -57,6 +57,10 @@ class UserPreferences:
     dark_theme: str = "searchmob-dark"
     # Base interface font size, in points (12pt default, stepped by 2 via the A-/A+ controls).
     font_point_size: int = 12
+    # UI language as a BCP-47 primary subtag (e.g. "es", "ar"). Empty means "follow the OS locale":
+    # on first launch the interface starts in the system language when it is one of the ten shipped,
+    # else English. Picking a language in Settings sets this explicitly.
+    language: str = ""
     history_enabled: bool = False
     # Learn a bounded ranking boost from the owner's own result clicks (off by default, opt-in via
     # the first-run wizard or Settings). The learned model is stored encrypted in the vault and is

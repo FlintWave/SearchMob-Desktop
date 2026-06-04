@@ -68,6 +68,7 @@ from searchmob_desktop.engines.wiki_summary import SummaryBox, summary_for_query
 from searchmob_desktop.gui.about_dialog import AboutDialog
 from searchmob_desktop.gui.browser_setup_dialog import BrowserSetupDialog
 from searchmob_desktop.gui.history_dialog import HistoryDialog
+from searchmob_desktop.gui.language import language_bridge
 from searchmob_desktop.gui.onboarding_dialog import ONBOARDING_VERSION
 from searchmob_desktop.gui.results_view import ResultsView
 from searchmob_desktop.gui.server_controller import (
@@ -77,6 +78,7 @@ from searchmob_desktop.gui.server_controller import (
 from searchmob_desktop.gui.settings_dialog import SettingsDialog
 from searchmob_desktop.gui.theme import DARK, active_theme, apply_theme
 from searchmob_desktop.gui.workers import AsyncWorker
+from searchmob_desktop.i18n import N_, tr, trc, trn
 from searchmob_desktop.prefs import JsonPreferencesStore
 from searchmob_desktop.server import LOOPBACK_HOST
 from searchmob_desktop.update import (
@@ -187,10 +189,10 @@ class MainWindow(QMainWindow):
         search_row = QHBoxLayout()
         search_row.setSpacing(10)
         self._query_input = QLineEdit()
-        self._query_input.setPlaceholderText("Search the web privately")
+        self._query_input.setPlaceholderText(tr("Search the web privately"))
         self._query_input.setClearButtonEnabled(True)
         self._query_input.returnPressed.connect(self._on_submit)
-        self._search_btn = QPushButton("Search")
+        self._search_btn = QPushButton(tr("Search"))
         self._search_btn.setProperty("role", "primary")
         self._search_btn.setDefault(True)
         self._search_btn.setMinimumWidth(110)
@@ -201,7 +203,7 @@ class MainWindow(QMainWindow):
         # theme it will switch to (a sun for Light, a moon for Dark).
         self._theme_btn = QPushButton()
         self._theme_btn.setProperty("role", "chip")
-        self._theme_btn.setToolTip("Switch between light and dark")
+        self._theme_btn.setToolTip(tr("Switch between light and dark"))
         self._theme_btn.clicked.connect(self._on_toggle_theme)
         search_row.addWidget(self._theme_btn)
         self._update_theme_button()
@@ -213,46 +215,54 @@ class MainWindow(QMainWindow):
         vertical_row.setSpacing(8)
         self._vertical_group = QButtonGroup(self)
         self._vertical_group.setExclusive(True)
+        # Keep (button -> English label) so a language change can re-translate each chip in place.
+        # Labels are N_-marked (with context) so the extractor finds them despite the loop variable.
+        self._vertical_buttons: list[tuple[QPushButton, str]] = []
         for label, value in (
-            ("Web", Vertical.WEB),
-            ("News", Vertical.NEWS),
-            ("Forums", Vertical.FORUMS),
-            ("Academic", Vertical.ACADEMIC),
+            (N_("Web", context="search category"), Vertical.WEB),
+            (N_("News", context="search category"), Vertical.NEWS),
+            (N_("Forums", context="search category"), Vertical.FORUMS),
+            (N_("Academic", context="search category"), Vertical.ACADEMIC),
         ):
-            btn = QPushButton(label)
+            btn = QPushButton(trc("search category", label))
             btn.setCheckable(True)
             btn.setProperty("role", "chip")
             btn.setChecked(value is Vertical.WEB)
             self._vertical_group.addButton(btn)
             btn.setProperty("vertical", value.value)
             vertical_row.addWidget(btn)
+            self._vertical_buttons.append((btn, label))
         vertical_row.addStretch(1)
         self._vertical_group.buttonClicked.connect(self._on_vertical_clicked)
         outer.addLayout(vertical_row)
 
         # Status line + sort control above the results: idle / loading / empty / error / count.
         status_row = QHBoxLayout()
-        self._status_label = QLabel("Enter a query to search.")
+        # The idle status; kept as the "current" status string so a language change re-renders it.
+        self._status_label = QLabel(tr("Enter a query to search."))
         self._status_label.setProperty("role", "muted")
         status_row.addWidget(self._status_label, stretch=1)
         # Scope (lens) selector: pick the active personalization lens, mirroring the served page's
         # scope bar. Hidden until at least one lens exists (created in Settings -> Result ranking).
-        self._scope_label = QLabel("Scope:")
+        self._scope_label = QLabel(tr("Scope") + ":")
         self._scope_label.setProperty("role", "muted")
         status_row.addWidget(self._scope_label)
         self._scope_combo = QComboBox()
         self._scope_combo.currentIndexChanged.connect(self._on_scope_changed)
         status_row.addWidget(self._scope_combo)
-        sort_label = QLabel("Sort:")
-        sort_label.setProperty("role", "muted")
-        status_row.addWidget(sort_label)
+        self._sort_label = QLabel(tr("Sort") + ":")
+        self._sort_label.setProperty("role", "muted")
+        status_row.addWidget(self._sort_label)
         self._sort_combo = QComboBox()
-        for label, mode in (
-            ("Freshest + Relevant", SortMode.FRESH_RELEVANT),
-            ("Date", SortMode.DATE),
-            ("Relevance", SortMode.RELEVANCE),
-        ):
-            self._sort_combo.addItem(label, mode.value)
+        # (English label, mode) kept so a language change rebuilds the items, keeping the selection.
+        # N_-marked (with context) so the extractor finds the labels despite the loop variable.
+        self._sort_options: tuple[tuple[str, SortMode], ...] = (
+            (N_("Freshest + Relevant", context="sort order"), SortMode.FRESH_RELEVANT),
+            (N_("Date", context="sort order"), SortMode.DATE),
+            (N_("Relevance", context="sort order"), SortMode.RELEVANCE),
+        )
+        for label, mode in self._sort_options:
+            self._sort_combo.addItem(trc("sort order", label), mode.value)
         self._sort_combo.setCurrentIndex(max(0, self._sort_combo.findData(self._sort_mode.value)))
         self._sort_combo.currentIndexChanged.connect(self._on_sort_changed)
         status_row.addWidget(self._sort_combo)
@@ -296,39 +306,44 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(central)
 
         # Toolbar with the four primary actions.
-        toolbar = QToolBar("Actions", self)
+        toolbar = QToolBar(tr("Actions"), self)
         toolbar.setMovable(False)
         self.addToolBar(toolbar)
 
-        self._toggle_server_action = QAction("Start server", self)
+        # The toggle text reflects the server state; it is set by the started/stopped handlers (and
+        # by _retranslate, which re-derives it from the current state).
+        self._toggle_server_action = QAction(tr("Start server"), self)
         self._toggle_server_action.triggered.connect(self._on_toggle_server)
         toolbar.addAction(self._toggle_server_action)
 
-        browser_action = QAction("Browser setup", self)
-        browser_action.triggered.connect(self._on_open_browser_setup)
-        toolbar.addAction(browser_action)
+        self._browser_action = QAction(tr("Browser setup"), self)
+        self._browser_action.triggered.connect(self._on_open_browser_setup)
+        toolbar.addAction(self._browser_action)
 
-        history_action = QAction("History", self)
-        history_action.triggered.connect(self._on_open_history)
-        toolbar.addAction(history_action)
+        self._history_action = QAction(tr("History"), self)
+        self._history_action.triggered.connect(self._on_open_history)
+        toolbar.addAction(self._history_action)
 
-        settings_action = QAction("Settings", self)
-        settings_action.setShortcut(QKeySequence.StandardKey.Preferences)
-        settings_action.triggered.connect(self._on_open_settings)
-        toolbar.addAction(settings_action)
+        self._settings_action = QAction(tr("Settings"), self)
+        self._settings_action.setShortcut(QKeySequence.StandardKey.Preferences)
+        self._settings_action.triggered.connect(self._on_open_settings)
+        toolbar.addAction(self._settings_action)
 
-        about_action = QAction("About", self)
-        about_action.triggered.connect(self._on_open_about)
-        toolbar.addAction(about_action)
+        self._about_action = QAction(tr("About"), self)
+        self._about_action.triggered.connect(self._on_open_about)
+        toolbar.addAction(self._about_action)
 
         # Status bar shows the bound URL while the server runs.
         status = QStatusBar(self)
         self.setStatusBar(status)
-        status.showMessage("Server stopped.")
+        status.showMessage(tr("Server stopped."))
 
         # System tray: lets the app live in the tray/applet area instead of quitting on close.
         self._tray: QSystemTrayIcon | None = None
         self._setup_tray()
+
+        # Re-translate the whole shell live when the UI language changes (from the Settings picker).
+        language_bridge().languageChanged.connect(self._retranslate)
 
         # Setup wizard: shown on first run, and once more after an update that adds a step worth
         # seeing (when the saved onboarding revision is behind the app's current one).
@@ -348,6 +363,58 @@ class MainWindow(QMainWindow):
             server_controller=self._server,
             parent=self,
         ).exec()
+
+    def _retranslate(self, _tag: str = "") -> None:
+        """Re-apply translated text to the persistent shell after a UI-language change.
+
+        Static chrome (search bar, category tabs, sort/scope controls, toolbar, tray, cards, empty
+        state, update banner) updates live. Transient status messages keep their last text and
+        re-render in the new language on the next search or server event.
+        """
+        self._query_input.setPlaceholderText(tr("Search the web privately"))
+        self._search_btn.setText(tr("Search"))
+        self._theme_btn.setToolTip(tr("Switch between light and dark"))
+        self._update_theme_button()
+        for btn, label in self._vertical_buttons:
+            btn.setText(trc("search category", label))
+        self._scope_label.setText(tr("Scope") + ":")
+        self._sort_label.setText(tr("Sort") + ":")
+        # Rebuild the sort combo, preserving the current selection by its data value.
+        current = self._sort_combo.currentData()
+        self._sort_combo.blockSignals(True)
+        self._sort_combo.clear()
+        for label, mode in self._sort_options:
+            self._sort_combo.addItem(trc("sort order", label), mode.value)
+        self._sort_combo.setCurrentIndex(max(0, self._sort_combo.findData(current)))
+        self._sort_combo.blockSignals(False)
+        self._refresh_scope_combo()
+        self._browser_action.setText(tr("Browser setup"))
+        self._history_action.setText(tr("History"))
+        self._settings_action.setText(tr("Settings"))
+        self._about_action.setText(tr("About"))
+        self._refresh_server_labels()
+        if self._tray is not None:
+            self._tray_show_action.setText(tr("Show window"))
+            self._tray_quit_action.setText(tr("Quit SearchMob"))
+        self._summary_footer.setText(tr("From Wikipedia"))
+        self._answer_header.setText(tr("AI answer (local)"))
+        self._answer_footer.setText(
+            tr("Generated on your device from the results below. May be inaccurate.")
+        )
+        self._empty_heading.setText(tr("Search the web privately"))
+        self._empty_subtitle.setText(
+            tr(
+                "Results are aggregated across engines on this device. "
+                "Nothing is stored by default."
+            )
+        )
+        self._update_dismiss.setToolTip(tr("Dismiss until the next check"))
+        self._update_btn.setText(tr("Update"))
+        if self._pending_update is not None:
+            version, _url = self._pending_update
+            self._update_label.setText(tr("SearchMob {version} is available.", version=version))
+        else:
+            self._update_label.setText(tr("An update is available."))
 
     # --- Summary card ------------------------------------------------------------------------
 
@@ -371,8 +438,9 @@ class MainWindow(QMainWindow):
         self._summary_desc.setProperty("role", "muted")
         self._summary_extract = QLabel()
         self._summary_extract.setWordWrap(True)
-        footer = QLabel("From Wikipedia")
-        footer.setProperty("role", "muted")
+        self._summary_footer = QLabel(tr("From Wikipedia"))
+        self._summary_footer.setProperty("role", "muted")
+        footer = self._summary_footer
         for w in (self._summary_title, self._summary_desc, self._summary_extract, footer):
             col.addWidget(w)
         return card
@@ -396,13 +464,17 @@ class MainWindow(QMainWindow):
         card.setFrameShape(QFrame.Shape.StyledPanel)
         col = QVBoxLayout(card)
         col.setSpacing(4)
-        header = QLabel("AI answer (local)")
-        header.setProperty("role", "heading")
+        self._answer_header = QLabel(tr("AI answer (local)"))
+        self._answer_header.setProperty("role", "heading")
+        header = self._answer_header
         self._answer_body = QLabel()
         self._answer_body.setWordWrap(True)
         self._answer_body.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        footer = QLabel("Generated on your device from the results below. May be inaccurate.")
-        footer.setProperty("role", "muted")
+        self._answer_footer = QLabel(
+            tr("Generated on your device from the results below. May be inaccurate.")
+        )
+        self._answer_footer.setProperty("role", "muted")
+        footer = self._answer_footer
         for w in (header, self._answer_body, footer):
             col.addWidget(w)
         return card
@@ -423,7 +495,7 @@ class MainWindow(QMainWindow):
             self._answer_card.hide()
             return
         # Show an immediate "thinking" state; the first streamed token replaces it.
-        self._answer_body.setText("Thinking ...")
+        self._answer_body.setText(tr("Thinking ..."))
         self._answer_card.show()
         grounding = list(results)
 
@@ -472,18 +544,21 @@ class MainWindow(QMainWindow):
             badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
             layout.addWidget(badge)
 
-        heading = QLabel("Search the web privately")
-        heading.setProperty("role", "heading")
-        heading.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(heading)
+        self._empty_heading = QLabel(tr("Search the web privately"))
+        self._empty_heading.setProperty("role", "heading")
+        self._empty_heading.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(self._empty_heading)
 
-        subtitle = QLabel(
-            "Results are aggregated across engines on this device. Nothing is stored by default."
+        self._empty_subtitle = QLabel(
+            tr(
+                "Results are aggregated across engines on this device. "
+                "Nothing is stored by default."
+            )
         )
-        subtitle.setProperty("role", "muted")
-        subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        subtitle.setWordWrap(True)
-        layout.addWidget(subtitle)
+        self._empty_subtitle.setProperty("role", "muted")
+        self._empty_subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._empty_subtitle.setWordWrap(True)
+        layout.addWidget(self._empty_subtitle)
         return widget
 
     # --- Tray --------------------------------------------------------------------------------
@@ -497,18 +572,18 @@ class MainWindow(QMainWindow):
         tray.setToolTip("SearchMob Desktop")
 
         menu = QMenu(self)
-        self._tray_show_action = QAction("Show window", self)
+        self._tray_show_action = QAction(tr("Show window"), self)
         self._tray_show_action.triggered.connect(self._show_from_tray)
         menu.addAction(self._tray_show_action)
 
-        self._tray_server_action = QAction("Start server", self)
+        self._tray_server_action = QAction(tr("Start server"), self)
         self._tray_server_action.triggered.connect(self._on_toggle_server)
         menu.addAction(self._tray_server_action)
 
         menu.addSeparator()
-        quit_action = QAction("Quit SearchMob", self)
-        quit_action.triggered.connect(self._quit_from_tray)
-        menu.addAction(quit_action)
+        self._tray_quit_action = QAction(tr("Quit SearchMob"), self)
+        self._tray_quit_action.triggered.connect(self._quit_from_tray)
+        menu.addAction(self._tray_quit_action)
 
         tray.setContextMenu(menu)
         tray.activated.connect(self._on_tray_activated)
@@ -547,12 +622,13 @@ class MainWindow(QMainWindow):
         row = QHBoxLayout(bar)
         row.setContentsMargins(14, 8, 8, 8)
         row.setSpacing(10)
-        self._update_label = QLabel("An update is available.")
-        self._update_btn = QPushButton("Update")
+        self._update_label = QLabel(tr("An update is available."))
+        self._update_btn = QPushButton(tr("Update"))
         self._update_btn.clicked.connect(self._on_update_clicked)
-        dismiss = QPushButton("✕")  # MULTIPLICATION X, a compact close glyph
+        self._update_dismiss = QPushButton("✕")  # MULTIPLICATION X, a compact close glyph
+        dismiss = self._update_dismiss
         dismiss.setProperty("role", "dismiss")
-        dismiss.setToolTip("Dismiss until the next check")
+        dismiss.setToolTip(tr("Dismiss until the next check"))
         dismiss.setFixedWidth(34)
         dismiss.clicked.connect(self._update_banner_dismiss)
         row.addWidget(self._update_label, stretch=1)
@@ -582,9 +658,9 @@ class MainWindow(QMainWindow):
     def _surface_update(self, version: str, url: str, *, notify: bool) -> None:
         """Show/refresh the banner and optionally post a one-per-session system notification."""
         self._pending_update = (version, url)
-        self._update_label.setText(f"SearchMob {version} is available.")
+        self._update_label.setText(tr("SearchMob {version} is available.", version=version))
         self._update_btn.setEnabled(True)
-        self._update_btn.setText("Update")
+        self._update_btn.setText(tr("Update"))
         self._update_banner.show()
         if notify and not self._update_notified:
             self._update_notified = True
@@ -594,8 +670,8 @@ class MainWindow(QMainWindow):
         """Post a native system notification through the tray icon, when one is available."""
         if self._tray is not None and QSystemTrayIcon.supportsMessages():
             self._tray.showMessage(
-                "Update available",
-                f"SearchMob {version} is available. Click here to update.",
+                tr("Update available"),
+                tr("SearchMob {version} is available. Click here to update.", version=version),
                 app_icon(),
                 8000,
             )
@@ -659,7 +735,7 @@ class MainWindow(QMainWindow):
             return
         version, url = self._pending_update
         self._update_btn.setEnabled(False)
-        self._update_label.setText(f"Downloading SearchMob {version} …")
+        self._update_label.setText(tr("Downloading SearchMob {version} …", version=version))
         system = sys.platform
 
         async def _run() -> object:
@@ -689,7 +765,7 @@ class MainWindow(QMainWindow):
 
     def _on_update_download_done(self, payload: object, version: str, url: str) -> None:
         self._update_btn.setEnabled(True)
-        self._update_label.setText(f"SearchMob {version} is available.")
+        self._update_label.setText(tr("SearchMob {version} is available.", version=version))
         kind, value = payload if isinstance(payload, tuple) and len(payload) == 2 else ("page", url)
         if kind == "file":
             # Hand off to the OS: opening the installer mounts the .dmg / launches the .msi. While
@@ -697,17 +773,17 @@ class MainWindow(QMainWindow):
             if not QDesktopServices.openUrl(QUrl.fromLocalFile(value)):
                 # Could not auto-open it: reveal the folder so the user can run it themselves.
                 QDesktopServices.openUrl(QUrl.fromLocalFile(str(Path(value).parent)))
-            self.statusBar().showMessage(f"Downloaded installer: {value}")
+            self.statusBar().showMessage(tr("Downloaded installer: {path}", path=value))
         else:
             QDesktopServices.openUrl(QUrl(value))
 
     def _on_update_download_failed(self, message: str, version: str, url: str) -> None:
         self._update_btn.setEnabled(True)
-        self._update_label.setText(f"SearchMob {version} is available.")
+        self._update_label.setText(tr("SearchMob {version} is available.", version=version))
         QMessageBox.warning(
             self,
-            "Update download failed",
-            f"{message}\n\nOpening the release page so you can download it manually.",
+            tr("Update download failed"),
+            f"{message}\n\n" + tr("Opening the release page so you can download it manually."),
         )
         QDesktopServices.openUrl(QUrl(url))
 
@@ -718,7 +794,7 @@ class MainWindow(QMainWindow):
         if not query:
             return
         self._last_query = query
-        self._status_label.setText("Searching ...")
+        self._status_label.setText(tr("Searching ..."))
         self._didyoumean.hide()
         self._summary_card.hide()
         self._answer_card.hide()
@@ -768,12 +844,12 @@ class MainWindow(QMainWindow):
         else:
             self._summary_card.hide()
         if not isinstance(results, list):
-            self._status_label.setText("Search failed: unexpected result type.")
+            self._status_label.setText(tr("Search failed: unexpected result type."))
             self._body.setCurrentWidget(self._empty_state)
             return
         if not results:
             self._raw_results = []
-            self._status_label.setText("No results found.")
+            self._status_label.setText(tr("No results found."))
             self._body.setCurrentWidget(self._empty_state)
             self._maybe_show_correction()
             self._answer_card.hide()
@@ -811,8 +887,12 @@ class MainWindow(QMainWindow):
         self._displayed_results = ranked
         self._results.set_results(ranked)
         hidden = len(self._raw_results) - len(ranked)
-        suffix = f" ({hidden} hidden by your rules)" if hidden > 0 else ""
-        self._status_label.setText(f"{len(ranked)} results{suffix}.")
+        base = trn(len(ranked), "{n} result", "{n} results")
+        if hidden > 0:
+            hid = trn(hidden, "{n} hidden by your rules", "{n} hidden by your rules")
+            self._status_label.setText(f"{base} ({hid}).")
+        else:
+            self._status_label.setText(f"{base}.")
 
     def _on_vertical_clicked(self, button: QPushButton) -> None:
         """A category tab was clicked: switch vertical and re-run the search."""
@@ -838,7 +918,7 @@ class MainWindow(QMainWindow):
         """Rebuild the scope selector from the current rules; hide it when no lenses exist."""
         self._scope_combo.blockSignals(True)
         self._scope_combo.clear()
-        self._scope_combo.addItem("No scope", "")
+        self._scope_combo.addItem(tr("No scope"), "")
         for lens in self._ranking_rules.lenses:
             self._scope_combo.addItem(lens.name, lens.name)
         active = self._ranking_rules.active_lens or ""
@@ -914,7 +994,7 @@ class MainWindow(QMainWindow):
 
     def _on_search_failed(self, message: str) -> None:
         self._search_btn.setEnabled(True)
-        self._status_label.setText(f"Search failed: {message}")
+        self._status_label.setText(tr("Search failed: {message}", message=message))
         self._body.setCurrentWidget(self._empty_state)
 
     # --- Server ------------------------------------------------------------------------------
@@ -936,46 +1016,59 @@ class MainWindow(QMainWindow):
         else:
             self._server.start()
 
-    def _on_server_started(self, port: int) -> None:
-        bound = self._server.bound_url or f"http://127.0.0.1:{port}/"
-        external = self._server.is_external
-        if external:
-            # The background service owns this server; the app is only reusing it. Do not offer to
-            # stop a process the app does not own.
-            self._toggle_server_action.setText("Background service running")
-            self._toggle_server_action.setEnabled(False)
-            self.statusBar().showMessage(f"Using the background service at {bound}")
+    def _refresh_server_labels(self) -> None:
+        """Set the toolbar/tray/status-bar server text from the current state (and the locale).
+
+        Centralized so a language change can re-derive these live by re-calling it, keeping the
+        running/stopped/external wording translated and consistent.
+        """
+        if self._server.is_running:
+            bound = self._server.bound_url or ""
+            external = self._server.is_external
+            if external:
+                # The background service owns this server; the app is only reusing it. Do not offer
+                # to stop a process the app does not own.
+                self._toggle_server_action.setText(tr("Background service running"))
+                self._toggle_server_action.setEnabled(False)
+                self.statusBar().showMessage(tr("Using the background service at {url}", url=bound))
+            else:
+                self._toggle_server_action.setText(tr("Stop server"))
+                self._toggle_server_action.setEnabled(True)
+                self.statusBar().showMessage(tr("Server running at {url}", url=bound))
+            if self._tray is not None:
+                self._tray_server_action.setText(
+                    tr("Background service") if external else tr("Stop server")
+                )
+                self._tray_server_action.setEnabled(not external)
+                self._tray.setToolTip(f"SearchMob Desktop - {bound}")
         else:
-            self._toggle_server_action.setText("Stop server")
+            self._toggle_server_action.setText(tr("Start server"))
             self._toggle_server_action.setEnabled(True)
-            self.statusBar().showMessage(f"Server running at {bound}")
-        if self._tray is not None:
-            self._tray_server_action.setText("Background service" if external else "Stop server")
-            self._tray_server_action.setEnabled(not external)
-            self._tray.setToolTip(f"SearchMob Desktop - {bound}")
+            if self._tray is not None:
+                self._tray_server_action.setText(tr("Start server"))
+                self._tray_server_action.setEnabled(True)
+                self._tray.setToolTip("SearchMob Desktop")
+
+    def _on_server_started(self, port: int) -> None:
+        self._refresh_server_labels()
 
     def _on_server_stopped(self) -> None:
-        self._toggle_server_action.setText("Start server")
-        self._toggle_server_action.setEnabled(True)
-        self.statusBar().showMessage("Server stopped.")
-        if self._tray is not None:
-            self._tray_server_action.setText("Start server")
-            self._tray_server_action.setEnabled(True)
-            self._tray.setToolTip("SearchMob Desktop")
+        self._refresh_server_labels()
+        self.statusBar().showMessage(tr("Server stopped."))
 
     def _on_server_error(self, message: str) -> None:
-        self._toggle_server_action.setText("Start server")
-        self.statusBar().showMessage("Server error.")
+        self._toggle_server_action.setText(tr("Start server"))
+        self.statusBar().showMessage(tr("Server error."))
         if self._tray is not None:
-            self._tray_server_action.setText("Start server")
-        QMessageBox.warning(self, "Server error", message)
+            self._tray_server_action.setText(tr("Start server"))
+        QMessageBox.warning(self, tr("Server error"), message)
 
     # --- Dialogs -----------------------------------------------------------------------------
 
     def _update_theme_button(self) -> None:
         """Label the toggle with the theme it switches to: a sun for Light, a moon for Dark."""
         is_dark = active_theme().mode == DARK
-        self._theme_btn.setText("☀ Light" if is_dark else "☾ Dark")
+        self._theme_btn.setText("☀ " + tr("Light") if is_dark else "☾ " + tr("Dark"))
 
     def _on_toggle_theme(self) -> None:
         """Flip the mode between light and dark, persist it, and re-style the app live.

@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING
 from PySide6.QtCore import QThreadPool, QUrl, Signal
 from PySide6.QtGui import QDesktopServices, QGuiApplication
 from PySide6.QtWidgets import (
+    QApplication,
     QButtonGroup,
     QCheckBox,
     QComboBox,
@@ -64,6 +65,7 @@ from searchmob_desktop.engines.rank.personalize import reset as reset_personaliz
 from searchmob_desktop.engines.rank.personalize import to_json as personalization_to_json
 from searchmob_desktop.gui.browser_setup_dialog import BrowserSetupDialog
 from searchmob_desktop.gui.engines_catalog import ENGINE_CATALOG, is_engine_enabled
+from searchmob_desktop.gui.language import apply_language
 from searchmob_desktop.gui.theme import (
     DARK,
     DARK_THEME_IDS,
@@ -77,6 +79,7 @@ from searchmob_desktop.gui.theme import (
     clamp_font_pt,
 )
 from searchmob_desktop.gui.workers import AsyncWorker
+from searchmob_desktop.i18n import SUPPORTED_LOCALES, normalize_tag, tr, trn
 from searchmob_desktop.prefs import JsonPreferencesStore, UserPreferences
 from searchmob_desktop.update import (
     RELEASES_PAGE_URL,
@@ -160,7 +163,7 @@ class SettingsDialog(QDialog):
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Settings")
+        self.setWindowTitle(tr("Settings"))
         self.setModal(True)
         # Constrain the window to a 4:3 aspect ratio: open at 4:3 and keep height locked to 3/4 of
         # the width as the user resizes (see resizeEvent). The guard flag prevents the resize we
@@ -187,18 +190,18 @@ class SettingsDialog(QDialog):
         # now live inline on the Search engines page (one field per engine), so there is no separate
         # "API keys" section here. `pages` is the single source of order for both the nav and stack.
         pages: list[tuple[str, QWidget]] = [
-            ("Appearance", self._build_appearance_tab()),
-            ("Search engines", self._build_engines_tab()),
-            ("Result ranking", self._build_ranking_tab()),
-            ("Local AI", self._build_local_ai_tab()),
-            ("AI access", self._build_ai_access_tab()),
-            ("Search history", self._build_history_tab()),
-            ("Suggestions", self._build_suggestions_tab()),
-            ("Updates", self._build_updates_tab()),
-            ("Network", self._build_network_tab()),
-            ("Device setup", self._build_device_tab()),
+            (tr("Appearance"), self._build_appearance_tab()),
+            (tr("Search engines"), self._build_engines_tab()),
+            (tr("Result ranking"), self._build_ranking_tab()),
+            (tr("Local AI"), self._build_local_ai_tab()),
+            (tr("AI access"), self._build_ai_access_tab()),
+            (tr("Search history"), self._build_history_tab()),
+            (tr("Suggestions"), self._build_suggestions_tab()),
+            (tr("Updates"), self._build_updates_tab()),
+            (tr("Network"), self._build_network_tab()),
+            (tr("Device setup"), self._build_device_tab()),
         ]
-        self._local_ai_tab_index = [title for title, _ in pages].index("Local AI")
+        self._local_ai_tab_index = [title for title, _ in pages].index(tr("Local AI"))
 
         self._nav = QListWidget()
         self._nav.setObjectName("settingsNav")
@@ -219,7 +222,7 @@ class SettingsDialog(QDialog):
 
         bottom = QHBoxLayout()
         bottom.addStretch(1)
-        close = QPushButton("Close")
+        close = QPushButton(tr("Close"))
         close.clicked.connect(self.accept)
         bottom.addWidget(close)
         outer.addLayout(bottom)
@@ -246,20 +249,49 @@ class SettingsDialog(QDialog):
         try:
             self._prefs_store.save(new_prefs)
         except OSError as exc:
-            QMessageBox.warning(self, "Could not save settings", str(exc))
+            QMessageBox.warning(self, tr("Could not save settings"), str(exc))
 
     # --- Appearance --------------------------------------------------------------------------
 
     def _build_appearance_tab(self) -> QWidget:
         tab = QWidget()
         layout = QVBoxLayout(tab)
-        layout.addWidget(QLabel("Theme"))
+
+        # UI language: the whole interface switches live. An empty saved value means "follow the OS
+        # locale"; the first entry maps to that, then each shipped language by its own endonym.
+        layout.addWidget(QLabel(tr("Language")))
+        lang_combo = QComboBox()
+        lang_combo.addItem(tr("Follow system language"), "")
+        for loc in SUPPORTED_LOCALES:
+            lang_combo.addItem(loc.native_name, loc.tag)
+        saved_lang = self._prefs.language
+        lang_combo.setCurrentIndex(max(0, lang_combo.findData(saved_lang)))
+
+        def _on_language(index: int) -> None:
+            tag = lang_combo.itemData(index)
+            if not isinstance(tag, str):
+                return
+            self._save(replace(self._prefs, language=tag))
+            # Apply immediately: empty => follow OS now; otherwise the chosen locale. The whole
+            # shell (and this dialog, behind any modal) retranslates via the language bridge.
+            from searchmob_desktop.i18n import resolve_os_locale
+
+            app = QApplication.instance()
+            if isinstance(app, QApplication):
+                apply_language(app, normalize_tag(tag) if tag else resolve_os_locale())
+
+        lang_combo.currentIndexChanged.connect(_on_language)
+        lang_row = QHBoxLayout()
+        lang_row.addWidget(lang_combo, 1)
+        layout.addLayout(lang_row)
+
+        layout.addWidget(QLabel(tr("Theme")))
 
         group = QButtonGroup(tab)
         radios = [
-            (LIGHT, QRadioButton("Light")),
-            (DARK, QRadioButton("Dark")),
-            (SYSTEM, QRadioButton("Follow system")),
+            (LIGHT, QRadioButton(tr("Light"))),
+            (DARK, QRadioButton(tr("Dark"))),
+            (SYSTEM, QRadioButton(tr("Follow system"))),
         ]
         current = self._prefs.theme
         for value, radio in radios:
@@ -304,24 +336,24 @@ class SettingsDialog(QDialog):
         dark_combo.currentIndexChanged.connect(_on_dark_theme)
 
         light_row = QHBoxLayout()
-        light_row.addWidget(QLabel("Light theme"))
+        light_row.addWidget(QLabel(tr("Light theme")))
         light_row.addWidget(light_combo, 1)
         layout.addLayout(light_row)
         dark_row = QHBoxLayout()
-        dark_row.addWidget(QLabel("Dark theme"))
+        dark_row.addWidget(QLabel(tr("Dark theme")))
         dark_row.addWidget(dark_combo, 1)
         layout.addLayout(dark_row)
 
         # Text size: a comfortable 12pt base stepped by 2pt; leans larger rather than cramped.
-        layout.addWidget(QLabel("Text size"))
+        layout.addWidget(QLabel(tr("Text size")))
         size_row = QHBoxLayout()
-        smaller = QPushButton("A-")
-        larger = QPushButton("A+")
+        smaller = QPushButton(tr("A-"))
+        larger = QPushButton(tr("A+"))
         size_label = QLabel()
 
         def _refresh_size() -> None:
             pt = clamp_font_pt(self._prefs.font_point_size)
-            size_label.setText(f"{pt} pt")
+            size_label.setText(tr("{pt} pt", pt=pt))
             smaller.setEnabled(pt > MIN_FONT_PT)
             larger.setEnabled(pt < MAX_FONT_PT)
 
@@ -351,9 +383,12 @@ class SettingsDialog(QDialog):
         tab = QWidget()
         layout = QVBoxLayout(tab)
         intro = QLabel(
-            "Pick which engines run on every search. The free engines are on by default. An engine "
-            "marked API needs a key: check it, then enter the key in the field that appears. Keys "
-            "are stored in your encrypted vault and never written in plain text."
+            tr(
+                "Pick which engines run on every search. The free engines are on by default. "
+                "An engine marked API needs a key: check it, then enter the key in the field "
+                "that appears. Keys are stored in your encrypted vault and never written in "
+                "plain text."
+            )
         )
         intro.setWordWrap(True)
         layout.addWidget(intro)
@@ -367,11 +402,14 @@ class SettingsDialog(QDialog):
             layout.addWidget(self._build_engine_row(entry.id, entry.display_name, existing))
 
         note = QLabel(
-            "Engine changes apply to the next search; restart the local server (if running) to "
-            "pick up the new list there too. The CLI also reads SEARCHMOB_BRAVE_API_KEY, "
-            "SEARCHMOB_MOJEEK_API_KEY, and SEARCHMOB_KAGI_API_KEY from the environment. Note: "
-            "Brave's API terms prohibit storing results, so enabling history with a Brave key may "
-            "save Brave results locally, which is your responsibility under Brave's terms."
+            tr(
+                "Engine changes apply to the next search; restart the local server (if running) "
+                "to pick up the new list there too. The CLI also reads SEARCHMOB_BRAVE_API_KEY, "
+                "SEARCHMOB_MOJEEK_API_KEY, and SEARCHMOB_KAGI_API_KEY from the environment. "
+                "Note: Brave's API terms prohibit storing results, so enabling history with a "
+                "Brave key may save Brave results locally, which is your responsibility under "
+                "Brave's terms."
+            )
         )
         note.setWordWrap(True)
         note.setProperty("role", "muted")
@@ -406,10 +444,10 @@ class SettingsDialog(QDialog):
         key_row.setContentsMargins(24, 0, 0, 0)  # indent under the checkbox
         key_input = QLineEdit()
         key_input.setEchoMode(QLineEdit.EchoMode.Password)
-        key_input.setPlaceholderText("API key")
-        key_input.setAccessibleName(f"{display_name} key")
-        save_btn = QPushButton("Save")
-        clear_btn = QPushButton("Clear")
+        key_input.setPlaceholderText(tr("API key"))
+        key_input.setAccessibleName(tr("{name} key", name=display_name))
+        save_btn = QPushButton(tr("Save"))
+        clear_btn = QPushButton(tr("Clear"))
         save_btn.clicked.connect(lambda: self._save_api_key(vault_key, key_input))
         clear_btn.clicked.connect(lambda: self._clear_api_key(vault_key, key_input))
         status = QLabel("")
@@ -447,34 +485,38 @@ class SettingsDialog(QDialog):
         layout = QVBoxLayout(tab)
         layout.addWidget(
             QLabel(
-                "Personalize results locally. Block / lower / raise / pin a domain by "
-                "right-clicking a result; pick a scope to focus results on a set of sites; or "
-                "import goggles (Brave Goggles format). Rules are stored in your encrypted vault "
-                "and applied on this device only."
+                tr(
+                    "Personalize results locally. Block / lower / raise / pin a domain by "
+                    "right-clicking a result; pick a scope to focus results on a set of sites; "
+                    "or import goggles (Brave Goggles format). Rules are stored in your "
+                    "encrypted vault and applied on this device only."
+                )
             )
         )
 
         self._personalize_check = QCheckBox(
-            "Learn from my clicks to personalize ranking (recommended)"
+            tr("Learn from my clicks to personalize ranking (recommended)")
         )
         self._personalize_check.setChecked(self._prefs.personalization_enabled)
         self._personalize_check.toggled.connect(self._on_personalization_toggled)
         layout.addWidget(self._personalize_check)
         personalize_help = QLabel(
-            "Quietly moves the sites you tend to click higher, and gets better the more you "
-            "search. The learned model is encrypted in your vault, never leaves this device, and "
-            "is never trained by other people on your network. Export it to back it up or move it "
-            "to another device, or reset it any time."
+            tr(
+                "Quietly moves the sites you tend to click higher, and gets better the more you "
+                "search. The learned model is encrypted in your vault, never leaves this device, "
+                "and is never trained by other people on your network. Export it to back it up "
+                "or move it to another device, or reset it any time."
+            )
         )
         personalize_help.setWordWrap(True)
         personalize_help.setProperty("role", "muted")
         layout.addWidget(personalize_help)
         personalize_btns = QHBoxLayout()
-        export_model_btn = QPushButton("Export model...")
+        export_model_btn = QPushButton(tr("Export model..."))
         export_model_btn.clicked.connect(self._on_export_personalization)
-        import_model_btn = QPushButton("Import model...")
+        import_model_btn = QPushButton(tr("Import model..."))
         import_model_btn.clicked.connect(self._on_import_personalization)
-        reset_model_btn = QPushButton("Reset")
+        reset_model_btn = QPushButton(tr("Reset"))
         reset_model_btn.clicked.connect(self._on_reset_personalization)
         personalize_btns.addWidget(export_model_btn)
         personalize_btns.addWidget(import_model_btn)
@@ -483,9 +525,13 @@ class SettingsDialog(QDialog):
         layout.addLayout(personalize_btns)
 
         slop_row = QHBoxLayout()
-        slop_row.addWidget(QLabel("Filter AI-generated / low-quality sites:"))
+        slop_row.addWidget(QLabel(tr("Filter AI-generated / low-quality sites:")))
         self._slop_combo = QComboBox()
-        for label, value in (("Downrank", "downrank"), ("Hide", "hide"), ("Off", "off")):
+        for label, value in (
+            (tr("Downrank"), "downrank"),
+            (tr("Hide"), "hide"),
+            (tr("Off"), "off"),
+        ):
             self._slop_combo.addItem(label, value)
         self._slop_combo.setCurrentIndex(
             max(0, self._slop_combo.findData(self._prefs.ai_slop_mode))
@@ -494,29 +540,32 @@ class SettingsDialog(QDialog):
         slop_row.addWidget(self._slop_combo, stretch=1)
         layout.addLayout(slop_row)
         slop_help = QLabel(
-            "On by default. Downrank pushes known AI content farms and low-quality sites below "
-            "other results; Hide removes them. The bundled list is applied on your device - your "
-            "query never leaves it for filtering - and your own domain rules above always win."
+            tr(
+                "On by default. Downrank pushes known AI content farms and low-quality sites "
+                "below other results; Hide removes them. The bundled list is applied on your "
+                "device - your query never leaves it for filtering - and your own domain rules "
+                "above always win."
+            )
         )
         slop_help.setWordWrap(True)
         slop_help.setProperty("role", "muted")
         layout.addWidget(slop_help)
 
         lens_row = QHBoxLayout()
-        lens_row.addWidget(QLabel("Active scope:"))
+        lens_row.addWidget(QLabel(tr("Active scope:")))
         self._lens_combo = QComboBox()
         self._lens_combo.currentIndexChanged.connect(self._on_lens_selected)
         lens_row.addWidget(self._lens_combo, stretch=1)
         layout.addLayout(lens_row)
 
-        layout.addWidget(QLabel("Domain rules"))
+        layout.addWidget(QLabel(tr("Domain rules")))
         self._rules_list = QListWidget()
         self._rule_domains: list[str] = []
         layout.addWidget(self._rules_list, stretch=1)
         rules_btns = QHBoxLayout()
-        remove_btn = QPushButton("Remove selected")
+        remove_btn = QPushButton(tr("Remove selected"))
         remove_btn.clicked.connect(self._on_remove_domain_rule)
-        clear_rules_btn = QPushButton("Clear all domain rules")
+        clear_rules_btn = QPushButton(tr("Clear all domain rules"))
         clear_rules_btn.clicked.connect(self._on_clear_domain_rules)
         rules_btns.addWidget(remove_btn)
         rules_btns.addWidget(clear_rules_btn)
@@ -528,16 +577,16 @@ class SettingsDialog(QDialog):
         layout.addWidget(self._goggle_status)
         self._goggle_text = QPlainTextEdit()
         self._goggle_text.setPlaceholderText(
-            "Paste goggle rules, e.g.  $discard,site=example.com  or  $boost,site=dev.to"
+            tr("Paste goggle rules, e.g.  $discard,site=example.com  or  $boost,site=dev.to")
         )
         self._goggle_text.setFixedHeight(72)
         layout.addWidget(self._goggle_text)
         goggle_btns = QHBoxLayout()
-        import_paste_btn = QPushButton("Import pasted goggles")
+        import_paste_btn = QPushButton(tr("Import pasted goggles"))
         import_paste_btn.clicked.connect(self._on_import_goggles_pasted)
-        import_file_btn = QPushButton("Import goggles file...")
+        import_file_btn = QPushButton(tr("Import goggles file..."))
         import_file_btn.clicked.connect(self._on_import_goggles_file)
-        clear_goggles_btn = QPushButton("Clear goggles")
+        clear_goggles_btn = QPushButton(tr("Clear goggles"))
         clear_goggles_btn.clicked.connect(self._on_clear_goggles)
         goggle_btns.addWidget(import_paste_btn)
         goggle_btns.addWidget(import_file_btn)
@@ -546,9 +595,9 @@ class SettingsDialog(QDialog):
         layout.addLayout(goggle_btns)
 
         io_row = QHBoxLayout()
-        export_btn = QPushButton("Export rules...")
+        export_btn = QPushButton(tr("Export rules..."))
         export_btn.clicked.connect(self._on_export_rules)
-        import_btn = QPushButton("Import rules...")
+        import_btn = QPushButton(tr("Import rules..."))
         import_btn.clicked.connect(self._on_import_rules)
         io_row.addWidget(export_btn)
         io_row.addWidget(import_btn)
@@ -562,9 +611,11 @@ class SettingsDialog(QDialog):
         if not save_ranking_rules(rules):
             QMessageBox.warning(
                 self,
-                "Could not save ranking rules",
-                "The encrypted vault is unavailable, so the rules could not be saved. Enable "
-                "search history or save an API key first to initialize the vault.",
+                tr("Could not save ranking rules"),
+                tr(
+                    "The encrypted vault is unavailable, so the rules could not be saved. "
+                    "Enable search history or save an API key first to initialize the vault."
+                ),
             )
             return
         self._ranking = rules
@@ -574,7 +625,7 @@ class SettingsDialog(QDialog):
     def _refresh_ranking_widgets(self) -> None:
         self._lens_combo.blockSignals(True)
         self._lens_combo.clear()
-        self._lens_combo.addItem("None")
+        self._lens_combo.addItem(tr("None"))
         names = [lens.name for lens in self._ranking.lenses]
         for name in names:
             self._lens_combo.addItem(name)
@@ -585,14 +636,14 @@ class SettingsDialog(QDialog):
         self._rules_list.clear()
         self._rule_domains = []
         for domain, rule in sorted(self._ranking.domain_rules.items()):
-            self._rules_list.addItem(f"{domain}  -  {rule.value}")
+            self._rules_list.addItem(tr("{domain}  -  {rule}", domain=domain, rule=rule.value))
             self._rule_domains.append(domain)
 
         count = len(self._ranking.goggles)
         self._goggle_status.setText(
-            f"{count} goggle rule{'' if count == 1 else 's'} imported."
+            trn(count, "{n} goggle rule imported.", "{n} goggle rules imported.")
             if count
-            else "No goggles imported."
+            else tr("No goggles imported.")
         )
 
     def _on_lens_selected(self, index: int) -> None:
@@ -618,7 +669,10 @@ class SettingsDialog(QDialog):
 
     def _on_import_goggles_file(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
-            self, "Import goggles", "", "Goggle files (*.goggle *.txt);;All files (*)"
+            self,
+            tr("Import goggles"),
+            "",
+            "Goggle files (*.goggle *.txt);;All files (*)",
         )
         if not path:
             return
@@ -631,18 +685,27 @@ class SettingsDialog(QDialog):
         parsed = parse_goggles(text)
         if not parsed:
             QMessageBox.information(
-                self, "No goggle rules", "Nothing recognizable to import from that text."
+                self,
+                tr("No goggle rules"),
+                tr("Nothing recognizable to import from that text."),
             )
             return
         self._save_ranking(replace(self._ranking, goggles=self._ranking.goggles + tuple(parsed)))
-        QMessageBox.information(self, "Goggles imported", f"Imported {len(parsed)} rule(s).")
+        QMessageBox.information(
+            self,
+            tr("Goggles imported"),
+            trn(len(parsed), "Imported {n} rule.", "Imported {n} rules."),
+        )
 
     def _on_clear_goggles(self) -> None:
         self._save_ranking(replace(self._ranking, goggles=()))
 
     def _on_export_rules(self) -> None:
         path, _ = QFileDialog.getSaveFileName(
-            self, "Export ranking rules", "searchmob-ranking.json", "JSON files (*.json)"
+            self,
+            tr("Export ranking rules"),
+            "searchmob-ranking.json",
+            "JSON files (*.json)",
         )
         if not path:
             return
@@ -650,13 +713,16 @@ class SettingsDialog(QDialog):
             with open(path, "w", encoding="utf-8") as fh:
                 fh.write(self._ranking.to_json())
         except OSError as exc:
-            QMessageBox.warning(self, "Export failed", str(exc))
+            QMessageBox.warning(self, tr("Export failed"), str(exc))
             return
-        QMessageBox.information(self, "Rules exported", "Your ranking rules were exported.")
+        QMessageBox.information(self, tr("Rules exported"), tr("Your ranking rules were exported."))
 
     def _on_import_rules(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
-            self, "Import ranking rules", "", "JSON files (*.json);;All files (*)"
+            self,
+            tr("Import ranking rules"),
+            "",
+            "JSON files (*.json);;All files (*)",
         )
         if not path:
             return
@@ -664,7 +730,7 @@ class SettingsDialog(QDialog):
         if text is None:
             return
         self._save_ranking(RankingRules.from_json(text))
-        QMessageBox.information(self, "Rules imported", "Your ranking rules were imported.")
+        QMessageBox.information(self, tr("Rules imported"), tr("Your ranking rules were imported."))
 
     # --- Click personalization ---------------------------------------------------------------
 
@@ -674,7 +740,10 @@ class SettingsDialog(QDialog):
 
     def _on_export_personalization(self) -> None:
         path, _ = QFileDialog.getSaveFileName(
-            self, "Export personalization", "searchmob-personalization.json", "JSON files (*.json)"
+            self,
+            tr("Export personalization"),
+            "searchmob-personalization.json",
+            "JSON files (*.json)",
         )
         if not path:
             return
@@ -682,15 +751,20 @@ class SettingsDialog(QDialog):
             with open(path, "w", encoding="utf-8") as fh:
                 fh.write(personalization_to_json(load_personalization()))
         except OSError as exc:
-            QMessageBox.warning(self, "Export failed", str(exc))
+            QMessageBox.warning(self, tr("Export failed"), str(exc))
             return
         QMessageBox.information(
-            self, "Personalization exported", "Your learned ranking model was exported."
+            self,
+            tr("Personalization exported"),
+            tr("Your learned ranking model was exported."),
         )
 
     def _on_import_personalization(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
-            self, "Import personalization", "", "JSON files (*.json);;All files (*)"
+            self,
+            tr("Import personalization"),
+            "",
+            "JSON files (*.json);;All files (*)",
         )
         if not path:
             return
@@ -701,15 +775,19 @@ class SettingsDialog(QDialog):
             self._warn_vault_unavailable()
             return
         QMessageBox.information(
-            self, "Personalization imported", "Your learned ranking model was imported."
+            self,
+            tr("Personalization imported"),
+            tr("Your learned ranking model was imported."),
         )
 
     def _on_reset_personalization(self) -> None:
         confirm = QMessageBox.question(
             self,
-            "Reset personalization",
-            "Forget everything SearchMob has learned from your clicks? Your ranking rules and "
-            "scopes are not affected.",
+            tr("Reset personalization"),
+            tr(
+                "Forget everything SearchMob has learned from your clicks? "
+                "Your ranking rules and scopes are not affected."
+            ),
         )
         if confirm != QMessageBox.StandardButton.Yes:
             return
@@ -717,15 +795,19 @@ class SettingsDialog(QDialog):
             self._warn_vault_unavailable()
             return
         QMessageBox.information(
-            self, "Personalization reset", "SearchMob forgot what it had learned from your clicks."
+            self,
+            tr("Personalization reset"),
+            tr("SearchMob forgot what it had learned from your clicks."),
         )
 
     def _warn_vault_unavailable(self) -> None:
         QMessageBox.warning(
             self,
-            "Vault unavailable",
-            "The encrypted vault is unavailable, so the personalization model could not be saved. "
-            "Enable search history or save an API key first to initialize the vault.",
+            tr("Vault unavailable"),
+            tr(
+                "The encrypted vault is unavailable, so the personalization model could not be "
+                "saved. Enable search history or save an API key first to initialize the vault."
+            ),
         )
 
     def _read_capped_text(self, path: str) -> str | None:
@@ -733,13 +815,15 @@ class SettingsDialog(QDialog):
         try:
             if os.path.getsize(path) > _MAX_IMPORT_BYTES:
                 QMessageBox.warning(
-                    self, "File too large", "That file is too large to import (limit 4 MiB)."
+                    self,
+                    tr("File too large"),
+                    tr("That file is too large to import (limit 4 MiB)."),
                 )
                 return None
             with open(path, encoding="utf-8") as fh:
                 return fh.read(_MAX_IMPORT_BYTES + 1)
         except OSError as exc:
-            QMessageBox.warning(self, "Import failed", str(exc))
+            QMessageBox.warning(self, tr("Import failed"), str(exc))
             return None
 
     # --- API keys (rendered inline on the Search engines page) -------------------------------
@@ -768,7 +852,7 @@ class SettingsDialog(QDialog):
                 storage.unlock_keyring()
             self._storage = storage
         except Exception as exc:
-            QMessageBox.warning(self, "Vault unavailable", str(exc))
+            QMessageBox.warning(self, tr("Vault unavailable"), str(exc))
             return None
         return self._storage
 
@@ -778,9 +862,11 @@ class SettingsDialog(QDialog):
             if storage is not None and storage.mode == WrapMode.PASSPHRASE:
                 QMessageBox.information(
                     self,
-                    "Vault locked",
-                    "Your vault is in zero-knowledge mode. Unlock it from the CLI "
-                    "(searchmob-desktop vault unlock) before saving keys here.",
+                    tr("Vault locked"),
+                    tr(
+                        "Your vault is in zero-knowledge mode. Unlock it from the CLI "
+                        "(searchmob-desktop vault unlock) before saving keys here."
+                    ),
                 )
             return None
         prefs_file = _vault_prefs_path(storage.metadata_store)
@@ -802,10 +888,10 @@ class SettingsDialog(QDialog):
         try:
             ep.put(key, value)
         except OSError as exc:
-            QMessageBox.warning(self, "Could not save key", str(exc))
+            QMessageBox.warning(self, tr("Could not save key"), str(exc))
             return
         input_widget.clear()
-        self._set_key_status(key, "Key saved.")
+        self._set_key_status(key, tr("Key saved."))
 
     def _clear_api_key(self, key: str, input_widget: QLineEdit) -> None:
         ep = self._vault_prefs()
@@ -814,10 +900,10 @@ class SettingsDialog(QDialog):
         try:
             ep.remove(key)
         except OSError as exc:
-            QMessageBox.warning(self, "Could not clear key", str(exc))
+            QMessageBox.warning(self, tr("Could not clear key"), str(exc))
             return
         input_widget.clear()
-        self._set_key_status(key, "Key cleared.")
+        self._set_key_status(key, tr("Key cleared."))
 
     # --- Local AI ----------------------------------------------------------------------------
 
@@ -826,10 +912,12 @@ class SettingsDialog(QDialog):
         layout = QVBoxLayout(tab)
 
         intro = QLabel(
-            "Show a short answer above results, generated by a language model running on this "
-            "computer. It uses only your search results and never leaves your device. Pick a model "
-            "below to turn it on (you need Ollama on port 11434 or LM Studio on port 1234). A "
-            "large model can take a while to answer the first time."
+            tr(
+                "Show a short answer above results, generated by a language model running on "
+                "this computer. It uses only your search results and never leaves your device. "
+                "Pick a model below to turn it on (you need Ollama on port 11434 or LM Studio "
+                "on port 1234). A large model can take a while to answer the first time."
+            )
         )
         intro.setWordWrap(True)
         intro.setProperty("role", "muted")
@@ -839,11 +927,11 @@ class SettingsDialog(QDialog):
         # machine. Pick a model to turn the answer box on; pick "Off" to turn it off. There is no
         # separate enable step, so a chosen model is never silently inert.
         model_row = QHBoxLayout()
-        model_row.addWidget(QLabel("Model:"))
+        model_row.addWidget(QLabel(tr("Model:")))
         self._llm_combo = QComboBox()
         self._llm_combo.currentIndexChanged.connect(self._on_llm_selection_changed)
         model_row.addWidget(self._llm_combo, stretch=1)
-        self._detect_btn = QPushButton("Rescan")
+        self._detect_btn = QPushButton(tr("Rescan"))
         self._detect_btn.clicked.connect(self._on_detect_models)
         model_row.addWidget(self._detect_btn)
         layout.addLayout(model_row)
@@ -873,14 +961,19 @@ class SettingsDialog(QDialog):
         models: list[tuple[str, str]] = []  # (key, display)
         for backend in backends:
             for model in backend.models:
-                models.append((_llm_key(backend.base_url, model), f"{backend.name} — {model}"))
+                models.append(
+                    (
+                        _llm_key(backend.base_url, model),
+                        tr("{backend} — {model}", backend=backend.name, model=model),
+                    )
+                )
         saved_key = _llm_key(self._prefs.llm_base_url, self._prefs.llm_model)
         if self._prefs.llm_model and not any(key == saved_key for key, _ in models):
-            models.insert(0, (saved_key, f"{self._prefs.llm_model} (saved)"))
+            models.insert(0, (saved_key, tr("{model} (saved)", model=self._prefs.llm_model)))
 
         self._llm_combo.blockSignals(True)
         self._llm_combo.clear()
-        self._llm_combo.addItem("Off (no AI answer)", "")
+        self._llm_combo.addItem(tr("Off (no AI answer)"), "")
         for key, display in models:
             self._llm_combo.addItem(display, key)
         # Select the saved model only if the feature is on; otherwise rest on "Off".
@@ -903,7 +996,7 @@ class SettingsDialog(QDialog):
 
     def _on_detect_models(self) -> None:
         self._detect_btn.setEnabled(False)
-        self._llm_status.setText("Looking for local model servers ...")
+        self._llm_status.setText(tr("Looking for local model servers ..."))
 
         async def _probe() -> list[LlmBackend]:
             return await detect_backends()
@@ -916,7 +1009,7 @@ class SettingsDialog(QDialog):
     def _on_detect_failed(self, _message: str) -> None:
         self._detect_btn.setEnabled(True)
         self._llm_status.setText(
-            "Could not reach a local model server. Is Ollama or LM Studio running?"
+            tr("Could not reach a local model server. Is Ollama or LM Studio running?")
         )
 
     def _on_models_detected(self, payload: object) -> None:
@@ -927,10 +1020,16 @@ class SettingsDialog(QDialog):
         self._populate_llm_combo(backends)
         count = sum(len(b.models) for b in backends)
         if count:
-            self._llm_status.setText(f"Found {count} model(s). Pick one to turn on the answer box.")
+            self._llm_status.setText(
+                trn(
+                    count,
+                    "Found {n} model. Pick one to turn on the answer box.",
+                    "Found {n} models. Pick one to turn on the answer box.",
+                )
+            )
         else:
             self._llm_status.setText(
-                "No local model server found on 127.0.0.1 (Ollama :11434 or LM Studio :1234)."
+                tr("No local model server found on 127.0.0.1 (Ollama :11434 or LM Studio :1234).")
             )
 
     def _on_llm_selection_changed(self) -> None:
@@ -946,21 +1045,23 @@ class SettingsDialog(QDialog):
                     llm_enabled=True,
                 )
             )
-            self._llm_status.setText(f"On. Answers will use {model}.")
+            self._llm_status.setText(tr("On. Answers will use {model}.", model=model))
         else:
             self._save(replace(self._prefs, llm_enabled=False))
-            self._llm_status.setText("Off.")
+            self._llm_status.setText(tr("Off."))
 
     # --- Search history ----------------------------------------------------------------------
 
     def _build_history_tab(self) -> QWidget:
         tab = QWidget()
         layout = QVBoxLayout(tab)
-        cb = QCheckBox("Store search history")
+        cb = QCheckBox(tr("Store search history"))
         cb.setChecked(self._prefs.history_enabled)
         sub = QLabel(
-            "Off by default. When on, queries are stored locally and encrypted at rest. "
-            "Toggling here takes effect on the next search."
+            tr(
+                "Off by default. When on, queries are stored locally and encrypted at rest. "
+                "Toggling here takes effect on the next search."
+            )
         )
         sub.setWordWrap(True)
         sub.setProperty("role", "muted")
@@ -974,11 +1075,11 @@ class SettingsDialog(QDialog):
         layout.addWidget(cb)
         layout.addWidget(sub)
 
-        clear_btn = QPushButton("Clear history")
+        clear_btn = QPushButton(tr("Clear history"))
         clear_btn.clicked.connect(self._on_clear_history)
         layout.addWidget(clear_btn)
 
-        zk_btn = QPushButton("Set up zero-knowledge passphrase")
+        zk_btn = QPushButton(tr("Set up zero-knowledge passphrase"))
         zk_btn.clicked.connect(self._on_setup_zero_knowledge)
         layout.addWidget(zk_btn)
 
@@ -990,10 +1091,12 @@ class SettingsDialog(QDialog):
             try:
                 self._history_store.clear()
             except Exception as exc:
-                QMessageBox.warning(self, "Could not clear history", str(exc))
+                QMessageBox.warning(self, tr("Could not clear history"), str(exc))
                 return
             self.historyCleared.emit()
-            QMessageBox.information(self, "History cleared", "Your search history was cleared.")
+            QMessageBox.information(
+                self, tr("History cleared"), tr("Your search history was cleared.")
+            )
 
     def _on_setup_zero_knowledge(self) -> None:
         # The warning + the matched-pair passphrase capture happen in one dialog so we cannot
@@ -1001,8 +1104,8 @@ class SettingsDialog(QDialog):
         # the vault.
         confirm = QMessageBox(self)
         confirm.setIcon(QMessageBox.Icon.Warning)
-        confirm.setWindowTitle("Zero-knowledge encryption")
-        confirm.setText("Set up zero-knowledge passphrase?")
+        confirm.setWindowTitle(tr("Zero-knowledge encryption"))
+        confirm.setText(tr("Set up zero-knowledge passphrase?"))
         confirm.setInformativeText(ZERO_KNOWLEDGE_UNRECOVERABLE_WARNING)
         confirm.setStandardButtons(
             QMessageBox.StandardButton.Cancel | QMessageBox.StandardButton.Ok
@@ -1018,8 +1121,8 @@ class SettingsDialog(QDialog):
         if storage is None or not storage.is_unlocked:
             QMessageBox.warning(
                 self,
-                "Vault not ready",
-                "The vault is not unlocked. Run searchmob-desktop vault unlock first.",
+                tr("Vault not ready"),
+                tr("The vault is not unlocked. Run searchmob-desktop vault unlock first."),
             )
             return
         try:
@@ -1029,13 +1132,15 @@ class SettingsDialog(QDialog):
             for i in range(len(buf)):
                 buf[i] = 0
         except Exception as exc:
-            QMessageBox.warning(self, "Could not enable zero-knowledge", str(exc))
+            QMessageBox.warning(self, tr("Could not enable zero-knowledge"), str(exc))
             return
         QMessageBox.information(
             self,
-            "Zero-knowledge enabled",
-            "The vault is now encrypted with your passphrase. Keep it safe; the data is "
-            "unrecoverable without it.",
+            tr("Zero-knowledge enabled"),
+            tr(
+                "The vault is now encrypted with your passphrase. Keep it safe; the data is "
+                "unrecoverable without it."
+            ),
         )
 
     # --- Suggestions -------------------------------------------------------------------------
@@ -1043,12 +1148,14 @@ class SettingsDialog(QDialog):
     def _build_suggestions_tab(self) -> QWidget:
         tab = QWidget()
         layout = QVBoxLayout(tab)
-        cb = QCheckBox("Live suggestions from the web")
+        cb = QCheckBox(tr("Live suggestions from the web"))
         cb.setChecked(self._prefs.upstream_suggestions_enabled)
         sub = QLabel(
-            "Off by default. When on, what you type is sent to DuckDuckGo's suggestion service "
-            "through the privacy proxy as you type, to offer live autocomplete. Off keeps "
-            "suggestions to your local history only."
+            tr(
+                "Off by default. When on, what you type is sent to DuckDuckGo's suggestion "
+                "service through the privacy proxy as you type, to offer live autocomplete. "
+                "Off keeps suggestions to your local history only."
+            )
         )
         sub.setWordWrap(True)
         sub.setProperty("role", "muted")
@@ -1060,12 +1167,14 @@ class SettingsDialog(QDialog):
         layout.addWidget(cb)
         layout.addWidget(sub)
 
-        summary_cb = QCheckBox("Show a Wikipedia summary for some searches")
+        summary_cb = QCheckBox(tr("Show a Wikipedia summary for some searches"))
         summary_cb.setChecked(self._prefs.summary_enabled)
         summary_sub = QLabel(
-            "On by default. For entity-like queries, shows a short summary card above results from "
-            "the related Wikipedia article. Adds at most one extra request to Wikipedia (already a "
-            "search engine here) through the privacy proxy."
+            tr(
+                "On by default. For entity-like queries, shows a short summary card above "
+                "results from the related Wikipedia article. Adds at most one extra request "
+                "to Wikipedia (already a search engine here) through the privacy proxy."
+            )
         )
         summary_sub.setWordWrap(True)
         summary_sub.setProperty("role", "muted")
@@ -1087,10 +1196,12 @@ class SettingsDialog(QDialog):
         tab = QWidget()
         layout = QVBoxLayout(tab)
         intro = QLabel(
-            "Let an AI agent (Claude Desktop, an IDE assistant, ...) run its web searches through "
-            "SearchMob instead of a third-party search engine. The agent launches SearchMob as a "
-            "local subprocess (nothing listens on the network) and gets a private 'web_search' "
-            "tool. Add this to your agent's MCP server config:"
+            tr(
+                "Let an AI agent (Claude Desktop, an IDE assistant, ...) run its web searches "
+                "through SearchMob instead of a third-party search engine. The agent launches "
+                "SearchMob as a local subprocess (nothing listens on the network) and gets a "
+                "private 'web_search' tool. Add this to your agent's MCP server config:"
+            )
         )
         intro.setWordWrap(True)
         layout.addWidget(intro)
@@ -1101,13 +1212,16 @@ class SettingsDialog(QDialog):
         self._mcp_config.setFixedHeight(150)
         layout.addWidget(self._mcp_config)
 
-        copy_btn = QPushButton("Copy config")
+        copy_btn = QPushButton(tr("Copy config"))
         copy_btn.clicked.connect(self._on_copy_mcp_config)
         layout.addWidget(copy_btn)
 
         note = QLabel(
-            "Searches still go only to your configured engines through the privacy proxy, and your "
-            "ranking rules and AI-slop filter apply. Nothing runs until your agent launches it."
+            tr(
+                "Searches still go only to your configured engines through the privacy proxy, "
+                "and your ranking rules and AI-slop filter apply. Nothing runs until your "
+                "agent launches it."
+            )
         )
         note.setWordWrap(True)
         note.setProperty("role", "muted")
@@ -1123,12 +1237,14 @@ class SettingsDialog(QDialog):
     def _build_updates_tab(self) -> QWidget:
         tab = QWidget()
         layout = QVBoxLayout(tab)
-        cb = QCheckBox("Check for updates on launch")
+        cb = QCheckBox(tr("Check for updates on launch"))
         cb.setChecked(self._prefs.update_check_enabled)
         sub = QLabel(
-            "On by default. Checks GitHub about once a day for a newer release, through the "
-            "privacy proxy. This is the only outbound traffic that is not a search. Turn it "
-            "off to disable it."
+            tr(
+                "On by default. Checks GitHub about once a day for a newer release, through "
+                "the privacy proxy. This is the only outbound traffic that is not a search. "
+                "Turn it off to disable it."
+            )
         )
         sub.setWordWrap(True)
         sub.setProperty("role", "muted")
@@ -1140,7 +1256,7 @@ class SettingsDialog(QDialog):
         layout.addWidget(cb)
         layout.addWidget(sub)
 
-        self._check_now_btn = QPushButton("Check now")
+        self._check_now_btn = QPushButton(tr("Check now"))
         self._check_now_btn.clicked.connect(self._on_check_now)
         layout.addWidget(self._check_now_btn)
         layout.addStretch(1)
@@ -1172,8 +1288,8 @@ class SettingsDialog(QDialog):
             if info is None:
                 self._show_update_dialog(
                     QMessageBox.Icon.Warning,
-                    "Update check failed",
-                    "Could not reach GitHub.",
+                    tr("Update check failed"),
+                    tr("Could not reach GitHub."),
                     RELEASES_PAGE_URL,
                 )
                 return
@@ -1181,21 +1297,26 @@ class SettingsDialog(QDialog):
                 v = info.latest_version
                 self._show_update_dialog(
                     QMessageBox.Icon.Information,
-                    "Update available",
-                    f"A newer version is available: {v.year:02d}.{v.month:02d}.{v.build:02d}.",
+                    tr("Update available"),
+                    tr(
+                        "A newer version is available: {year:02d}.{month:02d}.{build:02d}.",
+                        year=v.year,
+                        month=v.month,
+                        build=v.build,
+                    ),
                     info.release_url,
                 )
             else:
                 QMessageBox.information(
                     self,
-                    "Up to date",
-                    f"You are on the latest version ({__version__}).",
+                    tr("Up to date"),
+                    tr("You are on the latest version ({version}).", version=__version__),
                 )
 
         def _on_failed(message: str) -> None:
             self._check_now_btn.setEnabled(True)
             self._show_update_dialog(
-                QMessageBox.Icon.Warning, "Update check failed", message, RELEASES_PAGE_URL
+                QMessageBox.Icon.Warning, tr("Update check failed"), message, RELEASES_PAGE_URL
             )
 
         worker.signals.finished.connect(_on_finished)
@@ -1214,7 +1335,7 @@ class SettingsDialog(QDialog):
         box.setIcon(icon)
         box.setWindowTitle(title)
         box.setText(message)
-        open_button = box.addButton("Open release page", QMessageBox.ButtonRole.AcceptRole)
+        open_button = box.addButton(tr("Open release page"), QMessageBox.ButtonRole.AcceptRole)
         box.addButton(QMessageBox.StandardButton.Close)
         box.setDefaultButton(open_button)
         box.exec()
@@ -1226,9 +1347,11 @@ class SettingsDialog(QDialog):
     def _build_network_tab(self) -> QWidget:
         tab = QWidget()
         layout = QVBoxLayout(tab)
-        cb = QCheckBox("Allow access from your network (advanced)")
+        cb = QCheckBox(tr("Allow access from your network (advanced)"))
         cb.setChecked(self._prefs.network_access_enabled)
-        sub = QLabel("Off by default. When on, other devices on your network can reach SearchMob.")
+        sub = QLabel(
+            tr("Off by default. When on, other devices on your network can reach SearchMob.")
+        )
         sub.setWordWrap(True)
         sub.setProperty("role", "muted")
 
@@ -1237,8 +1360,8 @@ class SettingsDialog(QDialog):
                 # Show the warning modal. If declined, snap the checkbox back to off.
                 confirm = QMessageBox(self)
                 confirm.setIcon(QMessageBox.Icon.Warning)
-                confirm.setWindowTitle("Allow network access?")
-                confirm.setText("Allow network access?")
+                confirm.setWindowTitle(tr("Allow network access?"))
+                confirm.setText(tr("Allow network access?"))
                 confirm.setInformativeText(NETWORK_WARNING)
                 confirm.setStandardButtons(
                     QMessageBox.StandardButton.Cancel | QMessageBox.StandardButton.Ok
@@ -1274,25 +1397,30 @@ class SettingsDialog(QDialog):
         # Trusted hostnames: extra names the server accepts in the Host header so a browser on
         # another device can reach SearchMob by name (e.g. a Tailscale MagicDNS name) instead of
         # an IP. The machine's own hostname is always accepted; this covers names it cannot detect.
-        hostnames_label = QLabel("Trusted hostnames (network mode)")
+        hostnames_label = QLabel(tr("Trusted hostnames (network mode)"))
         layout.addWidget(hostnames_label)
         self._hostnames_input = QLineEdit()
         self._hostnames_input.setText(", ".join(self._prefs.network_hostnames))
-        self._hostnames_input.setPlaceholderText("e.g. my-pc.tailnet.ts.net, my-pc.local")
-        self._hostnames_input.setAccessibleName("Trusted hostnames")
+        self._hostnames_input.setPlaceholderText(tr("e.g. my-pc.tailnet.ts.net, my-pc.local"))
+        self._hostnames_input.setAccessibleName(tr("Trusted hostnames"))
         self._hostnames_input.editingFinished.connect(self._save_network_hostnames)
         layout.addWidget(self._hostnames_input)
         hostnames_help = QLabel(
-            "Comma-separated. Add a name only if it resolves to this machine on the other device "
-            "(Tailscale MagicDNS or mDNS). Reaching the server by IP always works without this."
+            tr(
+                "Comma-separated. Add a name only if it resolves to this machine on the other "
+                "device (Tailscale MagicDNS or mDNS). Reaching the server by IP always works "
+                "without this."
+            )
         )
         hostnames_help.setWordWrap(True)
         hostnames_help.setProperty("role", "muted")
         layout.addWidget(hostnames_help)
 
         info = QLabel(
-            "When on, restart the local server from the main window so the new bind address "
-            "takes effect."
+            tr(
+                "When on, restart the local server from the main window so the new bind "
+                "address takes effect."
+            )
         )
         info.setWordWrap(True)
         info.setProperty("role", "muted")
@@ -1314,23 +1442,25 @@ class SettingsDialog(QDialog):
         tab = QWidget()
         layout = QVBoxLayout(tab)
         intro = QLabel(
-            "Set SearchMob as your browser's default search engine so address-bar searches go "
-            "through your private local server."
+            tr(
+                "Set SearchMob as your browser's default search engine so address-bar searches "
+                "go through your private local server."
+            )
         )
         intro.setWordWrap(True)
         layout.addWidget(intro)
 
-        btn = QPushButton("Open browser setup")
+        btn = QPushButton(tr("Open browser setup"))
         btn.clicked.connect(self._open_browser_setup)
         layout.addWidget(btn)
 
-        guide_btn = QPushButton("Run the setup guide again")
+        guide_btn = QPushButton(tr("Run the setup guide again"))
         guide_btn.clicked.connect(self._open_onboarding)
         layout.addWidget(guide_btn)
 
         layout.addWidget(self._build_service_section())
 
-        about_btn = QPushButton("About and privacy")
+        about_btn = QPushButton(tr("About and privacy"))
         about_btn.clicked.connect(self._open_about)
         layout.addWidget(about_btn)
         layout.addStretch(1)
@@ -1344,15 +1474,18 @@ class SettingsDialog(QDialog):
         box.setFrameShape(QFrame.Shape.StyledPanel)
         col = QVBoxLayout(box)
 
-        header = QLabel("Run in the background")
+        header = QLabel(tr("Run in the background"))
         header_font = header.font()
         header_font.setBold(True)
         header.setFont(header_font)
         col.addWidget(header)
 
         desc = QLabel(
-            "Optionally run the local search server as a background service so your browser can "
-            "use SearchMob even when the app window is closed. The app still opens normally."
+            tr(
+                "Optionally run the local search server as a background service so your "
+                "browser can use SearchMob even when the app window is closed. The app still "
+                "opens normally."
+            )
         )
         desc.setWordWrap(True)
         desc.setProperty("role", "muted")
@@ -1364,9 +1497,9 @@ class SettingsDialog(QDialog):
         col.addWidget(self._service_status_label)
 
         row = QHBoxLayout()
-        self._service_install_btn = QPushButton("Install and start")
+        self._service_install_btn = QPushButton(tr("Install and start"))
         self._service_install_btn.clicked.connect(self._install_service)
-        self._service_remove_btn = QPushButton("Stop and remove")
+        self._service_remove_btn = QPushButton(tr("Stop and remove"))
         self._service_remove_btn.clicked.connect(self._remove_service)
         row.addWidget(self._service_install_btn)
         row.addWidget(self._service_remove_btn)
@@ -1387,7 +1520,7 @@ class SettingsDialog(QDialog):
         self._service_status_label.setText(state.summary())
         if state.supported:
             self._service_install_btn.setText(
-                "Reinstall" if state.installed else "Install and start"
+                tr("Reinstall") if state.installed else tr("Install and start")
             )
             self._service_remove_btn.setEnabled(state.installed)
 
@@ -1398,7 +1531,7 @@ class SettingsDialog(QDialog):
         host = "0.0.0.0" if self._prefs.network_access_enabled else "127.0.0.1"
         ok, message = service.install_and_enable(host=host)
         if not ok:
-            QMessageBox.warning(self, "Could not install the service", message)
+            QMessageBox.warning(self, tr("Could not install the service"), message)
         self._refresh_service_status()
 
     def _remove_service(self) -> None:
@@ -1406,7 +1539,7 @@ class SettingsDialog(QDialog):
 
         ok, message = service.disable_and_remove()
         if not ok:
-            QMessageBox.warning(self, "Could not remove the service", message)
+            QMessageBox.warning(self, tr("Could not remove the service"), message)
         self._refresh_service_status()
 
     def _open_onboarding(self) -> None:
@@ -1449,7 +1582,7 @@ class _PassphraseEntryDialog(QDialog):
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Set zero-knowledge passphrase")
+        self.setWindowTitle(tr("Set zero-knowledge passphrase"))
         self.setModal(True)
         layout = QVBoxLayout(self)
 
@@ -1460,24 +1593,24 @@ class _PassphraseEntryDialog(QDialog):
 
         self._p1 = QLineEdit()
         self._p1.setEchoMode(QLineEdit.EchoMode.Password)
-        self._p1.setPlaceholderText("New passphrase")
-        self._p1.setAccessibleName("New passphrase")
+        self._p1.setPlaceholderText(tr("New passphrase"))
+        self._p1.setAccessibleName(tr("New passphrase"))
         self._p2 = QLineEdit()
         self._p2.setEchoMode(QLineEdit.EchoMode.Password)
-        self._p2.setPlaceholderText("Confirm passphrase")
-        self._p2.setAccessibleName("Confirm passphrase")
+        self._p2.setPlaceholderText(tr("Confirm passphrase"))
+        self._p2.setAccessibleName(tr("Confirm passphrase"))
         layout.addWidget(self._p1)
         layout.addWidget(self._p2)
 
-        self._status = QLabel("Enter a passphrase and confirm it.")
+        self._status = QLabel(tr("Enter a passphrase and confirm it."))
         self._status.setProperty("role", "muted")
         layout.addWidget(self._status)
 
         row = QHBoxLayout()
         row.addStretch(1)
-        cancel = QPushButton("Cancel")
+        cancel = QPushButton(tr("Cancel"))
         cancel.clicked.connect(self.reject)
-        self._ok = QPushButton("Enable zero-knowledge")
+        self._ok = QPushButton(tr("Enable zero-knowledge"))
         self._ok.setEnabled(False)
         self._ok.clicked.connect(self.accept)
         row.addWidget(cancel)
@@ -1491,13 +1624,13 @@ class _PassphraseEntryDialog(QDialog):
         a = self._p1.text()
         b = self._p2.text()
         if not a or not b:
-            self._status.setText("Enter a passphrase and confirm it.")
+            self._status.setText(tr("Enter a passphrase and confirm it."))
             self._ok.setEnabled(False)
         elif a != b:
-            self._status.setText("Passphrases do not match.")
+            self._status.setText(tr("Passphrases do not match."))
             self._ok.setEnabled(False)
         else:
-            self._status.setText("Passphrases match.")
+            self._status.setText(tr("Passphrases match."))
             self._ok.setEnabled(True)
 
     def exec_and_get(self) -> str | None:

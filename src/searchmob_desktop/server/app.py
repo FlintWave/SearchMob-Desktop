@@ -71,9 +71,16 @@ from searchmob_desktop.engines.rank import (
 )
 from searchmob_desktop.engines.rank.personalize import query_terms, update_from_click
 from searchmob_desktop.engines.rank.slop_blocklist import load_slop_domains
+from searchmob_desktop.engines.region import language_region_for
 from searchmob_desktop.engines.sort import SortMode, sort_results
 from searchmob_desktop.engines.verticals import Vertical, default_sort, transform_query
 from searchmob_desktop.engines.wiki_summary import SummaryBox
+from searchmob_desktop.i18n import (
+    is_supported,
+    normalize_tag,
+    resolve_os_locale,
+    set_request_locale,
+)
 from searchmob_desktop.prefs import UserPreferences
 from searchmob_desktop.server.opensearch import build_descriptor
 from searchmob_desktop.server.templates import (
@@ -152,6 +159,7 @@ class _SecurityHeadersMiddleware(BaseHTTPMiddleware):
         {
             "/rules/domain",
             "/scope",
+            "/language",
             "/settings/prefs",
             "/settings/lens",
             "/settings/lens/delete",
@@ -448,6 +456,29 @@ def build_app(
         except Exception:
             return None
 
+    def _accept_language_locale(request: Request) -> str | None:
+        # First supported language from the visitor's Accept-Language header (q-values ignored; the
+        # browser already lists them best-first). Used when the owner has not pinned a UI language.
+        header = request.headers.get("accept-language", "")
+        for part in header.split(","):
+            tag = part.split(";", 1)[0].strip()
+            if is_supported(tag):
+                return normalize_tag(tag)
+        return None
+
+    def _resolve_locale(request: Request) -> str:
+        # The page language for this request: the owner's pinned `language` pref wins; absent that,
+        # the visitor's Accept-Language; absent that, the server's OS locale (else English). Set as
+        # the per-request override so the templates' bare `tr(...)` calls localize without threading
+        # a locale through every helper, and isolated to this request task (never the GUI's locale).
+        prefs = _load_prefs()
+        if prefs is not None and prefs.language and is_supported(prefs.language):
+            locale = normalize_tag(prefs.language)
+        else:
+            locale = _accept_language_locale(request) or resolve_os_locale()
+        set_request_locale(locale)
+        return locale
+
     async def _run_metasearch(
         query: str,
         sort_mode: SortMode = SortMode.FRESH_RELEVANT,
@@ -455,13 +486,21 @@ def build_app(
         *,
         model: PersonalizationModel | None = None,
         active_lens: str | None = None,
+        locale: str | None = None,
     ) -> list[SearchResult]:
         if not query.strip() or not engines:
             return []
         # Scope the query for the chosen vertical (a `site:` OR group the engines understand); the
         # original query still drives sort/summary/correction so freshness keywords are detected.
         scoped = transform_query(query, vertical)
-        ctx = EngineContext(query=scoped, max_results=max_results, timeout_seconds=timeout_seconds)
+        # Tailor results to the UI language: a non-English locale carries per-engine region/language
+        # params (DuckDuckGo `kl`, Brave country/search_lang/ui_lang); None leaves results neutral.
+        ctx = EngineContext(
+            query=scoped,
+            max_results=max_results,
+            timeout_seconds=timeout_seconds,
+            language_region=language_region_for(locale),
+        )
         results = await metasearch(ctx, engines)
         # The AI-slop filter mode is taken live from prefs when wired, so the Settings toggle takes
         # effect on the next search; otherwise the static build-time value is used.
@@ -523,11 +562,13 @@ def build_app(
         return suggestion.corrected if suggestion is not None else None
 
     async def home(request: Request) -> Response:
+        locale = _resolve_locale(request)
         body = render_home_page(
             settings_link=_is_settings_owner(request),
             rules=rules_provider(),
             editable=_is_owner(request),
             update_banner=_owner_update_banner(request),
+            locale=locale,
         )
         return Response(body, media_type="text/html; charset=utf-8")
 
@@ -583,6 +624,7 @@ def build_app(
         return prefs_saver is not None and is_loopback_host(client_host)
 
     async def search_html(request: Request) -> Response:
+        locale = _resolve_locale(request)
         raw_query = _clamp(request.query_params.get("q"))
         # An inline `+name` token applies a saved scope to this one search, additively and without
         # persisting it. The engines, summary, and correction run on the cleaned query; the original
@@ -604,7 +646,9 @@ def build_app(
         # latency to the results path.
         summary_task = asyncio.ensure_future(_maybe_summary(query))
         model = _owner_model(request)
-        results = await _run_metasearch(query, sort_mode, vertical, model=model, active_lens=scope)
+        results = await _run_metasearch(
+            query, sort_mode, vertical, model=model, active_lens=scope, locale=locale
+        )
         summary = await summary_task
         # When personalization is on for the owner, route result links through `/click` so a click
         # can train the model; everyone else (and a disabled owner) gets the plain destination link.
@@ -625,6 +669,7 @@ def build_app(
             settings_link=_is_settings_owner(request),
             link_builder=link_builder,
             update_banner=_owner_update_banner(request),
+            locale=locale,
         )
         return Response(body, media_type="text/html; charset=utf-8")
 
@@ -758,6 +803,7 @@ def build_app(
         # visitor (or a build with no saver) gets 404 so the surface is invisible off-loopback.
         if not _is_settings_owner(request):
             return PlainTextResponse("Not found", status_code=404)
+        locale = _resolve_locale(request)
         prefs = _load_prefs() or UserPreferences()
         saved = request.query_params.get("saved") == "1"
         history: list[HistoryEntry] | None = None
@@ -772,8 +818,23 @@ def build_app(
             saved=saved,
             history=history,
             history_clearable=history_clearer is not None,
+            locale=locale,
         )
         return Response(body, media_type="text/html; charset=utf-8")
+
+    async def set_language(request: Request) -> Response:
+        # Persist the chosen UI language (a shipped locale tag, or empty to follow the OS). It is
+        # loopback-only via the same owner gate as the other preference writes; redirects so the
+        # interface re-renders in the new language. Unknown tags are ignored (left unchanged).
+        if prefs_saver is None:
+            return PlainTextResponse("Settings are read-only here.", status_code=503)
+        form = await _form(request)
+        chosen = form.get("lang", "").strip()
+        if chosen and not is_supported(chosen):
+            return _redirect_back(request)
+        current = _load_prefs() or UserPreferences()
+        prefs_saver(replace(current, language=normalize_tag(chosen) if chosen else ""))
+        return _redirect_back(request)
 
     _BOOL_FORM = {"on", "true", "1", "yes"}
 
@@ -803,6 +864,7 @@ def build_app(
         return RedirectResponse("/settings?saved=1", status_code=303)
 
     async def search_json(request: Request) -> Response:
+        locale = _resolve_locale(request)
         raw_query = _clamp(request.query_params.get("q"))
         # Same inline `+name` scope token as the HTML route: applied to this request only, with the
         # engines/correction run on the cleaned query and the original echoed back as `query`.
@@ -811,7 +873,12 @@ def build_app(
         sort_param = request.query_params.get("sort")
         sort_mode = SortMode.from_value(sort_param) if sort_param else default_sort(vertical)
         results = await _run_metasearch(
-            query, sort_mode, vertical, model=_owner_model(request), active_lens=scope
+            query,
+            sort_mode,
+            vertical,
+            model=_owner_model(request),
+            active_lens=scope,
+            locale=locale,
         )
         payload = {
             "query": raw_query,
@@ -854,6 +921,7 @@ def build_app(
         # middleware; no-op (503) when no saver is wired.
         Route("/rules/domain", set_domain_rule, methods=["POST"]),
         Route("/scope", set_scope, methods=["POST"]),
+        Route("/language", set_language, methods=["POST"]),
         # Settings page + preference writes (owner-only; 404 / 503 otherwise).
         Route("/settings", settings_page, methods=["GET"]),
         Route("/settings/prefs", set_prefs, methods=["POST"]),

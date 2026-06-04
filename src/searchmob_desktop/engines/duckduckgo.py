@@ -25,8 +25,13 @@ _AD_CLASSES = ("result--ad", "result--ad-v2")
 
 async def fetch_duckduckgo(client: httpx.AsyncClient, ctx: EngineContext) -> list[SearchResult]:
     """Fetch one DuckDuckGo result page and parse it. Returns `[]` on any failure."""
+    params = {"q": ctx.query}
+    # Tailor results to the UI language when one is set: DuckDuckGo's `kl` is a region-language code
+    # (e.g. `es-es`). Absent (English / unmapped), the query stays region-neutral as before.
+    if ctx.language_region is not None and ctx.language_region.ddg_kl:
+        params["kl"] = ctx.language_region.ddg_kl
     try:
-        body = await fetch_bounded(client, "GET", f"{_ENDPOINT}?{urlencode({'q': ctx.query})}")
+        body = await fetch_bounded(client, "GET", f"{_ENDPOINT}?{urlencode(params)}")
         if body is None:
             return []
         return _parse(body.decode("utf-8", errors="replace"), ctx.max_results)

@@ -35,6 +35,16 @@ async def fetch_brave_api(
     if not api_key:
         return []
     params = {"q": ctx.query, "count": str(ctx.max_results)}
+    # Tailor results to the UI language when one is set: Brave takes a country, a search language,
+    # and a UI language. Absent (English / unmapped), the request stays region-neutral as before.
+    region = ctx.language_region
+    if region is not None:
+        if region.brave_country:
+            params["country"] = region.brave_country
+        if region.brave_search_lang:
+            params["search_lang"] = region.brave_search_lang
+        if region.brave_ui_lang:
+            params["ui_lang"] = region.brave_ui_lang
     headers = {"Accept": "application/json", "X-Subscription-Token": api_key}
     try:
         body = await fetch_bounded(

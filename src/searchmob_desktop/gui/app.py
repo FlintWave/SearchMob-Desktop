@@ -19,6 +19,7 @@ def run_gui(argv: list[str] | None = None) -> int:
     # Defer the PySide6 import so `import searchmob_desktop.gui` is cheap and headless-safe.
     from PySide6.QtWidgets import QApplication
 
+    from searchmob_desktop.gui.language import apply_language, initial_locale
     from searchmob_desktop.gui.main_window import MainWindow
     from searchmob_desktop.gui.theme import apply_theme
 
@@ -30,6 +31,9 @@ def run_gui(argv: list[str] | None = None) -> int:
     # If there is already a running QApplication (e.g. tests), reuse it but still apply theme.
     prefs_store = JsonPreferencesStore()
     prefs = prefs_store.load()
+    # Apply the UI language before building any widget so the first paint is already localized (and
+    # the layout direction is set for right-to-left languages). Empty pref => follow the OS locale.
+    apply_language(app, initial_locale(prefs.language))  # type: ignore[arg-type]
     apply_theme(
         app,  # type: ignore[arg-type]
         prefs.theme,
