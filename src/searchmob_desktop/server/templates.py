@@ -474,25 +474,43 @@ def _sort_bar(query: str, sort_mode: str) -> str:
     )
 
 
+def _short_lens_label(name: str) -> str:
+    """Drop a trailing parenthetical from a lens name for the compact nested scope selector.
+
+    "Less clutter (no Pinterest/Quora)" -> "Less clutter". The full name is kept in a hover title.
+    """
+    idx = name.find(" (")
+    short = name[:idx].rstrip() if idx > 0 else name
+    return short or name
+
+
 def _home_scope(rules: RankingRules) -> tuple[str, str]:
     """The home-page scope (lens) selector, nested inside the search box.
 
     Returns the `<select>` (placed just left of the Search button) and a hidden `/scope` form it
     submits to via the HTML `form=` attribute, so changing the scope persists exactly as the
     standalone scope bar does without nesting two forms. Both are empty when no lens is defined.
+
+    The visible label drops any trailing parenthetical to stay compact; the full lens name is the
+    option value and a hover `title` (on both each option and the collapsed select).
     """
     if not rules.lenses:
         return "", ""
     options = ['<option value="">No scope</option>']
+    active_full = ""
     for lens in rules.lenses:
         selected = " selected" if lens.name == rules.active_lens else ""
+        if selected:
+            active_full = lens.name
+        full = escape(lens.name, quote=True)
         options.append(
-            f'<option value="{escape(lens.name, quote=True)}"{selected}>'
-            f"{escape(lens.name)}</option>"
+            f'<option value="{full}" title="{full}"{selected}>'
+            f"{escape(_short_lens_label(lens.name))}</option>"
         )
+    select_title = f' title="{escape(active_full, quote=True)}"' if active_full else ""
     select = (
-        '<select id="sm-scope" name="lens" form="sm-scope-form" aria-label="Search scope" '
-        'onchange="this.form.submit()">' + "".join(options) + "</select>"
+        f'<select id="sm-scope" name="lens" form="sm-scope-form" aria-label="Search scope"'
+        f'{select_title} onchange="this.form.submit()">' + "".join(options) + "</select>"
     )
     form = '<form id="sm-scope-form" action="/scope" method="post" hidden></form>'
     return select, form
