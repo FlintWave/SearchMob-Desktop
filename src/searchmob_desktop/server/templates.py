@@ -185,6 +185,10 @@ _PAGE_CSS = (
     ".searchbox input[type=submit]{border:0;background:var(--accent);color:#fff;padding:0 22px;"
     "cursor:pointer;font-size:.9375rem;font-weight:600}"
     ".searchbox input[type=submit]:hover{filter:brightness(1.07)}"
+    # Scope (lens) selector nested inside the search box, just left of the Search button. A subtle
+    # divider separates it from the query field; it belongs to a separate /scope form via `form=`.
+    ".searchbox select{border:0;border-left:1px solid var(--border);background:transparent;"
+    "color:var(--fg);font-size:.875rem;padding:0 12px;outline:0;max-width:190px;cursor:pointer}"
     ".home{max-width:600px;margin:0 auto;padding:13vh 20px 0;text-align:center}"
     ".home .brand{font-size:3rem;font-weight:800;color:var(--accent);letter-spacing:-1.5px}"
     ".home .tagline{color:var(--muted);margin:8px 0 28px;font-size:.9375rem}"
@@ -396,7 +400,7 @@ def render_home_page(
     for the owner-only "update available" notice (None to omit).
     """
     active_rules = rules if rules is not None else RankingRules()
-    scope = _scope_bar(active_rules) if editable else ""
+    scope_select, scope_form = _home_scope(active_rules) if editable else ("", "")
     head = _page_head("SearchMob")
     body = (
         '<body data-page="home">'
@@ -412,9 +416,10 @@ def render_home_page(
         '<form action="/search" method="get" class="searchbox">'
         '<input type="text" name="q" placeholder="Search the web" aria-label="Search" '
         'autocomplete="off" autofocus="autofocus">'
+        f"{scope_select}"
         '<input type="submit" value="Search">'
         "</form>"
-        f"{scope}"
+        f"{scope_form}"
         "</div>"
         f"<script>{_THEME_TOGGLE_JS}</script>"
         "</body>"
@@ -467,6 +472,30 @@ def _sort_bar(query: str, sort_mode: str) -> str:
         '<noscript><button type="submit">Apply</button></noscript>'
         "</form>"
     )
+
+
+def _home_scope(rules: RankingRules) -> tuple[str, str]:
+    """The home-page scope (lens) selector, nested inside the search box.
+
+    Returns the `<select>` (placed just left of the Search button) and a hidden `/scope` form it
+    submits to via the HTML `form=` attribute, so changing the scope persists exactly as the
+    standalone scope bar does without nesting two forms. Both are empty when no lens is defined.
+    """
+    if not rules.lenses:
+        return "", ""
+    options = ['<option value="">No scope</option>']
+    for lens in rules.lenses:
+        selected = " selected" if lens.name == rules.active_lens else ""
+        options.append(
+            f'<option value="{escape(lens.name, quote=True)}"{selected}>'
+            f"{escape(lens.name)}</option>"
+        )
+    select = (
+        '<select id="sm-scope" name="lens" form="sm-scope-form" aria-label="Search scope" '
+        'onchange="this.form.submit()">' + "".join(options) + "</select>"
+    )
+    form = '<form id="sm-scope-form" action="/scope" method="post" hidden></form>'
+    return select, form
 
 
 def _scope_bar(rules: RankingRules) -> str:
