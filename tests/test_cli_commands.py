@@ -15,6 +15,7 @@ from typer.testing import CliRunner
 import searchmob_desktop.cli as cli
 from searchmob_desktop.cli import _build_engines, app
 from searchmob_desktop.engines import SearchResult
+from searchmob_desktop.engines.rank import Lens, RankingRules
 
 
 def test_search_happy_path_prints_table_and_exits_zero(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -49,6 +50,58 @@ def test_search_no_results_exits_one_with_message(monkeypatch: pytest.MonkeyPatc
     out = CliRunner().invoke(app, ["search", "nothing matches"])
     assert out.exit_code == 1, out.output
     assert "No results" in out.output
+
+
+def test_search_inline_scope_token_filters_and_cleans_query(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`search "<q> +research"` applies the matched scope and searches the cleaned query."""
+    results = [
+        SearchResult(title="Paper", url="https://arxiv.org/abs/1", snippet="", engine="e"),
+        SearchResult(title="Pin", url="https://pinterest.com/x", snippet="", engine="e"),
+    ]
+    seen: dict[str, str] = {}
+
+    async def _capture(ctx: object, _engines: object) -> list[SearchResult]:
+        seen["query"] = ctx.query  # type: ignore[attr-defined]
+        return results
+
+    rules = RankingRules(lenses=(Lens(name="Research mode", include_domains=("arxiv.org",)),))
+    monkeypatch.setattr(cli, "aggregate", _capture)
+    monkeypatch.setattr(cli, "_build_engines", lambda: [])
+    monkeypatch.setattr(cli, "load_ranking_rules", lambda: rules)
+
+    out = CliRunner().invoke(app, ["search", "neural nets +research"])
+    assert out.exit_code == 0, out.output
+    # The engines ran on the cleaned query, and only the scope's host survived the filter.
+    assert seen["query"] == "neural nets"
+    assert "arxiv.org" in out.output
+    assert "pinterest.com" not in out.output
+    assert "Research mode" in out.output  # the applied-scope note
+
+
+def test_search_unmatched_token_is_searched_verbatim(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An unmatched `+word` stays in the query and applies no scope."""
+    results = [
+        SearchResult(title="Paper", url="https://arxiv.org/abs/1", snippet="", engine="e"),
+        SearchResult(title="Pin", url="https://pinterest.com/x", snippet="", engine="e"),
+    ]
+    seen: dict[str, str] = {}
+
+    async def _capture(ctx: object, _engines: object) -> list[SearchResult]:
+        seen["query"] = ctx.query  # type: ignore[attr-defined]
+        return results
+
+    rules = RankingRules(lenses=(Lens(name="Research mode", include_domains=("arxiv.org",)),))
+    monkeypatch.setattr(cli, "aggregate", _capture)
+    monkeypatch.setattr(cli, "_build_engines", lambda: [])
+    monkeypatch.setattr(cli, "load_ranking_rules", lambda: rules)
+
+    out = CliRunner().invoke(app, ["search", "rust +tokio"])
+    assert out.exit_code == 0, out.output
+    assert seen["query"] == "rust +tokio"  # token left in place
+    assert "arxiv.org" in out.output
+    assert "pinterest.com" in out.output  # no scope applied, both kept
 
 
 def test_build_engines_returns_five_free_engines_with_no_keys(

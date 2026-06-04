@@ -15,6 +15,7 @@ from searchmob_desktop.engines.rank.model import GoggleRule, Lens, RankingRules,
 from searchmob_desktop.engines.rank.personalize import PersonalizationModel
 from searchmob_desktop.engines.rank.personalize import reorder as personalize_reorder
 from searchmob_desktop.engines.rank.ranker import apply_ranking, domain_match, host_of_url
+from searchmob_desktop.engines.rank.scope_token import parse_scope_token
 
 __all__ = [
     "DEFAULT_SAMPLE_LENSES",
@@ -28,5 +29,6 @@ __all__ = [
     "goggle_matches",
     "host_of_url",
     "parse_goggles",
+    "parse_scope_token",
     "personalize_reorder",
 ]
