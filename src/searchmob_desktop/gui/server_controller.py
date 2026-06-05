@@ -129,7 +129,7 @@ def build_engines_from_prefs(prefs: UserPreferences) -> list[EngineFn]:
         key = resolve_api_key(entry.id, vault_keys)
         if fetch is None or not key:
             continue
-        engines.append(bind_api_key(fetch, key))
+        engines.append(bind_api_key(fetch, key, entry.id))
     return engines
 
 

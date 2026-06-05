@@ -82,6 +82,7 @@
   "Engine changes apply to the next search; restart the local server (if running) to pick up the new list there too. The CLI also reads SEARCHMOB_BRAVE_API_KEY, SEARCHMOB_MOJEEK_API_KEY, and SEARCHMOB_KAGI_API_KEY from the environment. Note: Brave's API terms prohibit storing results, so enabling history with a Brave key may save Brave results locally, which is your responsibility under Brave's terms.": "Perubahan mesin akan diterapkan pada pencarian berikutnya; mulai ulang server lokal (jika sedang berjalan) agar daftar baru juga diterapkan di sana. CLI juga membaca SEARCHMOB_BRAVE_API_KEY, SEARCHMOB_MOJEEK_API_KEY, dan SEARCHMOB_KAGI_API_KEY dari lingkungan. Catatan: Ketentuan API Brave melarang penyimpanan hasil, jadi mengaktifkan riwayat dengan kunci Brave dapat menyimpan hasil Brave secara lokal, yang merupakan tanggung jawab Anda berdasarkan ketentuan Brave.",
   "Enter a passphrase and confirm it.": "Masukkan frasa sandi dan konfirmasi.",
   "Enter a query to search.": "Masukkan kueri untuk melakukan pencarian.",
+  "Example:": "OK.",
   "Exclude these domains": "Kecualikan domain-domain ini",
   "Exclude these keywords": "Kecualikan kata kunci ini",
   "Export failed": "Ekspor gagal",
@@ -337,6 +338,8 @@
   "discard": "buang",
   "downrank": "turunkan peringkat",
   "e.g. my-pc.tailnet.ts.net, my-pc.local": "my-pc.tailnet.ts.net, my-pc.local",
+  "engine status\u0004failed": "gagal",
+  "engine status\u0004no results": "tidak ada hasil",
   "or": "atau",
   "pin": "PIN",
   "search category\u0004Academic": "Akademik",
@@ -353,5 +356,6 @@
   "{exc}": "{exc}",
   "{model} (saved)": "{model} (disimpan)",
   "{name} key": "kunci {name}",
-  "{pt} pt": "{pt} pt"
+  "{pt} pt": "{pt} pt",
+  "{responded} of {total} engines responded": "{responded} dari {total} mesin telah memberikan respons"
 }

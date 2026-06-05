@@ -46,9 +46,11 @@ from searchmob_desktop.data.personalization_store import (
 from searchmob_desktop.data.ranking_store import load_ranking_rules, save_ranking_rules
 from searchmob_desktop.engines import (
     DEFAULT_POOL_SIZE,
+    AggregateOutcome,
     EngineContext,
+    EngineOutcome,
     SearchResult,
-    aggregate,
+    aggregate_with_status,
     make_privacy_client,
 )
 from searchmob_desktop.engines.correct import start_background_corrector
@@ -133,6 +135,9 @@ class MainWindow(QMainWindow):
         # without re-searching.
         self._ranking_rules = load_ranking_rules()
         self._raw_results: list[SearchResult] = []
+        # Per-engine outcome for the last search (contributed / empty / failed), shown as an
+        # unobtrusive "N of M engines responded" suffix on the status line. On-device only.
+        self._engine_status: tuple[EngineOutcome, ...] = ()
         # The list currently shown (after sort + personalization + rules). Kept so a result click
         # can learn from its displayed position (the personalization skip-above signal).
         self._displayed_results: list[SearchResult] = []
@@ -812,16 +817,18 @@ class MainWindow(QMainWindow):
         )
         summary_enabled = prefs.summary_enabled
 
-        async def _run() -> tuple[list[SearchResult], SummaryBox | None]:
+        async def _run() -> tuple[list[SearchResult], SummaryBox | None, AggregateOutcome]:
             # Fetch the contextual summary concurrently with the metasearch so it adds no latency.
             summary_task = (
                 asyncio.ensure_future(summary_for_query(query)) if summary_enabled else None
             )
-            results = await aggregate(ctx, engines)
+            outcome = await aggregate_with_status(ctx, engines)
             summary = await summary_task if summary_task is not None else None
-            return results, summary
+            return outcome.results, summary, outcome
 
-        worker: AsyncWorker[tuple[list[SearchResult], SummaryBox | None]] = AsyncWorker(_run)
+        worker: AsyncWorker[tuple[list[SearchResult], SummaryBox | None, AggregateOutcome]] = (
+            AsyncWorker(_run)
+        )
         worker.signals.finished.connect(self._on_results_ready)
         worker.signals.failed.connect(self._on_search_failed)
         # Record the search in the (in-memory) history store if enabled. The store handles the
@@ -834,11 +841,12 @@ class MainWindow(QMainWindow):
 
     def _on_results_ready(self, payload: object) -> None:
         self._search_btn.setEnabled(True)
-        # The worker returns (results, summary). Show the summary card regardless of result count.
+        # The worker returns (results, summary, outcome). Show the summary card regardless of count.
         results: object = payload
         summary: object = None
-        if isinstance(payload, tuple) and len(payload) == 2:
-            results, summary = payload
+        if isinstance(payload, tuple) and len(payload) == 3:
+            results, summary, outcome = payload
+            self._engine_status = outcome.engines if isinstance(outcome, AggregateOutcome) else ()
         if isinstance(summary, SummaryBox):
             self._show_summary(summary)
         else:
@@ -849,7 +857,10 @@ class MainWindow(QMainWindow):
             return
         if not results:
             self._raw_results = []
-            self._status_label.setText(tr("No results found."))
+            summary, tooltip = self._engine_status_suffix()
+            no_results = tr("No results found.")
+            self._status_label.setText(f"{no_results}  ·  {summary}" if summary else no_results)
+            self._status_label.setToolTip(tooltip)
             self._body.setCurrentWidget(self._empty_state)
             self._maybe_show_correction()
             self._answer_card.hide()
@@ -890,9 +901,37 @@ class MainWindow(QMainWindow):
         base = trn(len(ranked), "{n} result", "{n} results")
         if hidden > 0:
             hid = trn(hidden, "{n} hidden by your rules", "{n} hidden by your rules")
-            self._status_label.setText(f"{base} ({hid}).")
+            text = f"{base} ({hid})."
         else:
-            self._status_label.setText(f"{base}.")
+            text = f"{base}."
+        summary, tooltip = self._engine_status_suffix()
+        if summary:
+            text = f"{text}  ·  {summary}"
+        self._status_label.setText(text)
+        self._status_label.setToolTip(tooltip)
+
+    def _engine_status_suffix(self) -> tuple[str, str]:
+        """Return `(summary, tooltip)` for the last search's per-engine outcome, or `("", "")`.
+
+        `summary` is the muted "N of M engines responded" line appended to the status text;
+        `tooltip` lists each engine's outcome (the per-engine detail on demand, shown on hover).
+        Both are computed from on-device data and are never persisted or transmitted.
+        """
+        if not self._engine_status:
+            return "", ""
+        total = len(self._engine_status)
+        responded = sum(1 for o in self._engine_status if o.status != "failed")
+        summary = tr("{responded} of {total} engines responded", responded=responded, total=total)
+        lines: list[str] = []
+        for outcome in self._engine_status:
+            if outcome.status == "contributed":
+                detail = trn(outcome.count, "{n} result", "{n} results")
+            elif outcome.status == "empty":
+                detail = trc("engine status", "no results")
+            else:
+                detail = trc("engine status", "failed")
+            lines.append(f"{outcome.name} — {detail}")
+        return summary, "\n".join(lines)
 
     def _on_vertical_clicked(self, button: QPushButton) -> None:
         """A category tab was clicked: switch vertical and re-run the search."""

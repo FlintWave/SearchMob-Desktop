@@ -14,7 +14,7 @@ from typer.testing import CliRunner
 
 import searchmob_desktop.cli as cli
 from searchmob_desktop.cli import _build_engines, app
-from searchmob_desktop.engines import SearchResult
+from searchmob_desktop.engines import AggregateOutcome, SearchResult
 from searchmob_desktop.engines.rank import Lens, RankingRules
 
 
@@ -25,10 +25,10 @@ def test_search_happy_path_prints_table_and_exits_zero(monkeypatch: pytest.Monke
         SearchResult(title="Second hit", url="https://example.com/b", snippet="", engine="wiki"),
     ]
 
-    async def _fake_aggregate(_ctx: object, _engines: object) -> list[SearchResult]:
-        return results
+    async def _fake_aggregate(_ctx: object, _engines: object) -> AggregateOutcome:
+        return AggregateOutcome(results, ())
 
-    monkeypatch.setattr(cli, "aggregate", _fake_aggregate)
+    monkeypatch.setattr(cli, "aggregate_with_status", _fake_aggregate)
     monkeypatch.setattr(cli, "_build_engines", lambda: [])
 
     out = CliRunner().invoke(app, ["search", "hello world"])
@@ -41,10 +41,10 @@ def test_search_happy_path_prints_table_and_exits_zero(monkeypatch: pytest.Monke
 def test_search_no_results_exits_one_with_message(monkeypatch: pytest.MonkeyPatch) -> None:
     """The empty-results path prints "No results" and exits 1."""
 
-    async def _empty(_ctx: object, _engines: object) -> list[SearchResult]:
-        return []
+    async def _empty(_ctx: object, _engines: object) -> AggregateOutcome:
+        return AggregateOutcome([], ())
 
-    monkeypatch.setattr(cli, "aggregate", _empty)
+    monkeypatch.setattr(cli, "aggregate_with_status", _empty)
     monkeypatch.setattr(cli, "_build_engines", lambda: [])
 
     out = CliRunner().invoke(app, ["search", "nothing matches"])
@@ -62,12 +62,12 @@ def test_search_inline_scope_token_filters_and_cleans_query(
     ]
     seen: dict[str, str] = {}
 
-    async def _capture(ctx: object, _engines: object) -> list[SearchResult]:
+    async def _capture(ctx: object, _engines: object) -> AggregateOutcome:
         seen["query"] = ctx.query  # type: ignore[attr-defined]
-        return results
+        return AggregateOutcome(results, ())
 
     rules = RankingRules(lenses=(Lens(name="Research mode", include_domains=("arxiv.org",)),))
-    monkeypatch.setattr(cli, "aggregate", _capture)
+    monkeypatch.setattr(cli, "aggregate_with_status", _capture)
     monkeypatch.setattr(cli, "_build_engines", lambda: [])
     monkeypatch.setattr(cli, "load_ranking_rules", lambda: rules)
 
@@ -88,12 +88,12 @@ def test_search_unmatched_token_is_searched_verbatim(monkeypatch: pytest.MonkeyP
     ]
     seen: dict[str, str] = {}
 
-    async def _capture(ctx: object, _engines: object) -> list[SearchResult]:
+    async def _capture(ctx: object, _engines: object) -> AggregateOutcome:
         seen["query"] = ctx.query  # type: ignore[attr-defined]
-        return results
+        return AggregateOutcome(results, ())
 
     rules = RankingRules(lenses=(Lens(name="Research mode", include_domains=("arxiv.org",)),))
-    monkeypatch.setattr(cli, "aggregate", _capture)
+    monkeypatch.setattr(cli, "aggregate_with_status", _capture)
     monkeypatch.setattr(cli, "_build_engines", lambda: [])
     monkeypatch.setattr(cli, "load_ranking_rules", lambda: rules)
 

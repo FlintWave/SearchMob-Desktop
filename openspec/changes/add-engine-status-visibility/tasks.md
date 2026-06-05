@@ -2,14 +2,16 @@
 
 ## Desktop
 
-- [ ] `engines/aggregator.py`: capture per-engine outcome (contributed n / empty / failed) and return
-      it alongside the merged results without breaking existing callers.
-- [ ] GUI: show an unobtrusive "N of M engines responded" line near the results header, with
-      per-engine detail on demand.
-- [ ] Served page: render the same line for the loopback owner only (`server/app.py` +
-      `server/templates.py`); never for LAN clients.
-- [ ] CLI: print a dim per-search engine summary.
-- [ ] Tests: aggregator outcome (failed vs empty vs contributed); served-page owner-vs-LAN gating.
+- [x] `engines/aggregator.py`: capture per-engine outcome (contributed n / empty / failed) and return
+      it alongside the merged results without breaking existing callers (`aggregate_with_status` ->
+      `AggregateOutcome`; `aggregate` keeps its plain-list return). Engine labels via an `engine_id`
+      attribute set by `bind_api_key`, else the `fetch_` name.
+- [x] GUI: an unobtrusive "N of M engines responded" suffix on the status line, per-engine detail in
+      the tooltip on hover.
+- [x] Served page: render the line for the loopback owner only (`server/app.py` +
+      `server/templates.py`, a native `<details>` disclosure); `()` passed for LAN clients.
+- [x] CLI: print a dim per-search engine summary (responded count + which engines did not respond).
+- [x] Tests: aggregator outcome (failed vs empty vs contributed); served-page owner-vs-LAN gating.
 
 ## Android (parity)
 

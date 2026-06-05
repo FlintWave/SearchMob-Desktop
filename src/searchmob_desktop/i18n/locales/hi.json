@@ -338,6 +338,8 @@
   "discard": "त्याग दें",
   "downrank": "निम्न रैंक देना",
   "e.g. my-pc.tailnet.ts.net, my-pc.local": "मेरा-पीसी.टेलनेट.टीएस.नेट, मेरा-पीसी.लोकल",
+  "engine status\u0004failed": "असफल",
+  "engine status\u0004no results": "कोई परिणाम नहीं",
   "or": "या",
   "pin": "पिन",
   "search category\u0004Academic": "शैक्षणिक",
@@ -354,5 +356,6 @@
   "{exc}": "{exc}",
   "{model} (saved)": "{model} (सहेजा गया)",
   "{name} key": "{name} कुंजी",
-  "{pt} pt": "{pt} पीटी"
+  "{pt} pt": "{pt} पीटी",
+  "{responded} of {total} engines responded": "कुल {total} इंजनों में से {responded} ने प्रतिक्रिया दी।"
 }

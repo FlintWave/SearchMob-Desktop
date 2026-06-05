@@ -18,6 +18,7 @@ import asyncio
 import time
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
+from typing import Literal
 
 import httpx
 
@@ -36,6 +37,41 @@ EngineFn = Callable[[httpx.AsyncClient, EngineContext], Awaitable[list[SearchRes
 
 _RRF_K = 60
 
+# Per-engine outcome for one search: it returned results, returned nothing, or raised/timed out.
+EngineStatus = Literal["contributed", "empty", "failed"]
+
+
+@dataclass(frozen=True, slots=True)
+class EngineOutcome:
+    """One engine's result for a single search. `count` is the number of results it returned."""
+
+    name: str
+    status: EngineStatus
+    count: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class AggregateOutcome:
+    """The merged, ranked results plus the per-engine outcome that produced them.
+
+    `engines` is computed locally for owner-facing diagnostics ("N of M engines responded"); it is
+    never persisted or transmitted. Callers that only want results use `aggregate`, which returns
+    `results` directly.
+    """
+
+    results: list[SearchResult]
+    engines: tuple[EngineOutcome, ...]
+
+
+def _engine_label(fn: EngineFn) -> str:
+    """A stable display id for an engine function (`fetch_duckduckgo` -> `duckduckgo`).
+
+    Prefers an explicit `engine_id` attribute (set by `bind_api_key` for the BYO-key adapters whose
+    closure has no meaningful name), else strips the `fetch_` prefix from the function name.
+    """
+    raw = getattr(fn, "engine_id", None) or getattr(fn, "__name__", "engine")
+    return str(raw).removeprefix("fetch_").replace("_", "-")
+
 
 @dataclass(slots=True)
 class _Bucket:
@@ -51,7 +87,20 @@ async def aggregate(ctx: EngineContext, engines: Sequence[EngineFn]) -> list[Sea
     """Run every engine against `ctx`, dedup + RRF-rank the results, return up to `ctx.max_results`.
 
     The returned `SearchResult.engine` field is the comma-joined sorted list of engine ids that
-    surfaced the URL (e.g. `"duckduckgo"` or `"duckduckgo,wikipedia"`).
+    surfaced the URL (e.g. `"duckduckgo"` or `"duckduckgo,wikipedia"`). Use `aggregate_with_status`
+    when the per-engine outcome is wanted too.
+    """
+    return (await aggregate_with_status(ctx, engines)).results
+
+
+async def aggregate_with_status(
+    ctx: EngineContext, engines: Sequence[EngineFn]
+) -> AggregateOutcome:
+    """Like `aggregate`, but also return the per-engine outcome (contributed / empty / failed).
+
+    The outcome is derived from the same fan-out the ranking uses, so it costs nothing extra and is
+    exact: an engine that raised or timed out is `failed`, distinct from one that simply returned
+    nothing. It is for owner-facing diagnostics only and never leaves the device.
     """
     async with make_privacy_client(ctx.timeout_seconds) as client:
         gathered = await asyncio.gather(
@@ -60,13 +109,18 @@ async def aggregate(ctx: EngineContext, engines: Sequence[EngineFn]) -> list[Sea
         )
 
     per_engine: list[list[SearchResult]] = []
-    for result in gathered:
+    outcomes: list[EngineOutcome] = []
+    for engine, result in zip(engines, gathered, strict=True):
+        name = _engine_label(engine)
         if isinstance(result, BaseException):
             per_engine.append([])
-        elif isinstance(result, list):
+            outcomes.append(EngineOutcome(name, "failed"))
+        elif isinstance(result, list) and result:
             per_engine.append(result)
+            outcomes.append(EngineOutcome(name, "contributed", len(result)))
         else:
             per_engine.append([])
+            outcomes.append(EngineOutcome(name, "empty"))
 
     now_ms = int(time.time() * 1000)
 
@@ -121,7 +175,7 @@ async def aggregate(ctx: EngineContext, engines: Sequence[EngineFn]) -> list[Sea
         )
 
     ranked = sorted(buckets.values(), key=_final_score, reverse=True)
-    return [
+    results = [
         SearchResult(
             title=b.title,
             url=b.url,
@@ -131,3 +185,4 @@ async def aggregate(ctx: EngineContext, engines: Sequence[EngineFn]) -> list[Sea
         )
         for b in ranked[: ctx.max_results]
     ]
+    return AggregateOutcome(results, tuple(outcomes))

@@ -30,7 +30,7 @@ from searchmob_desktop.engines import (
     DEFAULT_POOL_SIZE,
     EngineContext,
     EngineFn,
-    aggregate,
+    aggregate_with_status,
     bind_api_key,
     fetch_brave_api,
     fetch_duckduckgo,
@@ -124,7 +124,7 @@ def _build_engines() -> list[EngineFn]:
     for engine_id, fetch in keyed:
         key = resolve_api_key(engine_id, vault_keys)
         if key:
-            engines.append(bind_api_key(fetch, key))
+            engines.append(bind_api_key(fetch, key, engine_id))
     return engines
 
 
@@ -150,7 +150,8 @@ def search(
     cleaned, scope = parse_scope_token(query, rules)
 
     ctx = EngineContext(query=cleaned, max_results=max_results, timeout_seconds=timeout)
-    results = asyncio.run(aggregate(ctx, _build_engines()))
+    outcome = asyncio.run(aggregate_with_status(ctx, _build_engines()))
+    results = outcome.results
 
     if scope is not None:
         matched = next((lens for lens in rules.lenses if lens.name == scope), None)
@@ -176,6 +177,15 @@ def search(
     for rank, item in enumerate(results, start=1):
         table.add_row(str(rank), item.title, item.url, item.engine)
     console.print(table)
+
+    # Per-engine outcome for this search (computed locally, never stored or sent). "Responded" means
+    # the engine answered at all; an engine that returned nothing is still distinct from one that
+    # failed (raised or timed out), which is named so a degraded search is diagnosable.
+    responded = sum(1 for o in outcome.engines if o.status != "failed")
+    console.print(f"[dim]{responded} of {len(outcome.engines)} engines responded[/]")
+    failed = [o.name for o in outcome.engines if o.status == "failed"]
+    if failed:
+        console.print(f"[dim]Did not respond: {', '.join(failed)}[/]")
 
 
 @app.command()

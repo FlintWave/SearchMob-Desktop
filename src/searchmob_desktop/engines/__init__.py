@@ -7,7 +7,13 @@ a metasearch.
 
 from __future__ import annotations
 
-from searchmob_desktop.engines.aggregator import EngineFn, aggregate
+from searchmob_desktop.engines.aggregator import (
+    AggregateOutcome,
+    EngineFn,
+    EngineOutcome,
+    aggregate,
+    aggregate_with_status,
+)
 from searchmob_desktop.engines.brave_api import fetch_brave_api
 from searchmob_desktop.engines.duckduckgo import fetch_duckduckgo
 from searchmob_desktop.engines.kagi_api import fetch_kagi_api
@@ -28,10 +34,13 @@ from searchmob_desktop.engines.wikipedia import fetch_wikipedia
 __all__ = [
     "DEFAULT_POOL_SIZE",
     "USER_AGENTS",
+    "AggregateOutcome",
     "EngineContext",
     "EngineFn",
+    "EngineOutcome",
     "SearchResult",
     "aggregate",
+    "aggregate_with_status",
     "bind_api_key",
     "fetch_brave_api",
     "fetch_duckduckgo",

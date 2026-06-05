@@ -338,6 +338,8 @@
   "discard": "discard",
   "downrank": "downrank",
   "e.g. my-pc.tailnet.ts.net, my-pc.local": "e.g. my-pc.tailnet.ts.net, my-pc.local",
+  "engine status\u0004failed": "failed",
+  "engine status\u0004no results": "no results",
   "or": "or",
   "pin": "pin",
   "search category\u0004Academic": "Academic",
@@ -354,5 +356,6 @@
   "{exc}": "{exc}",
   "{model} (saved)": "{model} (saved)",
   "{name} key": "{name} key",
-  "{pt} pt": "{pt} pt"
+  "{pt} pt": "{pt} pt",
+  "{responded} of {total} engines responded": "{responded} of {total} engines responded"
 }
