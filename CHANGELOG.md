@@ -5,6 +5,8 @@ All notable changes to SearchMob Desktop are documented here. The version scheme
 
 ## [Unreleased]
 
+## 26.06.05 — 2026-06-05
+
 ### Added
 - **Quick links for films, music, books, and games.** When a search is about a film, musician,
   album, song, book, or video game, SearchMob now shows a row of canonical places to watch, listen,
