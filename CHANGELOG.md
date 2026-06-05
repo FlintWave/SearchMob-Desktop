@@ -6,6 +6,12 @@ All notable changes to SearchMob Desktop are documented here. The version scheme
 ## [Unreleased]
 
 ### Added
+- **See which search engines responded.** Each search now shows an unobtrusive "N of M engines
+  responded" line, so when a result set looks thin you can tell whether an engine was simply quiet or
+  actually failed (timed out or was blocked for your network) rather than guessing the engine is bad.
+  Per-engine detail is a hover (app) or a click-to-expand (served page) away. It is computed entirely
+  on your device, never stored or sent anywhere, and shown only to you, never to other people on your
+  network.
 - **SearchMob now speaks ten languages.** The whole interface translates into English, Chinese,
   Hindi, Spanish, Arabic, French, Bengali, Portuguese, Indonesian, and Urdu, in both the app and the
   served page. Pick your language in Settings; the app remembers it and, on first launch, follows

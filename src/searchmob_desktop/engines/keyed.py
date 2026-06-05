@@ -19,10 +19,15 @@ from searchmob_desktop.engines.types import EngineContext, SearchResult
 KeyedEngineFn = Callable[[httpx.AsyncClient, EngineContext, str], Awaitable[list[SearchResult]]]
 
 
-def bind_api_key(fetch: KeyedEngineFn, api_key: str) -> EngineFn:
-    """Return an `EngineFn` that calls `fetch` with `api_key` already supplied."""
+def bind_api_key(fetch: KeyedEngineFn, api_key: str, engine_id: str = "") -> EngineFn:
+    """Return an `EngineFn` that calls `fetch` with `api_key` already supplied.
+
+    `engine_id` labels the bound closure for the per-engine status display (the closure's own name
+    is meaningless); it defaults to the wrapped fetcher's name with the `fetch_` prefix stripped.
+    """
 
     async def _run(client: httpx.AsyncClient, ctx: EngineContext) -> list[SearchResult]:
         return await fetch(client, ctx, api_key)
 
+    _run.engine_id = engine_id or getattr(fetch, "__name__", "").removeprefix("fetch_")  # type: ignore[attr-defined]
     return _run

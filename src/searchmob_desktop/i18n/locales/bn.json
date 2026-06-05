@@ -338,6 +338,8 @@
   "discard": "বাতিল করুন",
   "downrank": "অবস্থান অবনমিত করুন",
   "e.g. my-pc.tailnet.ts.net, my-pc.local": "আমার-পিসি.টেইলনেট.টিএস.নেট, আমার-পিসি.লোকাল",
+  "engine status\u0004failed": "ব্যর্থ হয়েছে।",
+  "engine status\u0004no results": "কোনো ফলাফল পাওয়া যায়নি।",
   "or": "অথবা",
   "pin": "পিন",
   "search category\u0004Academic": "শিক্ষাগত",
@@ -354,5 +356,6 @@
   "{exc}": "{exc}",
   "{model} (saved)": "{model} (সংরক্ষিত)",
   "{name} key": "{name} কী",
-  "{pt} pt": "{pt} পিটি"
+  "{pt} pt": "{pt} পিটি",
+  "{responded} of {total} engines responded": "মোট {total}টি ইঞ্জিনের মধ্যে {responded}টি সাড়া দিয়েছে।"
 }

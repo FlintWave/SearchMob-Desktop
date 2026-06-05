@@ -18,7 +18,7 @@ from PySide6.QtGui import QCloseEvent
 
 import searchmob_desktop.gui.main_window as main_window
 from searchmob_desktop.data.history import InMemoryHistoryStore
-from searchmob_desktop.engines import SearchResult
+from searchmob_desktop.engines import AggregateOutcome, SearchResult
 from searchmob_desktop.engines.correct.corrector import Correction
 from searchmob_desktop.engines.rank import RankRule
 from searchmob_desktop.gui.main_window import MainWindow
@@ -70,14 +70,14 @@ def test_summary_card_shown_for_summary_then_hidden(qapp: object, tmp_path: Path
         url="https://en.wikipedia.org/wiki/Mount_Everest",
     )
     results = [SearchResult(title="One", url="https://a.example/x", snippet="", engine="ddg")]
-    window._on_results_ready((results, box))
+    window._on_results_ready((results, box, AggregateOutcome(results, ())))
     assert not window._summary_card.isHidden()
     assert "Mount Everest" in window._summary_title.text()
     assert "en.wikipedia.org/wiki/Mount_Everest" in window._summary_title.text()
     assert window._summary_extract.text() == box.extract
 
     # A subsequent search with no summary hides the card again.
-    window._on_results_ready((results, None))
+    window._on_results_ready((results, None, AggregateOutcome(results, ())))
     assert window._summary_card.isHidden()
 
 

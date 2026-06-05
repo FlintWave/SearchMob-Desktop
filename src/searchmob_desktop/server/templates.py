@@ -12,13 +12,13 @@ the URL passes the http/https scheme allowlist (see `app.is_safe_http_url`).
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Sequence
 from functools import lru_cache
 from html import escape
 from urllib.parse import quote_plus, urlsplit
 
 from searchmob_desktop.data.history import HistoryEntry
-from searchmob_desktop.engines import SearchResult
+from searchmob_desktop.engines import EngineOutcome, SearchResult
 from searchmob_desktop.engines.rank import Lens, RankingRules, RankRule, host_of_url
 from searchmob_desktop.engines.wiki_summary import SummaryBox
 from searchmob_desktop.gui.theme import (
@@ -218,6 +218,10 @@ _PAGE_CSS = (
     ".topbar .searchbox input[type=submit]{padding:0 16px}"
     ".results{max-width:660px;margin:0 auto;padding:18px 20px 64px}"
     ".results .meta{color:var(--muted);font-size:.8125rem;margin:2px 0 20px}"
+    ".engine-status{margin:-12px 0 16px}"
+    ".engine-status summary{cursor:pointer;color:var(--muted)}"
+    ".engine-status ul{list-style:none;margin:6px 0 0;padding:0;color:var(--muted)}"
+    ".engine-status .engine-failed{font-weight:600}"
     ".didyoumean{font-size:.9375rem;margin:2px 0 18px}"
     ".didyoumean a{font-weight:600;font-style:italic}"
     ".result{margin:0 0 26px}"
@@ -512,6 +516,37 @@ def _vertical_bar(query: str, vertical: str) -> str:
     return f'<nav class="verticalbar" aria-label="{nav_label}">' + "".join(chips) + "</nav>"
 
 
+def _engine_status_line(engine_status: Sequence[EngineOutcome]) -> str:
+    """Owner-only, unobtrusive "N of M engines responded" disclosure with per-engine detail.
+
+    A native `<details>` element so it is keyboard-accessible with no JavaScript and not color-only:
+    the summary states the count in words, the open panel lists each engine's outcome. Returns ""
+    when no status is supplied (a LAN visitor, or a fake metasearch with no per-engine data), so the
+    line never appears for non-owners.
+    """
+    if not engine_status:
+        return ""
+    total = len(engine_status)
+    responded = sum(1 for o in engine_status if o.status != "failed")
+    summary = tr("{responded} of {total} engines responded", responded=responded, total=total)
+    rows: list[str] = []
+    for outcome in engine_status:
+        if outcome.status == "contributed":
+            detail = trn(outcome.count, "{n} result", "{n} results")
+        elif outcome.status == "empty":
+            detail = trc("engine status", "no results")
+        else:
+            detail = trc("engine status", "failed")
+        rows.append(
+            f'<li class="engine engine-{outcome.status}">'
+            f"{escape(outcome.name)} — {escape(detail)}</li>"
+        )
+    return (
+        '<details class="engine-status meta">'
+        f"<summary>{escape(summary)}</summary><ul>{''.join(rows)}</ul></details>"
+    )
+
+
 def _sort_bar(query: str, sort_mode: str) -> str:
     """A sort selector. GET so the choice is bookmarkable; carries the query in a hidden field."""
     # Literal `trc` calls so the extractor sees each label; "sort order" disambiguates the short
@@ -668,6 +703,9 @@ def render_results_page(
     link_builder: Callable[[int, str], str] | None = None,
     update_banner: tuple[str, str] | None = None,
     locale: str = "en",
+    # Per-engine outcome for this search, shown to the owner only (the server passes () for LAN
+    # visitors). Diagnostic; never persisted or sent anywhere.
+    engine_status: Sequence[EngineOutcome] = (),
 ) -> str:
     """The results page. Empty/blank query -> a placeholder; otherwise -> the merged results.
 
@@ -731,6 +769,7 @@ def render_results_page(
         parts.append(f'<p class="empty">{escape(tr("No results for “{query}”.", query=query))}</p>')
     else:
         parts.append(f'<p class="meta">{escape(tr("Results for “{query}”", query=query))}</p>')
+        parts.append(_engine_status_line(engine_status))
         parts.append(_sort_bar(query, sort_mode))
         if editable:
             parts.append(_scope_bar(active_rules))

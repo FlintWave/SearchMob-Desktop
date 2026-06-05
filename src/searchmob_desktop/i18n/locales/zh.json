@@ -338,6 +338,8 @@
   "discard": "放弃",
   "downrank": "降低排名",
   "e.g. my-pc.tailnet.ts.net, my-pc.local": "my-pc.tailnet.ts.net，my-pc.local",
+  "engine status\u0004failed": "失败",
+  "engine status\u0004no results": "没有结果",
   "or": "或",
   "pin": "图钉",
   "search category\u0004Academic": "学术",
@@ -354,5 +356,6 @@
   "{exc}": "{exc}",
   "{model} (saved)": "{model}（已保存）",
   "{name} key": "{name} 密钥",
-  "{pt} pt": "{pt} 磅"
+  "{pt} pt": "{pt} 磅",
+  "{responded} of {total} engines responded": "已响应的引擎数量为 {responded}/{total}"
 }

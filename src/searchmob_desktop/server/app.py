@@ -52,10 +52,12 @@ from starlette.types import ASGIApp
 from searchmob_desktop.data.history import HistoryEntry
 from searchmob_desktop.engines import (
     DEFAULT_POOL_SIZE,
+    AggregateOutcome,
     EngineContext,
     EngineFn,
+    EngineOutcome,
     SearchResult,
-    aggregate,
+    aggregate_with_status,
 )
 from searchmob_desktop.engines.correct import SpellCorrector
 from searchmob_desktop.engines.rank import (
@@ -347,8 +349,12 @@ def _suggestions_body(query: str, suggestions: Sequence[str]) -> str:
 
 
 # The metasearch runner is async-callable so a fake can plug in directly in tests without going
-# through `aggregate`. The default plumbs through to the real `aggregate(ctx, engines)` call.
-_MetasearchFn = Callable[[EngineContext, Sequence[EngineFn]], Awaitable[list[SearchResult]]]
+# through the aggregator. The default plumbs through to `aggregate_with_status`, which returns the
+# per-engine outcome too; a fake may return either a bare result list or an `AggregateOutcome`, and
+# `_run_metasearch` accepts both (a bare list simply has no per-engine status to show).
+_MetasearchFn = Callable[
+    [EngineContext, Sequence[EngineFn]], Awaitable["list[SearchResult] | AggregateOutcome"]
+]
 
 # Upper bound on remembered result renders for owner click-tracking (one per recent owner search).
 # Small on purpose: only the most recent few pages need clickable tracking links at once.
@@ -389,7 +395,7 @@ def build_app(
     max_suggestions: int = MAX_SUGGESTIONS,
     max_results: int = DEFAULT_POOL_SIZE,
     timeout_seconds: float = 5.0,
-    metasearch: _MetasearchFn = aggregate,
+    metasearch: _MetasearchFn = aggregate_with_status,
     access_token: str | None = None,
     host_allowlist_enabled: bool = True,
     allowed_hosts: frozenset[str] = frozenset(),
@@ -487,9 +493,9 @@ def build_app(
         model: PersonalizationModel | None = None,
         active_lens: str | None = None,
         locale: str | None = None,
-    ) -> list[SearchResult]:
+    ) -> tuple[list[SearchResult], tuple[EngineOutcome, ...]]:
         if not query.strip() or not engines:
-            return []
+            return [], ()
         # Scope the query for the chosen vertical (a `site:` OR group the engines understand); the
         # original query still drives sort/summary/correction so freshness keywords are detected.
         scoped = transform_query(query, vertical)
@@ -501,7 +507,13 @@ def build_app(
             timeout_seconds=timeout_seconds,
             language_region=language_region_for(locale),
         )
-        results = await metasearch(ctx, engines)
+        # The runner returns either a bare result list (a test fake) or an `AggregateOutcome` with
+        # the per-engine status (the real `aggregate_with_status`); accept both.
+        raw = await metasearch(ctx, engines)
+        if isinstance(raw, AggregateOutcome):
+            results, engine_outcomes = raw.results, raw.engines
+        else:
+            results, engine_outcomes = raw, ()
         # The AI-slop filter mode is taken live from prefs when wired, so the Settings toggle takes
         # effect on the next search; otherwise the static build-time value is used.
         prefs = _load_prefs()
@@ -520,7 +532,7 @@ def build_app(
         rules = rules_provider()
         if active_lens is not None:
             rules = rules.with_active_lens(active_lens)
-        return apply_ranking(
+        ranked = apply_ranking(
             ordered,
             rules,
             host_of=lambda r: host_of_url(r.url),
@@ -528,6 +540,7 @@ def build_app(
             slop_domains=load_slop_domains(),
             slop_mode=slop_mode,
         )
+        return ranked, engine_outcomes
 
     def _owner_model(request: Request) -> PersonalizationModel | None:
         # The learned model for the loopback owner, or None when off / disabled / not the owner.
@@ -646,7 +659,7 @@ def build_app(
         # latency to the results path.
         summary_task = asyncio.ensure_future(_maybe_summary(query))
         model = _owner_model(request)
-        results = await _run_metasearch(
+        results, engine_outcomes = await _run_metasearch(
             query, sort_mode, vertical, model=model, active_lens=scope, locale=locale
         )
         summary = await summary_task
@@ -670,6 +683,9 @@ def build_app(
             link_builder=link_builder,
             update_banner=_owner_update_banner(request),
             locale=locale,
+            # Per-engine status is diagnostic and owner-only: never shown to a LAN visitor, and
+            # the same loopback gate the editing controls use.
+            engine_status=engine_outcomes if _is_owner(request) else (),
         )
         return Response(body, media_type="text/html; charset=utf-8")
 
@@ -872,7 +888,7 @@ def build_app(
         vertical = Vertical.from_value(request.query_params.get("vertical"))
         sort_param = request.query_params.get("sort")
         sort_mode = SortMode.from_value(sort_param) if sort_param else default_sort(vertical)
-        results = await _run_metasearch(
+        results, _ = await _run_metasearch(
             query,
             sort_mode,
             vertical,

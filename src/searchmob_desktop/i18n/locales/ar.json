@@ -338,6 +338,8 @@
   "discard": "تجاهل",
   "downrank": "تقليل المرتبة",
   "e.g. my-pc.tailnet.ts.net, my-pc.local": "my-pc.tailnet.ts.net، my-pc.local",
+  "engine status\u0004failed": "فشل",
+  "engine status\u0004no results": "لا توجد نتائج",
   "or": "أو",
   "pin": "دبوس",
   "search category\u0004Academic": "أكاديمي",
@@ -354,5 +356,6 @@
   "{exc}": "{exc}",
   "{model} (saved)": "{model} (تم الحفظ)",
   "{name} key": "مفتاح {name}",
-  "{pt} pt": "{pt} نقطة"
+  "{pt} pt": "{pt} نقطة",
+  "{responded} of {total} engines responded": "استجاب {responded} من بين {total} محركًا"
 }
