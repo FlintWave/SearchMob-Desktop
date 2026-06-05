@@ -1184,6 +1184,24 @@ class SettingsDialog(QDialog):
         layout.addWidget(summary_cb)
         layout.addWidget(summary_sub)
 
+        media_cb = QCheckBox(tr("Show media links for films, music, books, and games"))
+        media_cb.setChecked(self._prefs.media_actions_enabled)
+        media_sub = QLabel(
+            tr(
+                "On by default. When a search is about a film, musician, album, book, or game, "
+                "shows a row of canonical places to watch, listen, read, or play it (free and open "
+                "options first) and nudges those up in results. Uses only the Wikipedia lookup the "
+                "summary already makes; the links are built on your device."
+            )
+        )
+        media_sub.setWordWrap(True)
+        media_sub.setProperty("role", "muted")
+        media_cb.toggled.connect(
+            lambda checked: self._save(replace(self._prefs, media_actions_enabled=checked))
+        )
+        layout.addWidget(media_cb)
+        layout.addWidget(media_sub)
+
         layout.addStretch(1)
         return tab
 

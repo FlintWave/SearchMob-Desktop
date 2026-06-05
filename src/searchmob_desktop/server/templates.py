@@ -19,6 +19,7 @@ from urllib.parse import quote_plus, urlsplit
 
 from searchmob_desktop.data.history import HistoryEntry
 from searchmob_desktop.engines import EngineOutcome, SearchResult
+from searchmob_desktop.engines.media_intent import ActionsRow, MediaCategory
 from searchmob_desktop.engines.rank import Lens, RankingRules, RankRule, host_of_url
 from searchmob_desktop.engines.wiki_summary import SummaryBox
 from searchmob_desktop.gui.theme import (
@@ -222,6 +223,10 @@ _PAGE_CSS = (
     ".engine-status summary{cursor:pointer;color:var(--muted)}"
     ".engine-status ul{list-style:none;margin:6px 0 0;padding:0;color:var(--muted)}"
     ".engine-status .engine-failed{font-weight:600}"
+    ".actions-row{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:0 0 18px}"
+    ".actions-row .alabel{color:var(--muted);font-size:.8125rem;font-weight:600}"
+    ".actions-row a{font-size:.8125rem;padding:3px 10px;border:1px solid var(--border);"
+    "border-radius:999px;text-decoration:none;color:var(--link)}"
     ".didyoumean{font-size:.9375rem;margin:2px 0 18px}"
     ".didyoumean a{font-weight:600;font-style:italic}"
     ".result{margin:0 0 26px}"
@@ -665,6 +670,34 @@ def _rank_controls(url: str, rules: RankingRules) -> str:
     return "".join(parts)
 
 
+def _row_label(category: MediaCategory) -> str:
+    """The localized verb for the actions row. Literal `trc` calls so the extractor sees them."""
+    if category is MediaCategory.MUSIC:
+        return trc("media actions", "Listen on")
+    if category is MediaCategory.FILM_TV:
+        return trc("media actions", "Watch on")
+    if category is MediaCategory.BOOKS:
+        return trc("media actions", "Read on")
+    return trc("media actions", "Play on")
+
+
+def _actions_row_card(row: ActionsRow) -> str:
+    """A knowledge-panel-style row of canonical destinations for a resolved media entity.
+
+    The verb label is localized; the destination names are brands (not translated). Every link is a
+    locally-built search/deep URL and carries `rel=noopener noreferrer` like all result links.
+    """
+    links = "".join(
+        f'<a href="{escape(link.url, quote=True)}" rel="noopener noreferrer">'
+        f"{escape(link.label)}</a>"
+        for link in row.links
+    )
+    return (
+        '<div class="actions-row">'
+        f'<span class="alabel">{escape(_row_label(row.category))}</span>{links}</div>'
+    )
+
+
 def _summary_box(summary: SummaryBox, is_safe_http_url: Callable[[str], bool]) -> str:
     """A knowledge-panel-style Wikipedia summary card shown above the results."""
     title_html = escape(summary.title)
@@ -706,6 +739,8 @@ def render_results_page(
     # Per-engine outcome for this search, shown to the owner only (the server passes () for LAN
     # visitors). Diagnostic; never persisted or sent anywhere.
     engine_status: Sequence[EngineOutcome] = (),
+    # The "Listen/Watch/Read/Play on" actions row for a resolved media entity, or None.
+    actions_row: ActionsRow | None = None,
 ) -> str:
     """The results page. Empty/blank query -> a placeholder; otherwise -> the merged results.
 
@@ -762,6 +797,9 @@ def render_results_page(
 
     if not blank and summary is not None:
         parts.append(_summary_box(summary, is_safe_http_url))
+
+    if not blank and actions_row is not None:
+        parts.append(_actions_row_card(actions_row))
 
     if blank:
         parts.append(f'<p class="empty">{escape(tr("Enter a query to search."))}</p>')
@@ -1194,6 +1232,13 @@ def render_settings_page(
     parts.append(f"<h2>{escape(tr('Suggestions'))}</h2>")
     parts.append(
         _checkbox("summary_enabled", N_("Show the Wikipedia summary card"), prefs.summary_enabled)
+    )
+    parts.append(
+        _checkbox(
+            "media_actions_enabled",
+            N_("Show media links (films, music, books, games)"),
+            prefs.media_actions_enabled,
+        )
     )
     parts.append(
         _checkbox(

@@ -80,6 +80,10 @@ class UserPreferences:
     # Show a contextual Wikipedia summary box above results for entity-like queries. Adds at most
     # one extra outbound call per search to Wikipedia (which is already a search engine here).
     summary_enabled: bool = True
+    # For a resolved media entity (film/musician/album/book/game), show a Listen/Watch/Read/Play row
+    # of canonical platforms and nudge those platforms up in ranking. Default on; uses
+    # only the Wikipedia lookup already made for the summary (the platform links are built locally).
+    media_actions_enabled: bool = True
     # Result sort order: "fresh" (freshness+relevance blend, default), "date", or "relevance".
     sort_mode: str = "fresh"
     # AI-slop / low-quality content filter: "downrank" (default, on), "hide", or "off".
