@@ -60,6 +60,11 @@ from searchmob_desktop.engines import (
     aggregate_with_status,
 )
 from searchmob_desktop.engines.correct import SpellCorrector
+from searchmob_desktop.engines.media_intent import (
+    build_actions_row,
+    detect_category,
+    promote_media,
+)
 from searchmob_desktop.engines.rank import (
     Lens,
     PersonalizationModel,
@@ -493,6 +498,10 @@ def build_app(
         model: PersonalizationModel | None = None,
         active_lens: str | None = None,
         locale: str | None = None,
+        # The contextual-summary task, already in flight, so media promotion can read the resolved
+        # entity's category and lift its canonical platforms before the user's domain rules run
+        # (pin/raise/block still win). None disables promotion (e.g. the JSON endpoint).
+        summary_task: Awaitable[SummaryBox | None] | None = None,
     ) -> tuple[list[SearchResult], tuple[EngineOutcome, ...]]:
         if not query.strip() or not engines:
             return [], ()
@@ -527,6 +536,17 @@ def build_app(
             ordered = personalize_reorder(
                 ordered, lambda r: host_of_url(r.url), query, model, now_ms
             )
+        # Media promotion: for a resolved media entity, nudge its canonical platforms up (bounded),
+        # after relevance/personalization and before the user's rules, so pin/raise/block still win.
+        # The summary is fetched concurrently; awaiting it here adds no latency past the metasearch.
+        media_on = prefs is None or prefs.media_actions_enabled
+        if media_on and summary_task is not None:
+            media_summary = await summary_task
+            category = (
+                detect_category(media_summary.description) if media_summary is not None else None
+            )
+            if category is not None:
+                ordered = promote_media(ordered, category)
         # An inline `+name` scope token (parsed from the query at the route) overrides the saved
         # active scope for this one request only; the persisted selection is never written.
         rules = rules_provider()
@@ -660,9 +680,22 @@ def build_app(
         summary_task = asyncio.ensure_future(_maybe_summary(query))
         model = _owner_model(request)
         results, engine_outcomes = await _run_metasearch(
-            query, sort_mode, vertical, model=model, active_lens=scope, locale=locale
+            query,
+            sort_mode,
+            vertical,
+            model=model,
+            active_lens=scope,
+            locale=locale,
+            summary_task=summary_task,
         )
         summary = await summary_task
+        # For a resolved media entity, build the "Listen/Watch/Read/Play on" actions row (the same
+        # toggle and the same Wikipedia lookup the summary card uses; the platform links are local).
+        actions_row = None
+        if (prefs is None or prefs.media_actions_enabled) and summary is not None:
+            category = detect_category(summary.description)
+            if category is not None:
+                actions_row = build_actions_row(category, summary.title, summary.url)
         # When personalization is on for the owner, route result links through `/click` so a click
         # can train the model; everyone else (and a disabled owner) gets the plain destination link.
         link_builder: Callable[[int, str], str] | None = None
@@ -686,6 +719,7 @@ def build_app(
             # Per-engine status is diagnostic and owner-only: never shown to a LAN visitor, and
             # the same loopback gate the editing controls use.
             engine_status=engine_outcomes if _is_owner(request) else (),
+            actions_row=actions_row,
         )
         return Response(body, media_type="text/html; charset=utf-8")
 
@@ -872,6 +906,7 @@ def build_app(
             sort_mode=sort_mode,
             ai_slop_mode=slop,
             summary_enabled=form.get("summary_enabled", "").lower() in _BOOL_FORM,
+            media_actions_enabled=form.get("media_actions_enabled", "").lower() in _BOOL_FORM,
             upstream_suggestions_enabled=(
                 form.get("upstream_suggestions_enabled", "").lower() in _BOOL_FORM
             ),

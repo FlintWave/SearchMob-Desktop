@@ -6,6 +6,13 @@ All notable changes to SearchMob Desktop are documented here. The version scheme
 ## [Unreleased]
 
 ### Added
+- **Quick links for films, music, books, and games.** When a search is about a film, musician,
+  album, song, book, or video game, SearchMob now shows a row of canonical places to watch, listen,
+  read, or play it, leading with free and open options (Bandcamp, Open Library, GOG, and the like)
+  and the entity's Wikipedia article, and it nudges those platforms up in the results. It only
+  recognizes media from the Wikipedia/Wikidata lookup the summary card already makes, so it adds no
+  new requests; every link is built on your device. The nudge is bounded and your pin/raise/block
+  rules still win. Turn the whole thing off in Settings.
 - **See which search engines responded.** Each search now shows an unobtrusive "N of M engines
   responded" line, so when a result set looks thin you can tell whether an engine was simply quiet or
   actually failed (timed out or was blocked for your network) rather than guessing the engine is bad.

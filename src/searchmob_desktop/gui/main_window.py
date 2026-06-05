@@ -55,6 +55,13 @@ from searchmob_desktop.engines import (
 )
 from searchmob_desktop.engines.correct import start_background_corrector
 from searchmob_desktop.engines.local_llm import LlmConfig, stream_answer
+from searchmob_desktop.engines.media_intent import (
+    ActionsRow,
+    MediaCategory,
+    build_actions_row,
+    detect_category,
+    promote_media,
+)
 from searchmob_desktop.engines.rank import (
     PersonalizationModel,
     RankRule,
@@ -103,6 +110,17 @@ def app_icon() -> QIcon:
         return QIcon()
 
 
+def _gui_row_label(category: MediaCategory) -> str:
+    """The localized verb heading the media actions row. Literal `trc` calls for the extractor."""
+    if category is MediaCategory.MUSIC:
+        return trc("media actions", "Listen on")
+    if category is MediaCategory.FILM_TV:
+        return trc("media actions", "Watch on")
+    if category is MediaCategory.BOOKS:
+        return trc("media actions", "Read on")
+    return trc("media actions", "Play on")
+
+
 class MainWindow(QMainWindow):
     """Top-level shell."""
 
@@ -138,6 +156,9 @@ class MainWindow(QMainWindow):
         # Per-engine outcome for the last search (contributed / empty / failed), shown as an
         # unobtrusive "N of M engines responded" suffix on the status line. On-device only.
         self._engine_status: tuple[EngineOutcome, ...] = ()
+        # Detected media category for the last search (from the summary entity), or None; drives the
+        # bounded canonical-platform promotion in `_apply_ranking_and_show`.
+        self._media_category: MediaCategory | None = None
         # The list currently shown (after sort + personalization + rules). Kept so a result click
         # can learn from its displayed position (the personalization skip-above signal).
         self._displayed_results: list[SearchResult] = []
@@ -295,6 +316,9 @@ class MainWindow(QMainWindow):
         self._summary_card = self._build_summary_card()
         self._summary_card.hide()
         outer.addWidget(self._summary_card)
+        self._actions_card = self._build_actions_card()
+        self._actions_card.hide()
+        outer.addWidget(self._actions_card)
 
         # Body swaps between a friendly empty state and the results list so the window never shows a
         # bare void before the first search.
@@ -449,6 +473,34 @@ class MainWindow(QMainWindow):
         for w in (self._summary_title, self._summary_desc, self._summary_extract, footer):
             col.addWidget(w)
         return card
+
+    def _build_actions_card(self) -> QFrame:
+        """A compact card of canonical media destinations ("Listen/Watch/Read/Play on ...").
+
+        Rendered as one rich-text label (the verb plus brand links) so it wraps cleanly; clicking a
+        link opens it in the browser. Every link is a locally-built search URL (nothing is fetched).
+        """
+        card = QFrame()
+        card.setObjectName("actionsCard")
+        card.setProperty("role", "card")
+        card.setFrameShape(QFrame.Shape.StyledPanel)
+        col = QVBoxLayout(card)
+        self._actions_label = QLabel()
+        self._actions_label.setTextFormat(Qt.TextFormat.RichText)
+        self._actions_label.setWordWrap(True)
+        self._actions_label.setOpenExternalLinks(False)
+        self._actions_label.linkActivated.connect(lambda url: QDesktopServices.openUrl(QUrl(url)))
+        col.addWidget(self._actions_label)
+        return card
+
+    def _show_actions(self, row: ActionsRow) -> None:
+        label = _gui_row_label(row.category)
+        links = " · ".join(
+            f'<a href="{escape(link.url, quote=True)}">{escape(link.label)}</a>'
+            for link in row.links
+        )
+        self._actions_label.setText(f"<b>{escape(label)}</b> {links}")
+        self._actions_card.show()
 
     def _show_summary(self, box: SummaryBox) -> None:
         if box.url:
@@ -851,6 +903,15 @@ class MainWindow(QMainWindow):
             self._show_summary(summary)
         else:
             self._summary_card.hide()
+        # Media actions row: for a resolved media entity (toggle on), show the canonical-platform
+        # card and record the category for the bounded promotion in `_apply_ranking_and_show`.
+        self._media_category = None
+        self._actions_card.hide()
+        if self._prefs_store.load().media_actions_enabled and isinstance(summary, SummaryBox):
+            category = detect_category(summary.description)
+            if category is not None:
+                self._media_category = category
+                self._show_actions(build_actions_row(category, summary.title, summary.url))
         if not isinstance(results, list):
             self._status_label.setText(tr("Search failed: unexpected result type."))
             self._body.setCurrentWidget(self._empty_state)
@@ -887,6 +948,10 @@ class MainWindow(QMainWindow):
                 self._personalization,
                 now_ms,
             )
+        # Media promotion: nudge the detected category's canonical platforms up (bounded), after
+        # relevance/personalization and before the user's rules so pin/raise/block still win.
+        if self._media_category is not None:
+            ordered = promote_media(ordered, self._media_category)
         ranked = apply_ranking(
             ordered,
             self._ranking_rules,
