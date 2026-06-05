@@ -28,6 +28,7 @@ from PySide6.QtWidgets import (
 from searchmob_desktop import service
 from searchmob_desktop.gui.browser_setup_dialog import BrowserSetupDialog, choose_setup_host
 from searchmob_desktop.gui.server_controller import LocalServerController
+from searchmob_desktop.i18n import tr
 from searchmob_desktop.prefs import JsonPreferencesStore
 from searchmob_desktop.server import local_hostnames
 
@@ -55,7 +56,7 @@ class OnboardingDialog(QDialog):
         self._returning = self._prefs.onboarding_completed
 
         self.setWindowTitle(
-            "What's new in SearchMob" if self._returning else "Welcome to SearchMob"
+            tr("What's new in SearchMob") if self._returning else tr("Welcome to SearchMob")
         )
         self.setModal(True)
         self.resize(640, 560)
@@ -69,7 +70,7 @@ class OnboardingDialog(QDialog):
         brand.setFont(brand_font)
         top.addWidget(brand)
         top.addStretch(1)
-        skip = QPushButton("Skip")
+        skip = QPushButton(tr("Skip"))
         skip.clicked.connect(self._finish)
         top.addWidget(skip)
         outer.addLayout(top)
@@ -90,9 +91,9 @@ class OnboardingDialog(QDialog):
         outer.addWidget(self._stack, stretch=1)
 
         nav = QHBoxLayout()
-        self._back_btn = QPushButton("Back")
+        self._back_btn = QPushButton(tr("Back"))
         self._back_btn.clicked.connect(self._back)
-        self._next_btn = QPushButton("Next")
+        self._next_btn = QPushButton(tr("Next"))
         self._next_btn.clicked.connect(self._next)
         nav.addWidget(self._back_btn)
         nav.addStretch(1)
@@ -148,60 +149,70 @@ class OnboardingDialog(QDialog):
 
     def _welcome_page(self) -> QWidget:
         return self._page(
-            "Welcome to SearchMob",
-            "Private, on-device metasearch. Your searches are aggregated from several engines "
-            "behind one box, with no tracking and no account. Let's set up a couple of things so "
-            "you can search straight from your browser.",
+            tr("Welcome to SearchMob"),
+            tr(
+                "Private, on-device metasearch. Your searches are aggregated from several engines "
+                "behind one box, with no tracking and no account. Let's set up a couple of things "
+                "so you can search straight from your browser."
+            ),
         )
 
     def _privacy_page(self) -> QWidget:
         return self._page(
-            "Private by default",
-            "SearchMob stores nothing by default. There are no cookies, no referrer, and no "
-            "device identifier, and the only outbound traffic is the searches you run plus an "
-            "optional once-a-day update check you can turn off. You can optionally enable "
-            "encrypted, zero-knowledge search history later in Settings.",
+            tr("Private by default"),
+            tr(
+                "SearchMob stores nothing by default. There are no cookies, no referrer, and no "
+                "device identifier, and the only outbound traffic is the searches you run plus an "
+                "optional once-a-day update check you can turn off. You can optionally enable "
+                "encrypted, zero-knowledge search history later in Settings."
+            ),
         )
 
     def _personalize_page(self) -> QWidget:
         box = QFrame()
         box.setFrameShape(QFrame.Shape.StyledPanel)
         col = QVBoxLayout(box)
-        self._personalize_check = QCheckBox("Turn on personalized ranking (recommended)")
+        self._personalize_check = QCheckBox(tr("Turn on personalized ranking (recommended)"))
         self._personalize_check.setChecked(self._prefs.personalization_enabled)
         self._personalize_check.toggled.connect(self._on_personalize_toggled)
         col.addWidget(self._personalize_check)
         note = QLabel(
-            "It is as private as your data and device are: keep a strong vault passphrase and a "
-            "locked, encrypted device, and turn on zero-knowledge mode for the strongest "
-            "protection. You can reset or export it any time in Settings."
+            tr(
+                "It is as private as your data and device are: keep a strong vault passphrase and "
+                "a locked, encrypted device, and turn on zero-knowledge mode for the strongest "
+                "protection. You can reset or export it any time in Settings."
+            )
         )
         note.setWordWrap(True)
         note.setProperty("role", "muted")
         col.addWidget(note)
         return self._page(
-            "Personalize your ranking (recommended)",
-            "SearchMob can learn which sites you click and quietly move the ones you prefer "
-            "higher. It gets better the more you search. Everything stays on this device: what it "
-            "learns is encrypted with your vault key, is never sent anywhere, and other people on "
-            "your network can never read it or change it.",
+            tr("Personalize your ranking (recommended)"),
+            tr(
+                "SearchMob can learn which sites you click and quietly move the ones you prefer "
+                "higher. It gets better the more you search. Everything stays on this device: "
+                "what it learns is encrypted with your vault key, is never sent anywhere, and "
+                "other people on your network can never read it or change it."
+            ),
             extra=box,
         )
 
     def _browser_page(self) -> QWidget:
-        btn = QPushButton("Open browser setup")
+        btn = QPushButton(tr("Open browser setup"))
         btn.clicked.connect(self._open_browser_setup)
         page = self._page(
-            "Make SearchMob your search engine",
-            "Add SearchMob to your browser so address-bar searches go through your private local "
-            "server. Start the local server from the main window first, then open the setup guide "
-            "for step-by-step instructions for your browser.",
+            tr("Make SearchMob your search engine"),
+            tr(
+                "Add SearchMob to your browser so address-bar searches go through your private "
+                "local server. Start the local server from the main window first, then open the "
+                "setup guide for step-by-step instructions for your browser."
+            ),
             extra=btn,
         )
         return page
 
     def _service_page(self) -> QWidget:
-        mechanism = service.mechanism_label() or "a background service"
+        mechanism = service.mechanism_label() or tr("a background service")
         box = QFrame()
         box.setFrameShape(QFrame.Shape.StyledPanel)
         col = QVBoxLayout(box)
@@ -209,16 +220,19 @@ class OnboardingDialog(QDialog):
         self._service_status.setWordWrap(True)
         self._service_status.setProperty("role", "muted")
         col.addWidget(self._service_status)
-        self._service_btn = QPushButton("Install and start")
+        self._service_btn = QPushButton(tr("Install and start"))
         self._service_btn.clicked.connect(self._install_service)
         col.addWidget(self._service_btn)
         if service.status().installed:
-            self._service_btn.setText("Reinstall")
+            self._service_btn.setText(tr("Reinstall"))
         return self._page(
-            "Run in the background (optional)",
-            f"Optionally run the local server as {mechanism} so your browser can use SearchMob "
-            "even when this window is closed. The app still opens normally; this is opt-in and you "
-            "can remove it any time from Settings.",
+            tr("Run in the background (optional)"),
+            tr(
+                "Optionally run the local server as {mechanism} so your browser can use SearchMob "
+                "even when this window is closed. The app still opens normally; this is opt-in "
+                "and you can remove it any time from Settings.",
+                mechanism=mechanism,
+            ),
             extra=box,
         )
 
@@ -252,17 +266,17 @@ class OnboardingDialog(QDialog):
         host = "0.0.0.0" if self._prefs.network_access_enabled else "127.0.0.1"
         ok, message = service.install_and_enable(host=host)
         if not ok:
-            QMessageBox.warning(self, "Could not install the service", message)
+            QMessageBox.warning(self, tr("Could not install the service"), message)
         self._service_status.setText(service.status().summary())
         if service.status().installed:
-            self._service_btn.setText("Reinstall")
+            self._service_btn.setText(tr("Reinstall"))
 
     # --- Navigation --------------------------------------------------------------------------
 
     def _update_nav(self) -> None:
         idx = self._stack.currentIndex()
         self._back_btn.setEnabled(idx > 0)
-        self._next_btn.setText("Finish" if idx == self._stack.count() - 1 else "Next")
+        self._next_btn.setText(tr("Finish") if idx == self._stack.count() - 1 else tr("Next"))
 
     def _back(self) -> None:
         self._stack.setCurrentIndex(max(0, self._stack.currentIndex() - 1))

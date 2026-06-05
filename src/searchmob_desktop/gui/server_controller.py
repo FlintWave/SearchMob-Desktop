@@ -42,6 +42,7 @@ from searchmob_desktop.engines.correct import start_background_corrector
 from searchmob_desktop.engines.rank import PersonalizationModel
 from searchmob_desktop.engines.wiki_summary import summary_for_query
 from searchmob_desktop.gui.engines_catalog import ENGINE_CATALOG, is_engine_enabled
+from searchmob_desktop.i18n import tr
 from searchmob_desktop.prefs import JsonPreferencesStore, UserPreferences
 from searchmob_desktop.server import (
     LOOPBACK_HOST,
@@ -254,11 +255,11 @@ class _UvicornWorker(QThread):
             # uvicorn.Server.run() builds its own asyncio loop and blocks until should_exit.
             server.run()
         except OSError as exc:
-            self.failed.emit(f"server failed to bind: {exc}")
+            self.failed.emit(tr("server failed to bind: {exc}", exc=exc))
             self._ready.set()
             return
         except Exception as exc:
-            self.failed.emit(str(exc))
+            self.failed.emit(tr("{exc}", exc=exc))
             self._ready.set()
             return
         finally:

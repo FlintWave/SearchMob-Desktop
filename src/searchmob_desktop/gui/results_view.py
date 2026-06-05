@@ -33,6 +33,7 @@ from PySide6.QtWidgets import (
 from searchmob_desktop.engines import SearchResult
 from searchmob_desktop.engines.rank import RankRule, host_of_url
 from searchmob_desktop.gui.theme import active_palette
+from searchmob_desktop.i18n import N_, tr
 
 # Custom roles so the delegate does not have to parse the visible string back into fields.
 _TITLE_ROLE = Qt.ItemDataRole.UserRole + 1
@@ -138,7 +139,9 @@ class _ResultDelegate(QStyledItemDelegate):
         if engine:
             painter.setPen(QColor(palette.engine))
             engine_y = rect.top() + (line_h + self._LINE_SPACING) * 3 + fm.ascent()
-            engine_text = fm.elidedText(f"via {engine}", Qt.TextElideMode.ElideRight, rect.width())
+            engine_text = fm.elidedText(
+                tr("via {engine}", engine=engine), Qt.TextElideMode.ElideRight, rect.width()
+            )
             painter.drawText(rect.left(), engine_y, engine_text)
 
         painter.restore()
@@ -191,17 +194,17 @@ class ResultsView(QListView):
         if not domain:
             return
         menu = QMenu(self)
-        menu.addAction(f"Domain: {domain}").setEnabled(False)
+        menu.addAction(tr("Domain: {domain}", domain=domain)).setEnabled(False)
         menu.addSeparator()
         # NORMAL clears any existing rule for the domain.
         for label, rule in (
-            ("Pin to top", RankRule.PIN),
-            ("Raise", RankRule.RAISE),
-            ("Lower", RankRule.LOWER),
-            ("Block", RankRule.BLOCK),
-            ("Clear rule", RankRule.NORMAL),
+            (N_("Pin to top"), RankRule.PIN),
+            (N_("Raise"), RankRule.RAISE),
+            (N_("Lower"), RankRule.LOWER),
+            (N_("Block"), RankRule.BLOCK),
+            (N_("Clear rule"), RankRule.NORMAL),
         ):
-            action = menu.addAction(label)
+            action = menu.addAction(tr(label))
             action.triggered.connect(
                 lambda _checked=False, r=rule: self.ruleRequested.emit(domain, r)
             )

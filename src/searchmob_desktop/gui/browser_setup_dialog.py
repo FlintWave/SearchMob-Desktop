@@ -24,6 +24,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from searchmob_desktop.i18n import tr
+
 
 def _setup_urls(host: str, port: int, token: str | None = None) -> tuple[str, str, str]:
     """Return `(visit_url, search_template, suggestion_template)` for a bound `(host, port)`.
@@ -79,7 +81,7 @@ class BrowserSetupDialog(QDialog):
         token: str | None = None,
     ) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Browser setup")
+        self.setWindowTitle(tr("Browser setup"))
         self.setModal(True)
         self.resize(720, 720)
 
@@ -95,89 +97,113 @@ class BrowserSetupDialog(QDialog):
         else:
             visit, search_template, suggest_template = _setup_urls(host, port, token)
             intro = QLabel(
-                "Make SearchMob your browser's default search engine. The easiest way: open the "
-                "page below once, then add SearchMob from your browser's search settings (it is "
-                "offered automatically). If you add it by hand instead, paste the search template "
-                "into the URL field and the suggestion template into the Suggestion URL field. "
-                "The %s in each template is where the browser drops your search term; leave it as "
-                "it is."
+                tr(
+                    "Make SearchMob your browser's default search engine. The easiest way: open"
+                    " the page below once, then add SearchMob from your browser's search settings"
+                    " (it is offered automatically). If you add it by hand instead, paste the"
+                    " search template into the URL field and the suggestion template into the"
+                    " Suggestion URL field. The %s in each template is where the browser drops"
+                    " your search term; leave it as it is."
+                )
             )
             intro.setWordWrap(True)
             layout.addWidget(intro)
 
-            self._add_url_card(layout, "Page to visit", visit)
-            self._add_url_card(layout, "Search URL (uses %s for the search term)", search_template)
+            self._add_url_card(layout, tr("Page to visit"), visit)
             self._add_url_card(
-                layout, "Suggestion URL (uses %s for the search term)", suggest_template
+                layout, tr("Search URL (uses %s for the search term)"), search_template
+            )
+            self._add_url_card(
+                layout, tr("Suggestion URL (uses %s for the search term)"), suggest_template
             )
 
-            open_btn = QPushButton("Open in browser")
+            open_btn = QPushButton(tr("Open in browser"))
             open_btn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(visit)))
             layout.addWidget(open_btn)
 
             self._add_instructions(
                 layout,
-                "Any browser (the general method)",
+                tr("Any browser (the general method)"),
                 (
-                    "Open the page above once. SearchMob advertises itself as a search "
-                    "engine when you visit it.",
-                    "Open your browser's search-engine settings.",
-                    "Pick SearchMob if it appears (no URL to type). Otherwise add a custom "
-                    "engine and paste the search template, leaving the %s placeholder intact, "
-                    "then set it as default.",
+                    tr(
+                        "Open the page above once. SearchMob advertises itself as a search"
+                        " engine when you visit it."
+                    ),
+                    tr("Open your browser's search-engine settings."),
+                    tr(
+                        "Pick SearchMob if it appears (no URL to type). Otherwise add a custom"
+                        " engine and paste the search template, leaving the %s placeholder"
+                        " intact, then set it as default."
+                    ),
                 ),
             )
             self._add_instructions(
                 layout,
-                "Firefox family (Firefox, LibreWolf, Mull, IronFox)",
+                tr("Firefox family (Firefox, LibreWolf, Mull, IronFox)"),
                 (
-                    "Easiest: after visiting the page above, go to Menu -> Settings -> Search "
-                    "and SearchMob can be added directly (it carries the right URLs).",
-                    "To add it by hand: Settings -> Search -> Add search engine. Name it "
-                    "SearchMob, paste the Search URL into the Engine URL field, and the "
-                    "Suggestion URL into the Suggestions URL field. Firefox uses %s for the "
-                    "search term (not {searchTerms}); leave the %s in the templates as it is.",
-                    "Save, then set SearchMob as the default search engine.",
+                    tr(
+                        "Easiest: after visiting the page above, go to Menu -> Settings ->"
+                        " Search and SearchMob can be added directly (it carries the right URLs)."
+                    ),
+                    tr(
+                        "To add it by hand: Settings -> Search -> Add search engine. Name it"
+                        " SearchMob, paste the Search URL into the Engine URL field, and the"
+                        " Suggestion URL into the Suggestions URL field. Firefox uses %s for the"
+                        " search term (not {searchTerms}); leave the %s in the templates as it is."
+                    ),
+                    tr("Save, then set SearchMob as the default search engine."),
                 ),
             )
             self._add_instructions(
                 layout,
-                "Chromium browsers (Chrome, Brave, Edge, Vivaldi)",
+                tr("Chromium browsers (Chrome, Brave, Edge, Vivaldi)"),
                 (
-                    "Settings -> Search engine -> Manage search engines and site search -> Add.",
-                    "Name it SearchMob and pick a Shortcut. Paste the Search URL into the "
-                    "URL field, and paste the Suggestion URL into the Suggestion URL field. "
-                    "Chromium uses %s for the search term; leave the %s in the templates as "
-                    "it is.",
-                    "Save, then activate SearchMob as the default search engine.",
+                    tr(
+                        "Settings -> Search engine -> Manage search engines and site search -> Add."
+                    ),
+                    tr(
+                        "Name it SearchMob and pick a Shortcut. Paste the Search URL into the"
+                        " URL field, and paste the Suggestion URL into the Suggestion URL field."
+                        " Chromium uses %s for the search term; leave the %s in the templates"
+                        " as it is."
+                    ),
+                    tr("Save, then activate SearchMob as the default search engine."),
                 ),
             )
             self._add_instructions(
                 layout,
-                "Other browsers (manual)",
+                tr("Other browsers (manual)"),
                 (
-                    "In your browser's search-engine settings, add a custom engine.",
-                    "Paste the search template as the query URL, leaving the %s placeholder "
-                    "intact (most browsers use %s for the search term).",
-                    "Set the new engine as your default.",
+                    tr("In your browser's search-engine settings, add a custom engine."),
+                    tr(
+                        "Paste the search template as the query URL, leaving the %s placeholder"
+                        " intact (most browsers use %s for the search term)."
+                    ),
+                    tr("Set the new engine as your default."),
                 ),
             )
             self._add_instructions(
                 layout,
-                "Show search suggestions (optional)",
+                tr("Show search suggestions (optional)"),
                 (
-                    "Make sure you pasted the Suggestion URL above into the browser's "
-                    "Suggestion URL field when you added SearchMob.",
-                    "Browsers also keep their own Show search suggestions toggle. Firefox "
-                    "family: menu -> Settings -> Search -> Show search suggestions. "
-                    "Chromium: Settings -> Search engine -> Show search suggestions.",
-                    "SearchMob suggests from your local history by default. For live web "
-                    "autocomplete, open Settings -> Suggestions and turn on Live "
-                    "suggestions from the web.",
+                    tr(
+                        "Make sure you pasted the Suggestion URL above into the browser's"
+                        " Suggestion URL field when you added SearchMob."
+                    ),
+                    tr(
+                        "Browsers also keep their own Show search suggestions toggle. Firefox"
+                        " family: menu -> Settings -> Search -> Show search suggestions."
+                        " Chromium: Settings -> Search engine -> Show search suggestions."
+                    ),
+                    tr(
+                        "SearchMob suggests from your local history by default. For live web"
+                        " autocomplete, open Settings -> Suggestions and turn on Live"
+                        " suggestions from the web."
+                    ),
                 ),
             )
 
-        close = QPushButton("Close")
+        close = QPushButton(tr("Close"))
         close.clicked.connect(self.accept)
         bottom = QHBoxLayout()
         bottom.addStretch(1)
@@ -189,13 +215,15 @@ class BrowserSetupDialog(QDialog):
 
     @staticmethod
     def _render_not_running(layout: QVBoxLayout) -> None:
-        title = QLabel("Server not running")
+        title = QLabel(tr("Server not running"))
         title_font = title.font()
         title_font.setBold(True)
         title.setFont(title_font)
         body = QLabel(
-            "The on-device search server is not running, so there is no address to add yet. "
-            "Start the server from the main window, then come back here."
+            tr(
+                "The on-device search server is not running, so there is no address to add yet."
+                " Start the server from the main window, then come back here."
+            )
         )
         body.setWordWrap(True)
         layout.addWidget(title)
@@ -217,7 +245,7 @@ class BrowserSetupDialog(QDialog):
         text_col.addWidget(label_widget)
         text_col.addWidget(url_widget)
         row.addLayout(text_col, stretch=1)
-        copy_btn = QPushButton("Copy")
+        copy_btn = QPushButton(tr("Copy"))
         copy_btn.clicked.connect(
             lambda checked=False, value=url, field=url_widget: self._copy(value, field)
         )

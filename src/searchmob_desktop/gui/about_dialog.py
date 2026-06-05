@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from searchmob_desktop.i18n import tr
 from searchmob_desktop.version import __version__
 
 REPO_URL = "https://github.com/FlintWave/SearchMob-Desktop"
@@ -33,7 +34,7 @@ class AboutDialog(QDialog):
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self.setWindowTitle("About SearchMob Desktop")
+        self.setWindowTitle(tr("About SearchMob Desktop"))
         self.setModal(True)
         self.resize(640, 720)
 
@@ -46,8 +47,8 @@ class AboutDialog(QDialog):
 
         self._add_section(
             layout,
-            title="What SearchMob is",
-            body=(
+            title=tr("What SearchMob is"),
+            body=tr(
                 "SearchMob Desktop is a private, on-device metasearch app. It runs a small "
                 "local HTTP server on your computer and queries public search engines directly "
                 "on your behalf. There are no SearchMob servers, so your searches never pass "
@@ -56,24 +57,26 @@ class AboutDialog(QDialog):
         )
         self._add_section(
             layout,
-            title="We never receive your data",
-            body=(
+            title=tr("We never receive your data"),
+            body=tr(
                 "SearchMob sends nothing back to its developers. The only outbound traffic is "
                 "the searches you run, plus an optional once-a-day update check to GitHub that "
                 "you can turn off in Settings."
             ),
             bullets=(
-                "No telemetry, no analytics, and no crash or diagnostic reporting.",
-                "No accounts to sign in to and no advertising IDs.",
-                "No device identifiers.",
-                "No background phone-home: the app makes no outbound calls except searches "
-                "and the optional update check, both routed through the privacy proxy.",
+                tr("No telemetry, no analytics, and no crash or diagnostic reporting."),
+                tr("No accounts to sign in to and no advertising IDs."),
+                tr("No device identifiers."),
+                tr(
+                    "No background phone-home: the app makes no outbound calls except searches "
+                    "and the optional update check, both routed through the privacy proxy."
+                ),
             ),
         )
         self._add_section(
             layout,
-            title="How it protects you when you search",
-            body=(
+            title=tr("How it protects you when you search"),
+            body=tr(
                 "SearchMob acts as a privacy proxy to the upstream engines. Requests carry no "
                 "cookies, no referrer, and no user or device identifier, and the User-Agent is "
                 "rotated on each request. It never scrapes Google.\n\n"
@@ -85,15 +88,21 @@ class AboutDialog(QDialog):
         )
         self._add_section(
             layout,
-            title="Tips to keep searches more private",
+            title=tr("Tips to keep searches more private"),
             bullets=(
-                "Keep history off, or use the zero-knowledge passphrase mode if you want it on.",
-                "Avoid queries that contain your real name, address, or account details.",
-                "Remember that bring-your-own API keys tie those queries to your account at "
-                "that provider.",
-                "Use a trustworthy VPN or Tor if you want to hide your IP from the upstream "
-                "engines.",
-                "Clear your history periodically.",
+                tr(
+                    "Keep history off, or use the zero-knowledge passphrase mode if you want it on."
+                ),
+                tr("Avoid queries that contain your real name, address, or account details."),
+                tr(
+                    "Remember that bring-your-own API keys tie those queries to your account at "
+                    "that provider."
+                ),
+                tr(
+                    "Use a trustworthy VPN or Tor if you want to hide your IP from the upstream "
+                    "engines."
+                ),
+                tr("Clear your history periodically."),
             ),
         )
 
@@ -102,18 +111,20 @@ class AboutDialog(QDialog):
         caveat.setProperty("role", "caveat")
         caveat.setFrameShape(QFrame.Shape.StyledPanel)
         caveat_layout = QVBoxLayout(caveat)
-        caveat_title = QLabel("A caveat")
+        caveat_title = QLabel(tr("A caveat"))
         caveat_title.setProperty("role", "caveat-text")
         title_font = caveat_title.font()
         title_font.setBold(True)
         caveat_title.setFont(title_font)
         caveat_body = QLabel(
-            "True anonymity on today's internet is effectively impossible. Upstream search "
-            "engines and the networks in between can still observe request metadata (your IP "
-            "address, timing, and query patterns) and may correlate that activity. SearchMob "
-            "minimizes what it, and especially its developers, can see, but it cannot make "
-            "you anonymous to the wider internet. Be skeptical of anything that promises "
-            "total anonymity."
+            tr(
+                "True anonymity on today's internet is effectively impossible. Upstream search "
+                "engines and the networks in between can still observe request metadata (your IP "
+                "address, timing, and query patterns) and may correlate that activity. SearchMob "
+                "minimizes what it, and especially its developers, can see, but it cannot make "
+                "you anonymous to the wider internet. Be skeptical of anything that promises "
+                "total anonymity."
+            )
         )
         caveat_body.setProperty("role", "caveat-text")
         caveat_body.setWordWrap(True)
@@ -122,20 +133,22 @@ class AboutDialog(QDialog):
         layout.addWidget(caveat)
 
         # Footer: version, license, copyright, attribution, buttons.
-        version_label = QLabel(f"Version {__version__}")
+        version_label = QLabel(tr("Version {version}", version=__version__))
         version_label.setProperty("role", "muted")
         license_label = QLabel("License: AGPL-3.0-or-later")
         license_label.setProperty("role", "muted")
         copyright_label = QLabel("Copyright © 2026 FlintWave. Contact: flintwave@tuta.com")
         copyright_label.setProperty("role", "muted")
-        attribution_label = QLabel("Search icons created by Freepik - Flaticon")
+        attribution_label = QLabel(tr("Search icons created by Freepik - Flaticon"))
         attribution_label.setProperty("role", "muted")
         attribution_label.setWordWrap(True)
         trademark_label = QLabel(
-            "SearchMob is not affiliated with, endorsed by, or sponsored by DuckDuckGo, Mojeek, "
-            "Marginalia, Mwmbl, Wikipedia, Brave, Kagi, Google, or Tailscale. All product names, "
-            "logos, and brands are the property of their respective owners and are used only to "
-            "identify the services SearchMob interoperates with."
+            tr(
+                "SearchMob is not affiliated with, endorsed by, or sponsored by DuckDuckGo,"
+                " Mojeek, Marginalia, Mwmbl, Wikipedia, Brave, Kagi, Google, or Tailscale."
+                " All product names, logos, and brands are the property of their respective"
+                " owners and are used only to identify the services SearchMob interoperates with."
+            )
         )
         trademark_label.setProperty("role", "muted")
         trademark_label.setWordWrap(True)
@@ -146,13 +159,13 @@ class AboutDialog(QDialog):
         layout.addWidget(trademark_label)
 
         buttons = QHBoxLayout()
-        repo_btn = QPushButton("View source on GitHub")
+        repo_btn = QPushButton(tr("View source on GitHub"))
         repo_btn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(REPO_URL)))
-        android_btn = QPushButton("SearchMob for Android")
+        android_btn = QPushButton(tr("SearchMob for Android"))
         android_btn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(ANDROID_URL)))
-        bug_btn = QPushButton("Report a bug")
+        bug_btn = QPushButton(tr("Report a bug"))
         bug_btn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(BUG_URL)))
-        close_btn = QPushButton("Close")
+        close_btn = QPushButton(tr("Close"))
         close_btn.clicked.connect(self.accept)
         buttons.addWidget(repo_btn)
         buttons.addWidget(android_btn)

@@ -6,6 +6,15 @@ All notable changes to SearchMob Desktop are documented here. The version scheme
 ## [Unreleased]
 
 ### Added
+- **SearchMob now speaks ten languages.** The whole interface translates into English, Chinese,
+  Hindi, Spanish, Arabic, French, Bengali, Portuguese, Indonesian, and Urdu, in both the app and the
+  served page. Pick your language in Settings; the app remembers it and, on first launch, follows
+  your operating system's language. Arabic and Urdu lay out right-to-left. Choosing a language also
+  tailors results to it (for the engines that support it), so a search in Spanish or Arabic leans
+  toward results in that language rather than English. The served page additionally honours a
+  visitor's browser language when you have not pinned one. Translating result pages themselves is not
+  part of this; SearchMob translates its own interface and asks the engines for language-appropriate
+  results.
 - **A theme library with a font-size control.** Settings now offers a slate of themes (the original
   SearchMob Light/Dark plus GitHub, One Dark, Dracula, Tokyo Night, Catppuccin, Gruvbox, Nord, Rose
   Pine, and two high-contrast accessibility themes), on both the app and the served page. Pick which

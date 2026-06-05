@@ -29,15 +29,25 @@ from searchmob_desktop.gui.theme import (
     Palette,
     Theme,
 )
+from searchmob_desktop.i18n import (
+    N_,
+    SUPPORTED_LOCALES,
+    is_rtl,
+    normalize_tag,
+    set_request_locale,
+    tr,
+    trc,
+    trn,
+)
 from searchmob_desktop.prefs import UserPreferences
 
 # The per-result domain actions offered in the served UI, in display order. Mirrors the in-app
 # right-click menu (block / lower / raise / pin); "Reset" maps to NORMAL (removes the rule).
 _RANK_ACTIONS: tuple[tuple[RankRule, str], ...] = (
-    (RankRule.BLOCK, "Block"),
-    (RankRule.LOWER, "Lower"),
-    (RankRule.RAISE, "Raise"),
-    (RankRule.PIN, "Pin"),
+    (RankRule.BLOCK, N_("Block")),
+    (RankRule.LOWER, N_("Lower")),
+    (RankRule.RAISE, N_("Raise")),
+    (RankRule.PIN, N_("Pin")),
 )
 
 
@@ -86,21 +96,31 @@ _PAGE_CSS = (
     "backdrop-filter:saturate(1.4) blur(8px);z-index:10}"
     ".topbar .logo{font-weight:800;font-size:20px;color:var(--accent);letter-spacing:-.5px;"
     "white-space:nowrap}"
-    ".theme-toggle{margin-left:auto;background:transparent;border:1px solid var(--border);"
+    ".theme-toggle{margin-inline-start:auto;background:transparent;border:1px solid var(--border);"
     "color:var(--fg);border-radius:20px;padding:6px 14px;cursor:pointer;font-size:13px;"
     "white-space:nowrap}"
     ".theme-toggle:hover{border-color:var(--accent);color:var(--accent)}"
-    ".settings-link{margin-left:auto;border:1px solid var(--border);color:var(--fg);"
+    ".settings-link{margin-inline-start:auto;border:1px solid var(--border);color:var(--fg);"
     "border-radius:20px;padding:6px 14px;font-size:13px;text-decoration:none;white-space:nowrap}"
     ".settings-link:hover{border-color:var(--accent);color:var(--accent)}"
-    ".settings-link+.theme-toggle{margin-left:0}"
-    ".topbar .spacer{margin-left:auto}"
+    ".settings-link+.theme-toggle{margin-inline-start:0}"
+    ".topbar .spacer{margin-inline-start:auto}"
+    # The language picker sits in the trailing cluster; its auto inline-start margin pushes the
+    # whole group (language, settings, theme) to the end, mirroring under rtl.
+    ".topbar .langform{margin-inline-start:auto;display:inline-flex;align-items:center;gap:6px;"
+    "margin-bottom:0;font-size:13px}"
+    ".topbar .langform label{color:var(--muted)}"
+    ".topbar .langform select{background:transparent;color:var(--fg);"
+    "border:1px solid var(--border);"
+    "border-radius:20px;padding:5px 10px;font-size:13px;cursor:pointer}"
+    ".topbar .langform+.settings-link,.topbar .langform+.theme-toggle{margin-inline-start:0}"
     # Owner-only "update available" banner, pinned above the top bar. Accent fill so it reads as a
     # notice without an icon set; the action is a high-contrast pill linking to the release.
     ".updatebar{display:flex;align-items:center;gap:12px;padding:9px 18px;background:var(--accent);"
     "color:#fff;font-size:13px}"
     ".updatebar .msg{font-weight:600}"
-    ".updatebar .btn{margin-left:auto;background:#fff;color:var(--accent);border-radius:16px;"
+    ".updatebar .btn{margin-inline-start:auto;background:#fff;color:var(--accent);"
+    "border-radius:16px;"
     "padding:5px 14px;font-weight:700;text-decoration:none;white-space:nowrap}"
     ".updatebar .btn:hover{text-decoration:none;opacity:.92}"
     ".settings{max-width:680px;margin:0 auto;padding:24px 18px 60px}"
@@ -131,7 +151,7 @@ _PAGE_CSS = (
     ".settings .rulelist li{display:flex;align-items:center;gap:8px;flex-wrap:wrap;"
     "padding:8px 0;border-bottom:1px solid var(--border)}"
     ".settings .rulelist .dom{font-weight:600;font-size:13px;word-break:break-all}"
-    ".settings .rulelist .rank{margin-left:auto}"
+    ".settings .rulelist .rank{margin-inline-start:auto}"
     ".settings .addrule{display:flex;gap:8px;flex-wrap:wrap;align-items:center}"
     ".settings .addrule input[type=text]{flex:1;min-width:140px;padding:8px 11px;"
     "border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--fg);"
@@ -160,7 +180,7 @@ _PAGE_CSS = (
     ".settings .gogglelist li{display:flex;gap:8px;align-items:center;padding:5px 0;"
     "border-bottom:1px solid var(--border)}"
     ".settings .gogglelist .site{font-weight:600;word-break:break-all}"
-    ".settings .gogglelist .act{margin-left:auto;font-size:11px;color:var(--muted)}"
+    ".settings .gogglelist .act{margin-inline-start:auto;font-size:11px;color:var(--muted)}"
     ".settings .histlist li{padding:4px 0;border-bottom:1px solid var(--border);"
     "word-break:break-word}"
     ".settings .goggleimport{display:flex;flex-direction:column;gap:8px}"
@@ -187,12 +207,12 @@ _PAGE_CSS = (
     ".searchbox input[type=submit]:hover{filter:brightness(1.07)}"
     # Scope (lens) selector nested inside the search box, just left of the Search button. A subtle
     # divider separates it from the query field; it belongs to a separate /scope form via `form=`.
-    ".searchbox select{border:0;border-left:1px solid var(--border);background:transparent;"
+    ".searchbox select{border:0;border-inline-start:1px solid var(--border);background:transparent;"
     "color:var(--fg);font-size:.875rem;padding:0 12px;outline:0;max-width:190px;cursor:pointer}"
     ".home{max-width:600px;margin:0 auto;padding:13vh 20px 0;text-align:center}"
     ".home .brand{font-size:3rem;font-weight:800;color:var(--accent);letter-spacing:-1.5px}"
     ".home .tagline{color:var(--muted);margin:8px 0 28px;font-size:.9375rem}"
-    ".home .searchbox{max-width:560px;margin:0 auto;text-align:left}"
+    ".home .searchbox{max-width:560px;margin:0 auto;text-align:start}"
     ".topbar .searchbox{flex:1;max-width:620px}"
     ".topbar .searchbox input[type=text]{padding:9px 16px}"
     ".topbar .searchbox input[type=submit]{padding:0 16px}"
@@ -241,7 +261,7 @@ _PAGE_CSS = (
     "border-radius:6px;background:var(--card);color:var(--fg)}"
     ".rank{display:flex;flex-wrap:wrap;gap:6px;margin-top:5px;align-items:center}"
     ".rank form{display:inline;margin:0}"
-    ".rank .state{font-size:11px;color:var(--muted);margin-right:2px}"
+    ".rank .state{font-size:11px;color:var(--muted);margin-inline-end:2px}"
     ".rank button{font-size:11px;padding:2px 9px;border:1px solid var(--border);border-radius:10px;"
     "background:var(--card);color:var(--muted);cursor:pointer}"
     ".rank button:hover{border-color:var(--accent);color:var(--fg)}"
@@ -335,7 +355,8 @@ def _theme_toggle_button() -> str:
     """The light/dark toggle button. JS labels it to show the alternative theme."""
     return (
         '<button type="button" class="theme-toggle" id="sm-theme-btn" '
-        'onclick="smToggle()" aria-label="Toggle light/dark theme">Theme</button>'
+        f'onclick="smToggle()" aria-label="{escape(tr("Toggle light/dark theme"), quote=True)}">'
+        f"{escape(tr('Theme'))}</button>"
     )
 
 
@@ -349,11 +370,12 @@ def _update_banner(banner: tuple[str, str] | None) -> str:
     if banner is None:
         return ""
     version, url = banner
+    msg = escape(tr("SearchMob {version} is available.", version=version))
     return (
         '<div class="updatebar" role="status">'
-        f'<span class="msg">SearchMob {escape(version)} is available.</span>'
+        f'<span class="msg">{msg}</span>'
         f'<a class="btn" href="{escape(url, quote=True)}" rel="noopener noreferrer">'
-        "Get the update</a>"
+        f"{escape(tr('Get the update'))}</a>"
         "</div>"
     )
 
@@ -362,7 +384,37 @@ def _settings_link(show: bool) -> str:
     """A Settings-page link, shown only to the loopback owner (the route itself is owner-only)."""
     if not show:
         return ""
-    return '<a href="/settings" class="settings-link" aria-label="Settings">Settings</a>'
+    label = escape(tr("Settings"))
+    return f'<a href="/settings" class="settings-link" aria-label="{label}">{label}</a>'
+
+
+def _html_open(locale: str) -> str:
+    """The doctype + `<html>` tag carrying the page language and direction (rtl for ar/ur)."""
+    tag = normalize_tag(locale)
+    direction = ' dir="rtl"' if is_rtl(tag) else ""
+    return f'<!DOCTYPE html><html lang="{tag}"{direction}>'
+
+
+def _language_select(current: str) -> str:
+    """A language picker `<select>` listing every shipped locale by its endonym, current selected.
+
+    Posts to `/language` (auto-submits via onchange when JS is on) so the whole interface switches
+    to the chosen language. Each option shows the language's own name so a speaker recognizes it.
+    """
+    active = normalize_tag(current)
+    options = []
+    for loc in SUPPORTED_LOCALES:
+        selected = " selected" if loc.tag == active else ""
+        options.append(f'<option value="{loc.tag}"{selected}>{escape(loc.native_name)}</option>')
+    label = escape(tr("Language"))
+    return (
+        '<form class="langform" action="/language" method="post">'
+        f'<label for="sm-lang">{label}:</label>'
+        '<select id="sm-lang" name="lang" aria-label="Interface language" '
+        'onchange="this.form.submit()">' + "".join(options) + "</select>"
+        f'<noscript><button type="submit">{escape(tr("Apply"))}</button></noscript>'
+        "</form>"
+    )
 
 
 def _display_url(raw_url: str) -> str:
@@ -390,6 +442,7 @@ def render_home_page(
     rules: RankingRules | None = None,
     editable: bool = False,
     update_banner: tuple[str, str] | None = None,
+    locale: str = "en",
 ) -> str:
     """The home page: a centered search box plus the OpenSearch link.
 
@@ -399,6 +452,7 @@ def render_home_page(
     (the selector renders only when at least one lens exists). `update_banner` is `(version, url)`
     for the owner-only "update available" notice (None to omit).
     """
+    set_request_locale(locale)
     active_rules = rules if rules is not None else RankingRules()
     scope_select, scope_form = _home_scope(active_rules) if editable else ("", "")
     head = _page_head("SearchMob")
@@ -407,24 +461,25 @@ def render_home_page(
         f"{_update_banner(update_banner)}"
         '<div class="topbar">'
         '<span class="logo">SearchMob</span>'
+        f"{_language_select(locale)}"
         f"{_settings_link(settings_link)}"
         f"{_theme_toggle_button()}"
         "</div>"
         '<div class="home">'
         '<div class="brand">SearchMob</div>'
-        '<p class="tagline">Private, on-device metasearch.</p>'
+        f'<p class="tagline">{escape(tr("Private, on-device metasearch."))}</p>'
         '<form action="/search" method="get" class="searchbox">'
-        '<input type="text" name="q" placeholder="Search the web" aria-label="Search" '
-        'autocomplete="off" autofocus="autofocus">'
+        f'<input type="text" name="q" placeholder="{escape(tr("Search the web"), quote=True)}" '
+        f'aria-label="{escape(tr("Search"), quote=True)}" autocomplete="off" autofocus="autofocus">'
         f"{scope_select}"
-        '<input type="submit" value="Search">'
+        f'<input type="submit" value="{escape(tr("Search"), quote=True)}">'
         "</form>"
         f"{scope_form}"
         "</div>"
         f"<script>{_THEME_TOGGLE_JS}</script>"
         "</body>"
     )
-    return f"<!DOCTYPE html><html lang='en'>{head}{body}</html>"
+    return f"{_html_open(locale)}{head}{body}</html>"
 
 
 def _vertical_bar(query: str, vertical: str) -> str:
@@ -434,42 +489,51 @@ def _vertical_bar(query: str, vertical: str) -> str:
     it. Links (not a select) so the categories are visible at a glance and bookmarkable.
     """
     safe_q = quote_plus(query)
+    # Literal `trc` calls (not a loop variable) so the extractor sees each label and the "search
+    # category" context disambiguates these short words for translators.
+    labels = {
+        "web": trc("search category", "Web"),
+        "news": trc("search category", "News"),
+        "forums": trc("search category", "Forums"),
+        "academic": trc("search category", "Academic"),
+    }
     chips = []
-    for value, label in (
-        ("web", "Web"),
-        ("news", "News"),
-        ("forums", "Forums"),
-        ("academic", "Academic"),
-    ):
+    for value in ("web", "news", "forums", "academic"):
         is_active = value == vertical
         active = " active" if is_active else ""
         # aria-current marks the active category for assistive tech (not by color alone).
         current = ' aria-current="page"' if is_active else ""
         href = f"/search?q={safe_q}&vertical={value}"
         chips.append(
-            f'<a class="chip{active}"{current} href="{escape(href, quote=True)}">{label}</a>'
+            f'<a class="chip{active}"{current} href="{escape(href, quote=True)}">'
+            f"{escape(labels[value])}</a>"
         )
-    return '<nav class="verticalbar" aria-label="Search categories">' + "".join(chips) + "</nav>"
+    nav_label = escape(tr("Search categories"), quote=True)
+    return f'<nav class="verticalbar" aria-label="{nav_label}">' + "".join(chips) + "</nav>"
 
 
 def _sort_bar(query: str, sort_mode: str) -> str:
     """A sort selector. GET so the choice is bookmarkable; carries the query in a hidden field."""
+    # Literal `trc` calls so the extractor sees each label; "sort order" disambiguates the short
+    # words (especially "Date") for translators.
+    labels = {
+        "fresh": trc("sort order", "Freshest + Relevant"),
+        "date": trc("sort order", "Date"),
+        "relevance": trc("sort order", "Relevance"),
+    }
     options = []
-    for value, label in (
-        ("fresh", "Freshest + Relevant"),
-        ("date", "Date"),
-        ("relevance", "Relevance"),
-    ):
+    for value in ("fresh", "date", "relevance"):
         selected = " selected" if value == sort_mode else ""
-        options.append(f'<option value="{value}"{selected}>{label}</option>')
+        label_html = escape(labels[value])
+        options.append(f'<option value="{value}"{selected}>{label_html}</option>')
     return (
         '<form class="scopebar" action="/search" method="get">'
         f'<input type="hidden" name="q" value="{escape(query, quote=True)}">'
-        '<label for="sm-sort">Sort:</label>'
+        f'<label for="sm-sort">{escape(tr("Sort"))}:</label>'
         '<select id="sm-sort" name="sort" onchange="this.form.submit()">'
         + "".join(options)
         + "</select>"
-        '<noscript><button type="submit">Apply</button></noscript>'
+        f'<noscript><button type="submit">{escape(tr("Apply"))}</button></noscript>'
         "</form>"
     )
 
@@ -496,7 +560,7 @@ def _home_scope(rules: RankingRules) -> tuple[str, str]:
     """
     if not rules.lenses:
         return "", ""
-    options = ['<option value="">No scope</option>']
+    options = [f'<option value="">{escape(tr("No scope"))}</option>']
     active_full = ""
     for lens in rules.lenses:
         selected = " selected" if lens.name == rules.active_lens else ""
@@ -520,7 +584,7 @@ def _scope_bar(rules: RankingRules) -> str:
     """A scope (lens) selector. Renders only when the profile has at least one lens defined."""
     if not rules.lenses:
         return ""
-    options = ['<option value="">No scope</option>']
+    options = [f'<option value="">{escape(tr("No scope"))}</option>']
     for lens in rules.lenses:
         selected = " selected" if lens.name == rules.active_lens else ""
         options.append(
@@ -530,11 +594,11 @@ def _scope_bar(rules: RankingRules) -> str:
     # onchange auto-submits when JS is on; the noscript button covers the JS-off case.
     return (
         '<form class="scopebar" action="/scope" method="post">'
-        '<label for="sm-scope">Scope:</label>'
+        f'<label for="sm-scope">{escape(tr("Scope"))}:</label>'
         '<select id="sm-scope" name="lens" onchange="this.form.submit()">'
         + "".join(options)
         + "</select>"
-        '<noscript><button type="submit">Apply</button></noscript>'
+        f'<noscript><button type="submit">{escape(tr("Apply"))}</button></noscript>'
         "</form>"
     )
 
@@ -555,11 +619,13 @@ def _rank_controls(url: str, rules: RankingRules) -> str:
         on = " on" if current is rule else ""
         parts.append(
             f'<button class="btn{on}" type="submit" name="action" value="{rule.value}">'
-            f"{label}</button>"
+            f"{escape(tr(label))}</button>"
         )
     # Offer a reset only when a rule is currently set, so the row stays compact otherwise.
     if current is not None:
-        parts.append('<button type="submit" name="action" value="NORMAL">Reset</button>')
+        parts.append(
+            f'<button type="submit" name="action" value="NORMAL">{escape(tr("Reset"))}</button>'
+        )
     parts.append("</form>")
     return "".join(parts)
 
@@ -583,7 +649,7 @@ def _summary_box(summary: SummaryBox, is_safe_http_url: Callable[[str], bool]) -
     if summary.description:
         parts.append(f'<p class="sdesc">{escape(summary.description)}</p>')
     parts.append(f'<p class="sextract">{escape(summary.extract)}</p>')
-    parts.append('<p class="ssource meta">From Wikipedia</p>')
+    parts.append(f'<p class="ssource meta">{escape(tr("From Wikipedia"))}</p>')
     parts.append("</div></div>")
     return "".join(parts)
 
@@ -601,6 +667,7 @@ def render_results_page(
     settings_link: bool = False,
     link_builder: Callable[[int, str], str] | None = None,
     update_banner: tuple[str, str] | None = None,
+    locale: str = "en",
 ) -> str:
     """The results page. Empty/blank query -> a placeholder; otherwise -> the merged results.
 
@@ -616,11 +683,11 @@ def render_results_page(
     raise/pin); the server passes it True only for the loopback owner, so a network visitor sees a
     read-only page.
     """
+    set_request_locale(locale)
     active_rules = rules if rules is not None else RankingRules()
     # Materialize once so we can both branch on emptiness and iterate.
     results_list = list(results)
     blank = not query.strip()
-    safe_query = escape(query)
     title_text = "SearchMob" if blank else f"{query} · SearchMob"
     head = _page_head(title_text)
 
@@ -631,11 +698,13 @@ def render_results_page(
     parts.append('<a href="/" class="logo">SearchMob</a>')
     parts.append('<form action="/search" method="get" class="searchbox">')
     parts.append(
-        '<input type="text" name="q" placeholder="Search the web" aria-label="Search" '
+        f'<input type="text" name="q" placeholder="{escape(tr("Search the web"), quote=True)}" '
+        f'aria-label="{escape(tr("Search"), quote=True)}" '
         f'value="{escape(query, quote=True)}" autocomplete="off" spellcheck="false">'
     )
-    parts.append('<input type="submit" value="Search">')
+    parts.append(f'<input type="submit" value="{escape(tr("Search"), quote=True)}">')
     parts.append("</form>")
+    parts.append(_language_select(locale))
     parts.append(_settings_link(settings_link))
     parts.append(_theme_toggle_button())
     parts.append("</div>")
@@ -649,7 +718,7 @@ def render_results_page(
     if not blank and correction:
         href = "/search?q=" + quote_plus(correction)
         parts.append(
-            '<p class="didyoumean">Did you mean: '
+            f'<p class="didyoumean">{escape(tr("Did you mean:"))} '
             f'<a href="{escape(href, quote=True)}">{escape(correction)}</a></p>'
         )
 
@@ -657,11 +726,11 @@ def render_results_page(
         parts.append(_summary_box(summary, is_safe_http_url))
 
     if blank:
-        parts.append('<p class="empty">Enter a query to search.</p>')
+        parts.append(f'<p class="empty">{escape(tr("Enter a query to search."))}</p>')
     elif not results_list:
-        parts.append(f'<p class="empty">No results for “{safe_query}”.</p>')
+        parts.append(f'<p class="empty">{escape(tr("No results for “{query}”.", query=query))}</p>')
     else:
-        parts.append(f'<p class="meta">Results for “{safe_query}”</p>')
+        parts.append(f'<p class="meta">{escape(tr("Results for “{query}”", query=query))}</p>')
         parts.append(_sort_bar(query, sort_mode))
         if editable:
             parts.append(_scope_bar(active_rules))
@@ -705,7 +774,7 @@ def render_results_page(
         parts.append(f"<script>{_REVEAL_JS}</script>")
     parts.append(f"<script>{_THEME_TOGGLE_JS}</script>")
     parts.append("</body>")
-    return "<!DOCTYPE html><html lang='en'>" + head + "".join(parts) + "</html>"
+    return _html_open(locale) + head + "".join(parts) + "</html>"
 
 
 def _select(name: str, options: tuple[tuple[str, str], ...], current: str) -> str:
@@ -714,7 +783,7 @@ def _select(name: str, options: tuple[tuple[str, str], ...], current: str) -> st
     for value, label in options:
         selected = " selected" if value == current else ""
         opts.append(
-            f'<option value="{escape(value, quote=True)}"{selected}>{escape(label)}</option>'
+            f'<option value="{escape(value, quote=True)}"{selected}>{escape(tr(label))}</option>'
         )
     return f'<select name="{escape(name, quote=True)}">' + "".join(opts) + "</select>"
 
@@ -724,34 +793,34 @@ def _checkbox(name: str, label: str, checked: bool) -> str:
     on = " checked" if checked else ""
     return (
         '<label class="checkrow">'
-        f'<input type="checkbox" name="{escape(name, quote=True)}" value="on"{on}> {escape(label)}'
-        "</label>"
+        f'<input type="checkbox" name="{escape(name, quote=True)}" value="on"{on}> '
+        f"{escape(tr(label))}</label>"
     )
 
 
 _SORT_OPTIONS: tuple[tuple[str, str], ...] = (
-    ("fresh", "Freshest + Relevant"),
-    ("date", "Date (newest first)"),
-    ("relevance", "Relevance"),
+    ("fresh", N_("Freshest + Relevant")),
+    ("date", N_("Date (newest first)")),
+    ("relevance", N_("Relevance")),
 )
 _SLOP_OPTIONS: tuple[tuple[str, str], ...] = (
-    ("downrank", "Downrank (default)"),
-    ("hide", "Hide"),
-    ("off", "Off"),
+    ("downrank", N_("Downrank (default)")),
+    ("hide", N_("Hide")),
+    ("off", N_("Off")),
 )
 
 
 _ADD_RULE_OPTIONS: tuple[tuple[str, str], ...] = (
-    ("RAISE", "Raise"),
-    ("LOWER", "Lower"),
-    ("BLOCK", "Block"),
-    ("PIN", "Pin"),
+    ("RAISE", N_("Raise")),
+    ("LOWER", N_("Lower")),
+    ("BLOCK", N_("Block")),
+    ("PIN", N_("Pin")),
 )
 
 
 def _domain_rules_section(rules: RankingRules) -> str:
     """The Domain rules card: every saved per-domain rule (editable) plus an add form."""
-    parts = ['<section class="card"><h2>Domain rules</h2>']
+    parts = [f'<section class="card"><h2>{escape(tr("Domain rules"))}</h2>']
     if rules.domain_rules:
         parts.append('<ul class="rulelist">')
         for domain, rule in sorted(rules.domain_rules.items()):
@@ -765,22 +834,30 @@ def _domain_rules_section(rules: RankingRules) -> str:
                 on = " on" if action_rule is rule else ""
                 parts.append(
                     f'<button class="btn{on}" type="submit" name="action" '
-                    f'value="{action_rule.value}">{label}</button>'
+                    f'value="{action_rule.value}">{escape(tr(label))}</button>'
                 )
-            parts.append('<button type="submit" name="action" value="NORMAL">Reset</button>')
+            parts.append(
+                f'<button type="submit" name="action" value="NORMAL">{escape(tr("Reset"))}</button>'
+            )
             parts.append("</form></li>")
         parts.append("</ul>")
     else:
         parts.append(
-            '<p class="hint">No domain rules yet. Add one below, or use the '
-            "Block / Lower / Raise / Pin buttons on any result.</p>"
+            f'<p class="hint">{
+                escape(
+                    tr(
+                        "No domain rules yet. Add one below, or use the "
+                        "Block / Lower / Raise / Pin buttons on any result."
+                    )
+                )
+            }</p>'
         )
     parts.append('<form class="addrule" action="/rules/domain" method="post">')
     parts.append(
         '<input type="text" name="domain" placeholder="example.com" autocomplete="off" required>'
     )
     parts.append(_select("action", _ADD_RULE_OPTIONS, "RAISE"))
-    parts.append('<button type="submit">Add rule</button>')
+    parts.append(f'<button type="submit">{escape(tr("Add rule"))}</button>')
     parts.append("</form>")
     parts.append("</section>")
     return "".join(parts)
@@ -790,59 +867,70 @@ def _lens_form(lens: Lens | None) -> str:
     """A lens edit form prefilled from `lens`, or an empty create form when None."""
     name = lens.name if lens else ""
     fields = (
-        ("include_domains", "Only these domains", lens.include_domains if lens else ()),
-        ("exclude_domains", "Exclude these domains", lens.exclude_domains if lens else ()),
-        ("include_keywords", "Require these keywords", lens.include_keywords if lens else ()),
-        ("exclude_keywords", "Exclude these keywords", lens.exclude_keywords if lens else ()),
+        ("include_domains", N_("Only these domains"), lens.include_domains if lens else ()),
+        ("exclude_domains", N_("Exclude these domains"), lens.exclude_domains if lens else ()),
+        ("include_keywords", N_("Require these keywords"), lens.include_keywords if lens else ()),
+        ("exclude_keywords", N_("Exclude these keywords"), lens.exclude_keywords if lens else ()),
     )
     parts = ['<form class="lensform" action="/settings/lens" method="post">']
+    name_ph = escape(tr("Scope name"), quote=True)
     parts.append(
-        '<input class="lname" type="text" name="name" placeholder="Scope name" '
+        f'<input class="lname" type="text" name="name" placeholder="{name_ph}" '
         f'value="{escape(name, quote=True)}" autocomplete="off" required>'
     )
+    placeholder = escape(tr("comma separated"), quote=True)
     for fname, label, values in fields:
         joined = ", ".join(values)
         parts.append(
-            f'<label class="lf">{escape(label)}'
+            f'<label class="lf">{escape(tr(label))}'
             f'<input type="text" name="{fname}" value="{escape(joined, quote=True)}" '
-            'placeholder="comma separated" autocomplete="off"></label>'
+            f'placeholder="{placeholder}" autocomplete="off"></label>'
         )
-    parts.append('<button type="submit">Save scope</button>')
+    parts.append(f'<button type="submit">{escape(tr("Save scope"))}</button>')
     parts.append("</form>")
     return "".join(parts)
 
 
 def _lenses_section(rules: RankingRules) -> str:
     """The Scopes card: the active selector, each lens (edit + delete), and a create form."""
-    parts = ['<section class="card"><h2>Scopes (lenses)</h2>']
+    parts = [f'<section class="card"><h2>{escape(tr("Scopes (lenses)"))}</h2>']
     parts.append(
-        '<p class="hint">A scope filters results to the domains and keywords you choose. '
-        "Set the active scope here, or per-search from the results page.</p>"
+        f'<p class="hint">{
+            escape(
+                tr(
+                    "A scope filters results to the domains and keywords you "
+                    "choose. Set the active scope here, or per-search from the results page."
+                )
+            )
+        }</p>'
     )
     if rules.lenses:
-        opts = ['<option value="">No scope</option>']
+        opts = [f'<option value="">{escape(tr("No scope"))}</option>']
         for lens in rules.lenses:
             sel = " selected" if lens.name == rules.active_lens else ""
             opts.append(
                 f'<option value="{escape(lens.name, quote=True)}"{sel}>{escape(lens.name)}</option>'
             )
         parts.append(
-            '<form class="scopebar" action="/scope" method="post"><label>Active scope</label>'
+            '<form class="scopebar" action="/scope" method="post">'
+            f"<label>{escape(tr('Active scope'))}</label>"
         )
         parts.append(
             '<select name="lens" onchange="this.form.submit()">' + "".join(opts) + "</select>"
         )
-        parts.append('<noscript><button type="submit">Apply</button></noscript></form>')
+        parts.append(
+            f'<noscript><button type="submit">{escape(tr("Apply"))}</button></noscript></form>'
+        )
         for lens in rules.lenses:
             parts.append('<div class="lensitem">')
             parts.append(_lens_form(lens))
             parts.append(
                 '<form class="lensdel" action="/settings/lens/delete" method="post">'
                 f'<input type="hidden" name="name" value="{escape(lens.name, quote=True)}">'
-                '<button type="submit">Delete</button></form>'
+                f'<button type="submit">{escape(tr("Delete"))}</button></form>'
             )
             parts.append("</div>")
-    parts.append('<h3 class="sub">Create a scope</h3>')
+    parts.append(f'<h3 class="sub">{escape(tr("Create a scope"))}</h3>')
     parts.append(_lens_form(None))
     parts.append("</section>")
     return "".join(parts)
@@ -850,10 +938,10 @@ def _lenses_section(rules: RankingRules) -> str:
 
 # A goggle action maps to a rank effect; show it in plain words in the goggle list.
 _GOGGLE_ACTION_LABELS = {
-    RankRule.BLOCK: "discard",
-    RankRule.RAISE: "boost",
-    RankRule.LOWER: "downrank",
-    RankRule.PIN: "pin",
+    RankRule.BLOCK: N_("discard"),
+    RankRule.RAISE: N_("boost"),
+    RankRule.LOWER: N_("downrank"),
+    RankRule.PIN: N_("pin"),
 }
 
 # Read a chosen .goggle file into the textarea so "upload" works without a multipart parser: the
@@ -867,10 +955,11 @@ _GOGGLE_FILE_JS = (
 
 def _goggles_section(rules: RankingRules) -> str:
     """The Goggles card: current goggle rules, a paste/upload import (append), and clear-all."""
-    parts = ['<section class="card"><h2>Goggles</h2>']
+    parts = [f'<section class="card"><h2>{escape(tr("Goggles"))}</h2>']
     parts.append(
-        '<p class="hint">Brave-style goggle rules, applied on-device. '
-        "Example: <code>$discard,site=example.com</code> or <code>$boost,site=dev.to</code>.</p>"
+        f'<p class="hint">{escape(tr("Brave-style goggle rules, applied on-device."))} '
+        f"{escape(tr('Example:'))} <code>$discard,site=example.com</code> "
+        f"{escape(tr('or'))} <code>$boost,site=dev.to</code>.</p>"
     )
     if rules.goggles:
         parts.append('<ul class="gogglelist">')
@@ -878,23 +967,25 @@ def _goggles_section(rules: RankingRules) -> str:
             action = _GOGGLE_ACTION_LABELS.get(goggle.action, goggle.action.value.lower())
             parts.append(
                 f'<li><span class="site">{escape(goggle.site)}</span>'
-                f'<span class="act">{escape(action)}</span></li>'
+                f'<span class="act">{escape(tr(action))}</span></li>'
             )
         parts.append("</ul>")
+        clear_label = escape(trn(len(rules.goggles), "Clear all {n} rule", "Clear all {n} rules"))
         parts.append(
             '<form class="goggleclear" action="/settings/goggles/clear" method="post">'
-            f'<button type="submit">Clear all {len(rules.goggles)} rules</button></form>'
+            f'<button type="submit">{clear_label}</button></form>'
         )
     else:
-        parts.append('<p class="hint">No goggle rules imported yet.</p>')
+        parts.append(f'<p class="hint">{escape(tr("No goggle rules imported yet."))}</p>')
     parts.append('<form class="goggleimport" action="/settings/goggles" method="post">')
     parts.append(
         '<textarea id="sm-goggle-text" name="goggles" rows="4" '
-        'placeholder="Paste goggle rules, one per line"></textarea>'
+        f'placeholder="{escape(tr("Paste goggle rules, one per line"), quote=True)}"></textarea>'
     )
     parts.append(
         '<div class="grow"><input type="file" accept=".goggle,.txt,text/plain" '
-        'onchange="smLoadGoggle(this)"><button type="submit">Import (append)</button></div>'
+        f'onchange="smLoadGoggle(this)"><button type="submit">{escape(tr("Import (append)"))}'
+        "</button></div>"
     )
     parts.append("</form>")
     parts.append("</section>")
@@ -905,7 +996,7 @@ def _history_section(history: list[HistoryEntry] | None, clearable: bool) -> str
     """The Search history card: recent queries and a clear-all button. Owner-only (loopback)."""
     if history is None:
         return ""
-    parts = ['<section class="card"><h2>Search history</h2>']
+    parts = [f'<section class="card"><h2>{escape(tr("Search history"))}</h2>']
     if history:
         parts.append('<ul class="histlist">')
         for entry in history:
@@ -914,11 +1005,13 @@ def _history_section(history: list[HistoryEntry] | None, clearable: bool) -> str
         if clearable:
             parts.append(
                 '<form class="histclear" action="/settings/history/clear" method="post">'
-                '<button type="submit">Clear search history</button></form>'
+                f'<button type="submit">{escape(tr("Clear search history"))}</button></form>'
             )
     else:
         parts.append(
-            '<p class="hint">No search history (history is off, or nothing recorded yet).</p>'
+            f'<p class="hint">{
+                escape(tr("No search history (history is off, or nothing recorded yet)."))
+            }</p>'
         )
     parts.append("</section>")
     return "".join(parts)
@@ -927,9 +1020,9 @@ def _history_section(history: list[HistoryEntry] | None, clearable: bool) -> str
 # The mode options for the Appearance picker. `system` follows the OS scheme; absent value (a
 # never-touched picker) is treated as system by the controls JS.
 _THEME_MODE_OPTIONS: tuple[tuple[str, str], ...] = (
-    ("light", "Light"),
-    ("dark", "Dark"),
-    ("system", "Follow system"),
+    ("light", N_("Light")),
+    ("dark", N_("Dark")),
+    ("system", N_("Follow system")),
 )
 
 
@@ -940,7 +1033,8 @@ def _appearance_section() -> str:
     selects are filled from `THEMES` so the served list matches the GUI's, partitioned by mode.
     """
     mode_opts = "".join(
-        f'<option value="{value}">{escape(label)}</option>' for value, label in _THEME_MODE_OPTIONS
+        f'<option value="{value}">{escape(tr(label))}</option>'
+        for value, label in _THEME_MODE_OPTIONS
     )
     light_opts = "".join(
         f'<option value="{escape(t.id, quote=True)}">{escape(t.name)}</option>'
@@ -952,19 +1046,21 @@ def _appearance_section() -> str:
         for t in THEMES.values()
         if t.mode != LIGHT
     )
+    smaller = escape(tr("Smaller text"), quote=True)
+    larger = escape(tr("Larger text"), quote=True)
     return (
-        '<section class="card"><h2>Appearance</h2>'
-        '<div class="field"><label for="sm-mode">Mode</label>'
+        f'<section class="card"><h2>{escape(tr("Appearance"))}</h2>'
+        f'<div class="field"><label for="sm-mode">{escape(tr("Mode"))}</label>'
         f'<select id="sm-mode">{mode_opts}</select></div>'
-        '<div class="field"><label for="sm-light-theme">Light theme</label>'
+        f'<div class="field"><label for="sm-light-theme">{escape(tr("Light theme"))}</label>'
         f'<select id="sm-light-theme">{light_opts}</select></div>'
-        '<div class="field"><label for="sm-dark-theme">Dark theme</label>'
+        f'<div class="field"><label for="sm-dark-theme">{escape(tr("Dark theme"))}</label>'
         f'<select id="sm-dark-theme">{dark_opts}</select></div>'
-        '<div class="field"><label>Text size</label>'
+        f'<div class="field"><label>{escape(tr("Text size"))}</label>'
         '<div class="sizerow">'
-        '<button type="button" id="sm-font-dec" aria-label="Smaller text">A-</button>'
+        f'<button type="button" id="sm-font-dec" aria-label="{smaller}">A-</button>'
         '<span class="sizeval" id="sm-font-val"></span>'
-        '<button type="button" id="sm-font-inc" aria-label="Larger text">A+</button>'
+        f'<button type="button" id="sm-font-inc" aria-label="{larger}">A+</button>'
         "</div></div>"
         "</section>"
     )
@@ -1008,6 +1104,7 @@ def render_settings_page(
     saved: bool = False,
     history: list[HistoryEntry] | None = None,
     history_clearable: bool = False,
+    locale: str = "en",
 ) -> str:
     """The browser Settings page: live preference toggles plus domain-rule and scope management.
 
@@ -1018,18 +1115,20 @@ def render_settings_page(
     `history`, when provided, shows recent queries with a clear-all button (`history_clearable`).
     Passing `history=None` omits the history card entirely.
     """
-    head = _page_head("Settings · SearchMob")
+    set_request_locale(locale)
+    head = _page_head(tr("Settings") + " · SearchMob")
     parts: list[str] = []
     parts.append('<body data-page="settings">')
     parts.append('<div class="topbar">')
     parts.append('<a href="/" class="logo">SearchMob</a>')
     parts.append('<span class="spacer"></span>')
+    parts.append(_language_select(locale))
     parts.append(_theme_toggle_button())
     parts.append("</div>")
     parts.append('<div class="settings">')
-    parts.append("<h1>Settings</h1>")
+    parts.append(f"<h1>{escape(tr('Settings'))}</h1>")
     if saved:
-        parts.append('<p class="saved" role="status">Saved.</p>')
+        parts.append(f'<p class="saved" role="status">{escape(tr("Saved."))}</p>')
 
     # The Appearance card is client-side only (localStorage), so it sits above the prefs form rather
     # than inside it; nothing here posts to the server.
@@ -1038,37 +1137,45 @@ def render_settings_page(
     parts.append('<form action="/settings/prefs" method="post">')
 
     parts.append('<section class="card">')
-    parts.append("<h2>Search &amp; ranking</h2>")
-    parts.append('<div class="field"><label>Default sort</label>')
+    parts.append(f"<h2>{escape(tr('Search & ranking'))}</h2>")
+    parts.append(f'<div class="field"><label>{escape(tr("Default sort"))}</label>')
     parts.append(_select("sort_mode", _SORT_OPTIONS, prefs.sort_mode))
     parts.append("</div>")
-    parts.append('<div class="field"><label>AI-slop / low-quality filter</label>')
+    parts.append(f'<div class="field"><label>{escape(tr("AI-slop / low-quality filter"))}</label>')
     parts.append(_select("ai_slop_mode", _SLOP_OPTIONS, prefs.ai_slop_mode))
     parts.append(
-        '<p class="hint">Applied on-device after your own domain rules, which always win.</p>'
+        f'<p class="hint">{
+            escape(tr("Applied on-device after your own domain rules, which always win."))
+        }</p>'
     )
     parts.append("</div>")
     parts.append("</section>")
 
     parts.append('<section class="card">')
-    parts.append("<h2>Suggestions</h2>")
+    parts.append(f"<h2>{escape(tr('Suggestions'))}</h2>")
     parts.append(
-        _checkbox("summary_enabled", "Show the Wikipedia summary card", prefs.summary_enabled)
+        _checkbox("summary_enabled", N_("Show the Wikipedia summary card"), prefs.summary_enabled)
     )
     parts.append(
         _checkbox(
             "upstream_suggestions_enabled",
-            "Use upstream autocomplete suggestions",
+            N_("Use upstream autocomplete suggestions"),
             prefs.upstream_suggestions_enabled,
         )
     )
     parts.append(
-        '<p class="hint">Upstream autocomplete sends what you type to a suggestions service; '
-        "your on-device history suggestions are always private.</p>"
+        f'<p class="hint">{
+            escape(
+                tr(
+                    "Upstream autocomplete sends what you type to a suggestions "
+                    "service; your on-device history suggestions are always private."
+                )
+            )
+        }</p>'
     )
     parts.append("</section>")
 
-    parts.append('<div class="actions"><button type="submit">Save</button></div>')
+    parts.append(f'<div class="actions"><button type="submit">{escape(tr("Save"))}</button></div>')
     parts.append("</form>")
 
     # Domain rules, scopes, goggles, and history are their own forms (each posts independently), so
@@ -1083,4 +1190,4 @@ def render_settings_page(
     parts.append(f"<script>{_THEME_CONTROLS_JS}</script>")
     parts.append(f"<script>{_GOGGLE_FILE_JS}</script>")
     parts.append("</body>")
-    return "<!DOCTYPE html><html lang='en'>" + head + "".join(parts) + "</html>"
+    return _html_open(locale) + head + "".join(parts) + "</html>"

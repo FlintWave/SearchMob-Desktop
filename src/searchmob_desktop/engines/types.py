@@ -13,6 +13,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from searchmob_desktop.engines.region import LanguageRegion
+
 # The ranked POOL size a search holds, distinct from the REVEAL window the UI shows first. The
 # aggregator ranks and returns up to this many merged results; the GUI, served page, and Android
 # list reveal a smaller window and grow it on scroll (infinite scroll) without re-querying. Kept
@@ -42,8 +44,11 @@ class EngineContext:
 
     `max_results` is the cap each engine is asked to return; the aggregator may return fewer or more
     distinct rows after dedup. `timeout_seconds` is the httpx client timeout, applied uniformly.
+    `language_region`, when set, carries per-engine language/region parameters that tailor results
+    to the UI language (DuckDuckGo `kl`, Brave `country`/`search_lang`/`ui_lang`); None is neutral.
     """
 
     query: str
     max_results: int = 10
     timeout_seconds: float = 5.0
+    language_region: LanguageRegion | None = None

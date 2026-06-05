@@ -1,0 +1,29 @@
+{
+  "Clear all {n} rules": {
+    "other": "清除所有 {{n}} 条规则"
+  },
+  "Found {n} models. Pick one to turn on the answer box.": {
+    "other": "未找到任何模型。请选择一个以启用答案框。"
+  },
+  "Imported {n} rules.": {
+    "other": "已导入 {n} 条规则。"
+  },
+  "{n} entries exported.": {
+    "other": "已导出 {n} 个条目。"
+  },
+  "{n} goggle rules imported.": {
+    "other": "已导入 {n} 条 Google 规则。"
+  },
+  "{n} hidden by your rules": {
+    "other": "您的规则已隐藏 {n} 项"
+  },
+  "{n} new entries imported.": {
+    "other": "已导入 {n} 个新条目。"
+  },
+  "{n} results": {
+    "other": "{n} 个结果"
+  },
+  "{n} saved searches.": {
+    "other": "已保存的搜索：{n} 个。"
+  }
+}
