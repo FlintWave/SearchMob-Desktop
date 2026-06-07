@@ -98,6 +98,23 @@ def test_foreign_origin_is_rejected_as_csrf() -> None:
     assert holder.rules.domain_rules == {"news.example": RankRule.BLOCK}
 
 
+def test_opaque_origin_is_treated_as_same_origin() -> None:
+    # Regression: a browser serializes the page's own origin as the literal `Origin: null` for our
+    # form posts because every response carries `Referrer-Policy: no-referrer`. That opaque origin
+    # has no host and must be accepted (same-origin), not rejected as CSRF. This is the case that
+    # broke the Android sibling's served scope/rule edits; desktop must keep allowing it.
+    holder = _Holder()
+    with _loopback(_app(holder)) as client:
+        resp = client.post(
+            "/scope",
+            data={"lens": "Docs"},
+            headers={"Origin": "null"},
+            follow_redirects=False,
+        )
+        assert resp.status_code == 303
+    assert holder.rules.active_lens == "Docs"
+
+
 def test_post_scope_sets_active_lens() -> None:
     holder = _Holder(RankingRules(lenses=(Lens(name="Docs"),)))
     with _loopback(_app(holder)) as client:
