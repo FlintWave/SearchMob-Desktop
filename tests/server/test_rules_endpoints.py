@@ -126,6 +126,48 @@ def test_post_scope_sets_active_lens() -> None:
     assert holder.rules.active_lens is None
 
 
+def test_mutation_redirects_back_to_the_results_page() -> None:
+    # Regression: applying a scope/rule from the results page must return to that search (carried
+    # via hidden q/sort/vertical fields), not dump the owner on the home page and lose the results.
+    # The Referer is stripped by our no-referrer policy, so the redirect cannot rely on it.
+    holder = _Holder(RankingRules(lenses=(Lens(name="Docs"),)))
+    with _loopback(_app(holder)) as client:
+        resp = client.post(
+            "/scope",
+            data={"lens": "Docs", "q": "privacy", "sort": "fresh", "vertical": "news"},
+            follow_redirects=False,
+        )
+        assert resp.status_code == 303
+        loc = resp.headers["location"]
+        assert loc.startswith("/search?")
+        assert "q=privacy" in loc
+        assert "vertical=news" in loc
+
+        resp = client.post(
+            "/rules/domain",
+            data={
+                "domain": "news.example",
+                "action": "BLOCK",
+                "q": "privacy",
+                "sort": "fresh",
+                "vertical": "web",
+            },
+            follow_redirects=False,
+        )
+        assert resp.status_code == 303
+        assert resp.headers["location"].startswith("/search?")
+        assert "q=privacy" in resp.headers["location"]
+
+
+def test_mutation_without_a_query_falls_back_home() -> None:
+    # The home-page scope selector carries no query; it must still redirect to "/", not error.
+    holder = _Holder(RankingRules(lenses=(Lens(name="Docs"),)))
+    with _loopback(_app(holder)) as client:
+        resp = client.post("/scope", data={"lens": "Docs"}, follow_redirects=False)
+        assert resp.status_code == 303
+        assert resp.headers["location"] == "/"
+
+
 def test_endpoints_are_read_only_without_a_saver() -> None:
     with _loopback(_app(None)) as client:
         resp = client.post("/rules/domain", data={"domain": "x.example", "action": "BLOCK"})

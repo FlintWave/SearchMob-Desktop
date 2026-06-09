@@ -34,7 +34,7 @@ from collections import OrderedDict
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import asdict, dataclass, replace
 from ipaddress import ip_address
-from urllib.parse import parse_qsl, urlsplit
+from urllib.parse import parse_qsl, urlencode, urlsplit
 
 from starlette.applications import Starlette
 from starlette.middleware import Middleware
@@ -770,6 +770,20 @@ def build_app(
         raw = await request.body()
         return dict(parse_qsl(raw.decode("utf-8", "replace")))
 
+    def _redirect_to_results(form: dict[str, str]) -> Response:
+        # Return to the results page a scope/rule POST came from, rebuilt from the hidden q/sort/
+        # vertical fields the served forms carry, so the new ranking is applied to the same search
+        # instead of dumping the owner on the home page. (Our no-referrer policy strips the Referer,
+        # so the Referer-based _redirect_back always fell through to "/".) No query - the home-page
+        # or settings scope selector - falls back to home. 303 -> re-fetch with GET.
+        query = form.get("q", "").strip()
+        if not query:
+            return RedirectResponse("/", status_code=303)
+        sort_mode = form.get("sort", "").strip() or "fresh"
+        vertical = form.get("vertical", "").strip() or "web"
+        target = "/search?" + urlencode({"q": query, "vertical": vertical, "sort": sort_mode})
+        return RedirectResponse(target, status_code=303)
+
     async def set_domain_rule(request: Request) -> Response:
         if ranking_rules_saver is None:
             return PlainTextResponse("Personalization is read-only here.", status_code=503)
@@ -778,7 +792,7 @@ def build_app(
         action = form.get("action", "").strip().upper()
         if domain and action in RankRule.__members__:
             ranking_rules_saver(rules_provider().with_domain_rule(domain, RankRule[action]))
-        return _redirect_back(request)
+        return _redirect_to_results(form)
 
     async def set_scope(request: Request) -> Response:
         if ranking_rules_saver is None:
@@ -786,7 +800,7 @@ def build_app(
         form = await _form(request)
         lens = form.get("lens", "").strip()
         ranking_rules_saver(rules_provider().with_active_lens(lens or None))
-        return _redirect_back(request)
+        return _redirect_to_results(form)
 
     def _csv_tuple(raw: str) -> tuple[str, ...]:
         # Split a comma- or newline-separated field into clean, de-duplicated, lowercased entries.
