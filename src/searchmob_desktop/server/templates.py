@@ -620,7 +620,20 @@ def _home_scope(rules: RankingRules) -> tuple[str, str]:
     return select, form
 
 
-def _scope_bar(rules: RankingRules) -> str:
+def _search_context_fields(query: str, sort_mode: str, vertical: str) -> str:
+    """Hidden q/sort/vertical fields so a mutation POST can return to the same results page.
+
+    The served forms carry the current search this way because our ``Referrer-Policy: no-referrer``
+    strips the Referer, so the handler cannot recover the originating page from it.
+    """
+    return (
+        f'<input type="hidden" name="q" value="{escape(query, quote=True)}">'
+        f'<input type="hidden" name="sort" value="{escape(sort_mode, quote=True)}">'
+        f'<input type="hidden" name="vertical" value="{escape(vertical, quote=True)}">'
+    )
+
+
+def _scope_bar(rules: RankingRules, query: str, sort_mode: str, vertical: str) -> str:
     """A scope (lens) selector. Renders only when the profile has at least one lens defined."""
     if not rules.lenses:
         return ""
@@ -634,7 +647,8 @@ def _scope_bar(rules: RankingRules) -> str:
     # onchange auto-submits when JS is on; the noscript button covers the JS-off case.
     return (
         '<form class="scopebar" action="/scope" method="post">'
-        f'<label for="sm-scope">{escape(tr("Scope"))}:</label>'
+        + _search_context_fields(query, sort_mode, vertical)
+        + f'<label for="sm-scope">{escape(tr("Scope"))}:</label>'
         '<select id="sm-scope" name="lens" onchange="this.form.submit()">'
         + "".join(options)
         + "</select>"
@@ -643,7 +657,7 @@ def _scope_bar(rules: RankingRules) -> str:
     )
 
 
-def _rank_controls(url: str, rules: RankingRules) -> str:
+def _rank_controls(url: str, rules: RankingRules, query: str, sort_mode: str, vertical: str) -> str:
     """Per-result domain controls (block / lower / raise / pin / reset) as a single POST form."""
     domain = host_of_url(url)
     if not domain:
@@ -652,6 +666,7 @@ def _rank_controls(url: str, rules: RankingRules) -> str:
     safe_domain = escape(domain, quote=True)
     parts = [
         '<form class="rank" action="/rules/domain" method="post">',
+        _search_context_fields(query, sort_mode, vertical),
         f'<span class="state">{escape(domain)}</span>',
         f'<input type="hidden" name="domain" value="{safe_domain}">',
     ]
@@ -810,7 +825,7 @@ def render_results_page(
         parts.append(_engine_status_line(engine_status))
         parts.append(_sort_bar(query, sort_mode))
         if editable:
-            parts.append(_scope_bar(active_rules))
+            parts.append(_scope_bar(active_rules, query, sort_mode, vertical))
         for index, result in enumerate(results_list):
             # Results past the first reveal window start collapsed; the reveal script unhides them
             # in batches on scroll. The full list is still in the DOM, so click positions (and the
@@ -841,7 +856,7 @@ def render_results_page(
                         parts.append(f'<span class="chip">{escape(name)}</span>')
                 parts.append("</div>")
             if editable:
-                parts.append(_rank_controls(result.url, active_rules))
+                parts.append(_rank_controls(result.url, active_rules, query, sort_mode, vertical))
             parts.append("</div>")
         if len(results_list) > _REVEAL_SIZE:
             parts.append('<div class="reveal-sentinel" aria-hidden="true"></div>')
