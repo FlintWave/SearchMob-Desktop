@@ -657,6 +657,21 @@ def _scope_bar(rules: RankingRules, query: str, sort_mode: str, vertical: str) -
     )
 
 
+def _clear_scope_link(query: str, sort_mode: str, vertical: str) -> str:
+    """A one-click 'Clear scope' control: POST /scope with an empty lens, carrying the search ctx.
+
+    Clearing the active lens and redirecting back to the same query re-runs it unfiltered, so the
+    owner recovers the results an over-filtering scope hid without retyping anything.
+    """
+    return (
+        '<form class="clearscope" action="/scope" method="post" style="display:inline">'
+        + _search_context_fields(query, sort_mode, vertical)
+        + '<input type="hidden" name="lens" value="">'
+        + f'<button type="submit">{escape(tr("Clear scope"))}</button>'
+        + "</form>"
+    )
+
+
 def _rank_controls(url: str, rules: RankingRules, query: str, sort_mode: str, vertical: str) -> str:
     """Per-result domain controls (block / lower / raise / pin / reset) as a single POST form."""
     domain = host_of_url(url)
@@ -819,7 +834,29 @@ def render_results_page(
     if blank:
         parts.append(f'<p class="empty">{escape(tr("Enter a query to search."))}</p>')
     elif not results_list:
-        parts.append(f'<p class="empty">{escape(tr("No results for “{query}”.", query=query))}</p>')
+        active_lens = active_rules.active_lens
+        if editable and active_lens:
+            # An active scope filtered every result out. Without this the page looked empty with no
+            # hint why and no way back: the scope bar only rendered when there WERE results, so the
+            # owner could neither see nor clear the scope that hid them. Show both here.
+            parts.append(_scope_bar(active_rules, query, sort_mode, vertical))
+            parts.append('<p class="empty">')
+            parts.append(
+                escape(
+                    tr(
+                        "No results match the “{scope}” scope for “{query}”.",
+                        scope=active_lens,
+                        query=query,
+                    )
+                )
+            )
+            parts.append(" ")
+            parts.append(_clear_scope_link(query, sort_mode, vertical))
+            parts.append("</p>")
+        else:
+            parts.append(
+                f'<p class="empty">{escape(tr("No results for “{query}”.", query=query))}</p>'
+            )
     else:
         parts.append(f'<p class="meta">{escape(tr("Results for “{query}”", query=query))}</p>')
         parts.append(_engine_status_line(engine_status))
