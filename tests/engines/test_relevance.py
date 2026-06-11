@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 from searchmob_desktop.engines.relevance import (
+    NAVIGATIONAL_BOOST,
     RELEVANCE_BASE,
     blended_score,
     content_terms,
     language_affinity,
     lexical_score,
+    navigational_factor,
+    registrable_label,
+    squished_query,
 )
 
 # --- content_terms ----------------------------------------------------------------------------
@@ -93,3 +97,50 @@ def test_blend_sinks_weak_match_toward_base() -> None:
 def test_affinity_multiplies_on_top() -> None:
     # A perfect lexical match in the wrong script is still demoted by the affinity factor.
     assert blended_score(1.0, 1.0, affinity=0.4) == 0.4
+
+
+# --- separator bridging (threejs <-> three.js) ------------------------------------------------
+
+
+def test_separator_split_brand_name_matches_squished_query() -> None:
+    # The query "threejs" must match the official "three.js" title, which tokenizes to three + js.
+    # Without bridging the head term is absent and the result is demoted; with it, it scores high.
+    terms = content_terms("threejs")
+    bridged = lexical_score("Three.js - JavaScript 3D Library", "A 3D library", terms)
+    assert bridged >= 0.8
+
+
+def test_bridging_does_not_match_unrelated_title() -> None:
+    terms = content_terms("threejs")
+    assert lexical_score("A cooking blog about pies", "recipes and more", terms) == 0.0
+
+
+# --- navigational promotion -------------------------------------------------------------------
+
+
+def test_squished_query_joins_terms_without_separators() -> None:
+    assert squished_query(content_terms("three js")) == "threejs"
+    assert squished_query(content_terms("node js")) == "nodejs"
+
+
+def test_registrable_label_strips_suffix_and_subdomains() -> None:
+    assert registrable_label("threejs.org") == "threejs"
+    assert registrable_label("docs.python.org") == "python"
+    assert registrable_label("www.nodejs.org") == "nodejs"
+    assert registrable_label("example.co.uk") == "example"
+
+
+def test_navigational_factor_promotes_exact_domain_match() -> None:
+    assert navigational_factor(content_terms("threejs"), "threejs.org") == NAVIGATIONAL_BOOST
+    # Squished multi-word query also names the site.
+    assert navigational_factor(content_terms("three js"), "threejs.org") == NAVIGATIONAL_BOOST
+
+
+def test_navigational_factor_neutral_for_non_matches() -> None:
+    # A forum that merely contains the word is not the site itself.
+    assert navigational_factor(content_terms("threejs"), "gamedev.net") == 1.0
+    # A long descriptive query is not navigational.
+    long_query = content_terms("how to rotate a cube in threejs")
+    assert navigational_factor(long_query, "threejs.org") == 1.0
+    # Too-short squished query never fires.
+    assert navigational_factor(content_terms("go"), "go.dev") == 1.0

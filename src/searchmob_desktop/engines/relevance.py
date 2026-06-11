@@ -20,14 +20,19 @@ intelligence" for the query term "ai") that several engines agree on is demoted,
 from __future__ import annotations
 
 import re
+from itertools import pairwise
 
 __all__ = [
+    "NAVIGATIONAL_BOOST",
     "RELEVANCE_BASE",
     "RELEVANCE_GAIN",
     "blended_score",
     "content_terms",
     "language_affinity",
     "lexical_score",
+    "navigational_factor",
+    "registrable_label",
+    "squished_query",
 ]
 
 # The blend is DEMOTION-ONLY: the factor is capped at 1.0, so a well-matching result keeps its full
@@ -37,6 +42,22 @@ __all__ = [
 # terms is already at full weight; only weaker matches are penalized. See test_relevance.py.
 RELEVANCE_BASE = 0.5
 RELEVANCE_GAIN = 1.0
+
+# Navigational promotion: when the query, squished to one separator-free word, exactly names a
+# result's registrable domain label (query "threejs" -> threejs.org, "node js" -> nodejs.org), that
+# result is almost certainly the site the searcher wanted, so its final score is multiplied by this
+# factor to float it to the top past the demotion-only relevance blend. Exact-match only and capped
+# to short queries (below), so it is high precision: a long descriptive query never triggers it.
+NAVIGATIONAL_BOOST = 4.0
+
+# A navigational query is short by nature ("threejs", "node js", "khan academy"). Past this many
+# content terms the query is descriptive, not a site name, so the boost is not considered.
+_MAX_NAVIGATIONAL_TERMS = 3
+
+# Second-level public-suffix heads (e.g. "co" in "example.co.uk") so the registrable label is the
+# segment before them, not the suffix itself. Short, common list; a full Public Suffix List is
+# overkill for a high-precision exact-match signal.
+_COMPOUND_TLD_HEADS = frozenset({"co", "com", "org", "net", "ac", "gov", "edu"})
 
 # Conservative stopword set: function words and generic query modifiers that carry little subject
 # intent. Kept short on purpose so the actual subject of a query is never stripped. If a query is
@@ -190,6 +211,42 @@ def language_affinity(query: str, title: str, snippet: str) -> float:
     return 0.4
 
 
+def squished_query(terms: list[str]) -> str:
+    """The query's content terms joined with no separators, lowercased ('three js' -> 'threejs')."""
+    return "".join(terms).lower()
+
+
+def registrable_label(host: str) -> str:
+    """The main label of `host`: 'threejs.org' -> 'threejs', 'docs.python.org' -> 'python'.
+
+    Strips a leading 'www.' and returns the segment immediately left of the public suffix, stepping
+    over a known second-level suffix head ('co.uk', 'com.au') when present. Not a full Public Suffix
+    List, which is overkill for an exact-match navigational signal.
+    """
+    cleaned = host.lower().strip().removeprefix("www.")
+    parts = [p for p in cleaned.split(".") if p]
+    if len(parts) < 2:
+        return cleaned
+    if len(parts) >= 3 and parts[-2] in _COMPOUND_TLD_HEADS:
+        return parts[-3]
+    return parts[-2]
+
+
+def navigational_factor(terms: list[str], host: str) -> float:
+    """`NAVIGATIONAL_BOOST` when the squished query exactly names `host`'s main label, else 1.0.
+
+    High precision by design: only a short query (<= `_MAX_NAVIGATIONAL_TERMS` content terms, at
+    least three characters squished) whose separator-free form equals the registrable label fires,
+    so "threejs"/"three js" promote threejs.org while a descriptive query never does.
+    """
+    if not terms or len(terms) > _MAX_NAVIGATIONAL_TERMS:
+        return 1.0
+    squished = squished_query(terms)
+    if len(squished) < 3:
+        return 1.0
+    return NAVIGATIONAL_BOOST if squished == registrable_label(host) else 1.0
+
+
 def content_terms(query: str) -> list[str]:
     """Distinct content tokens of `query` (lowercased, length >= 2, stopwords removed, order kept).
 
@@ -205,18 +262,35 @@ def content_terms(query: str) -> list[str]:
     return content or distinct
 
 
+def _bridged_stems(text: str) -> set[str]:
+    """Stemmed tokens of `text`, plus adjacent-pair concatenations.
+
+    A separator-split brand name in a title (``"three.js"`` -> tokens ``[three, js]``) is bridged by
+    adding the concatenation ``"threejs"`` so the same word typed without the separator (the query
+    ``"threejs"``) matches. The concatenation is run through ``_stem`` like any token, so the
+    trailing-``s`` folding that turns the query ``"threejs"`` into ``"threej"`` also applies to the
+    bridged ``"three"+"js"`` and the two still meet.
+    """
+    raw = _TOKEN.findall(text.lower())
+    stems = {_stem(w) for w in raw}
+    for first, second in pairwise(raw):
+        stems.add(_stem(first + second))
+    return stems
+
+
 def lexical_score(title: str, snippet: str, terms: list[str]) -> float:
     """How well `title`/`snippet` match `terms`, in [0, 1]. Higher = better query match.
 
     Combines whole-word coverage (fraction of query terms present anywhere), title coverage (the
     same but title-only, weighted equally because a title hit is a strong relevance signal), and a
     small bonus when the terms appear as a contiguous phrase in the title. Whole-word membership
-    (not substring) avoids false hits like the term "ai" matching inside "available".
+    (not substring) avoids false hits like the term "ai" matching inside "available". Adjacent
+    tokens are also bridged (see `_bridged_stems`) so "threejs" matches a "three.js" title.
     """
     if not terms:
         return 0.0
-    title_stems = {_stem(w) for w in _TOKEN.findall(title.lower())}
-    snippet_stems = {_stem(w) for w in _TOKEN.findall(snippet.lower())}
+    title_stems = _bridged_stems(title)
+    snippet_stems = _bridged_stems(snippet)
     stems = [_stem(t) for t in terms]
     n = len(stems)
     in_title = sum(1 for s in stems if s in title_stems)

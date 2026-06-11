@@ -24,11 +24,13 @@ import httpx
 
 from searchmob_desktop.engines.normalize import normalize_url, strip_tracking_params
 from searchmob_desktop.engines.proxy import make_privacy_client
+from searchmob_desktop.engines.rank.ranker import host_of_url
 from searchmob_desktop.engines.relevance import (
     blended_score,
     content_terms,
     language_affinity,
     lexical_score,
+    navigational_factor,
 )
 from searchmob_desktop.engines.snippet_date import parse_date
 from searchmob_desktop.engines.types import EngineContext, SearchResult
@@ -168,10 +170,17 @@ async def aggregate_with_status(
     terms = content_terms(ctx.query)
 
     def _final_score(b: _Bucket) -> float:
-        return blended_score(
-            b.score,
-            lexical_score(b.title, b.snippet, terms),
-            language_affinity(ctx.query, b.title, b.snippet),
+        # Navigational promotion: when the squished query names this result's domain (query
+        # "threejs" -> threejs.org), float it to the top past the demotion-only relevance blend, so
+        # the official site is not buried under forum posts that merely contain the word.
+        nav = navigational_factor(terms, host_of_url(b.url) or "")
+        return (
+            blended_score(
+                b.score,
+                lexical_score(b.title, b.snippet, terms),
+                language_affinity(ctx.query, b.title, b.snippet),
+            )
+            * nav
         )
 
     ranked = sorted(buckets.values(), key=_final_score, reverse=True)
