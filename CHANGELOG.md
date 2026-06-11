@@ -16,6 +16,9 @@ All notable changes to SearchMob Desktop are documented here. The version scheme
   scope on the results page in a browser and it matches nothing, the page now tells you the scope
   hid the results and offers a one-click "Clear scope" to bring them back, instead of an empty page
   with no hint of what happened or how to undo it.
+- **The update notification now appears without restarting.** The app checked for a new version only
+  at launch, so if you left it open when a release came out you were never told. It now re-checks on
+  a timer while it stays open (still about once a day, still opt-out), so the banner shows on its own.
 
 ## 26.06.05 — 2026-06-10
 
