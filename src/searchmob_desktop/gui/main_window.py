@@ -121,6 +121,13 @@ def _gui_row_label(category: MediaCategory) -> str:
     return trc("media actions", "Play on")
 
 
+# How often, while the window stays open, to re-run the throttled update check. `check_if_due` keeps
+# the ~daily throttle, so most ticks do no network at all; this only bounds HOW LONG after a release
+# (published while the app was already running) the notification can lag. Without it the check ran
+# once per launch, so a user who never relaunched was never told a new version existed.
+_UPDATE_RECHECK_INTERVAL_MS = 60 * 60 * 1000
+
+
 class MainWindow(QMainWindow):
     """Top-level shell."""
 
@@ -752,6 +759,13 @@ class MainWindow(QMainWindow):
         if not self._update_check_started:
             self._update_check_started = True
             QTimer.singleShot(0, self._start_update_check)
+            # Keep re-checking while the window stays open so a release published AFTER launch is
+            # still surfaced without a relaunch. The ~daily throttle in `check_if_due` means almost
+            # every tick is a no-op (no network); this just bounds the notification lag to the tick.
+            self._update_recheck_timer = QTimer(self)
+            self._update_recheck_timer.setInterval(_UPDATE_RECHECK_INTERVAL_MS)
+            self._update_recheck_timer.timeout.connect(self._start_update_check)
+            self._update_recheck_timer.start()
 
     def _start_update_check(self) -> None:
         """Run the throttled GitHub check off-thread; surface a newer release if found."""

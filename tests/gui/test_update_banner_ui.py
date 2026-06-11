@@ -38,6 +38,34 @@ def _store_with_pending(tmp_path: Path, version: str) -> JsonPreferencesStore:
     return store
 
 
+def test_recheck_timer_runs_while_window_stays_open(qapp: object, tmp_path: Path) -> None:
+    # Regression: the update check used to run only once per launch, so a release published while
+    # the app stayed open was never surfaced. Showing the window starts a RECURRING re-check timer.
+    import time
+
+    from searchmob_desktop.gui.main_window import _UPDATE_RECHECK_INTERVAL_MS
+
+    store = JsonPreferencesStore(path=tmp_path / "prefs.json")
+    store.save(
+        replace(
+            store.load(),
+            onboarding_completed=True,
+            onboarding_version=ONBOARDING_VERSION,
+            # A fresh stamp keeps the launch tick throttled, so this test never touches the network.
+            last_update_check_ms=int(time.time() * 1000),
+        )
+    )
+    window = MainWindow(prefs_store=store, history_store=InMemoryHistoryStore())
+    window.show()
+    try:
+        timer = window._update_recheck_timer
+        assert timer.isActive()
+        assert not timer.isSingleShot()
+        assert timer.interval() == _UPDATE_RECHECK_INTERVAL_MS
+    finally:
+        window.close()
+
+
 def test_banner_shown_when_prefs_has_newer_pending(qapp: object, tmp_path: Path) -> None:
     version = _newer_than_current()
     window = MainWindow(
