@@ -104,11 +104,12 @@ follow_imports = "skip"
 #
 # Version is mirrored here (rather than read dynamically) because Briefcase resolves PEP621
 # `dynamic = ["version"]` by running the PEP517 build backend in an isolated env, which is wasteful
-# in CI. Bump both this string and src/searchmob_desktop/version.py together at release time.
+# in CI. Bump both this string and src/searchmob_desktop/version.py together at release time;
+# `tests/test_version_consistency.py` fails the build if they ever drift apart.
 [tool.briefcase]
 project_name = "SearchMob Desktop"
 bundle = "com.flintwave"
-version = "26.06.05"
+version = "26.06.06"
 url = "https://github.com/FlintWave/SearchMob-Desktop"
 author = "FlintWave"
 author_email = "flintwave@tuta.com"
