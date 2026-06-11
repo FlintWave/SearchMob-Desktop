@@ -40,6 +40,37 @@ async def _fake_raises(_client: httpx.AsyncClient, _ctx: EngineContext) -> list[
     raise RuntimeError("engine exploded")
 
 
+async def _fake_official(_client: httpx.AsyncClient, _ctx: EngineContext) -> list[SearchResult]:
+    # One engine, ranked last, returns the official site whose title uses the dotted brand name.
+    return [
+        SearchResult(
+            title="ThreeJS - GameDev.net", url="https://gamedev.net/x", snippet="forum", engine="x"
+        ),
+        SearchResult(
+            title="threejs on Stack Overflow",
+            url="https://stackoverflow.com/q",
+            snippet="q",
+            engine="x",
+        ),
+        SearchResult(
+            title="Three.js - JavaScript 3D Library",
+            url="https://threejs.org/",
+            snippet="docs",
+            engine="x",
+        ),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_navigational_query_promotes_official_site_over_literal_forum_hits() -> None:
+    # Regression: for "threejs" the official three.js site (one engine, ranked last, dotted title)
+    # must beat single-engine forum posts that literally contain "threejs". The nav boost + the
+    # separator bridging together float it to the top instead of burying it.
+    ctx = EngineContext(query="threejs", max_results=10)
+    results = await aggregate(ctx, [_fake_official])
+    assert results[0].url == "https://threejs.org/"
+
+
 @pytest.mark.asyncio
 async def test_dedup_rrf_and_combined_engine_label() -> None:
     ctx = EngineContext(query="anything", max_results=10)
