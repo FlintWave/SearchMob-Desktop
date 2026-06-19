@@ -183,7 +183,10 @@ async def aggregate_with_status(
             * nav
         )
 
-    ranked = sorted(buckets.values(), key=_final_score, reverse=True)
+    # Score once, then sort by and carry the score, so downstream freshness sorting scales the real
+    # relevance (with its navigational boost) rather than re-deriving a flat positional proxy.
+    scored = [(b, _final_score(b)) for b in buckets.values()]
+    scored.sort(key=lambda pair: pair[1], reverse=True)
     results = [
         SearchResult(
             title=b.title,
@@ -191,7 +194,8 @@ async def aggregate_with_status(
             snippet=b.snippet,
             engine=",".join(sorted(b.engines)),
             published=b.published,
+            relevance=score,
         )
-        for b in ranked[: ctx.max_results]
+        for b, score in scored[: ctx.max_results]
     ]
     return AggregateOutcome(results, tuple(outcomes))

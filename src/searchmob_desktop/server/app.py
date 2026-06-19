@@ -947,7 +947,11 @@ def build_app(
         )
         payload = {
             "query": raw_query,
-            "results": [asdict(result) for result in results],
+            # `relevance` is an internal ranking signal (see `SearchResult`); keep it out of the
+            # public JSON contract.
+            "results": [
+                {k: v for k, v in asdict(result).items() if k != "relevance"} for result in results
+            ],
             "correction": _correction(query),
         }
         return JSONResponse(payload)

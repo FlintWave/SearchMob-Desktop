@@ -5,6 +5,7 @@ from __future__ import annotations
 from searchmob_desktop.engines.rank.model import RankingRules, RankRule
 from searchmob_desktop.engines.rank.ranker import apply_ranking
 from searchmob_desktop.engines.rank.slop_blocklist import (
+    load_slop_allowlist,
     load_slop_domains,
     matches_blocklist,
 )
@@ -18,6 +19,18 @@ def test_load_slop_domains_non_empty_and_cached() -> None:
     assert len(domains) > 100
     # Cached: a second call returns the identical frozenset object.
     assert load_slop_domains() is domains
+
+
+def test_allowlisted_destinations_are_not_in_effective_blocklist() -> None:
+    # The community lists include the official sites of AI companies and major dev hubs. A search
+    # for one of those names must surface it, so the allowlisted domains (and their subdomains) are
+    # subtracted from the effective blocklist and never downranked. Regression for the "official
+    # site missing from page one" report.
+    allow = load_slop_allowlist()
+    assert {"huggingface.co", "github.com", "openai.com"} <= allow
+    effective = load_slop_domains()
+    for host in ("huggingface.co", "github.com", "openai.com", "discuss.huggingface.co"):
+        assert matches_blocklist(host, effective) is False
 
 
 def test_matches_blocklist_host_parent_and_miss() -> None:
