@@ -86,10 +86,22 @@ def sort_results(
         dated.sort(key=lambda pair: (-(pair[1].published or 0), pair[0]))
         return [r for _, r in dated] + undated
 
-    # FRESH_RELEVANT: blend a recency boost into the relevance rank, floored at 1.0 for undated.
+    # FRESH_RELEVANT: blend a recency boost into the relevance SCORE, floored at 1.0 for undated.
+    # The boost multiplies the aggregator's actual score (`relevance`), which carries the lexical
+    # blend and the navigational boost, so a strong match (the official site a navigational query
+    # named) keeps its lead and freshness only reorders results of comparable relevance. Earlier
+    # this multiplied a positional `1/(60+index)` proxy, which flattened every rank gap to a hair
+    # and let a single dated result leapfrog an undated #1 (a news/wiki page over the queried site
+    # itself). When no result is scored (raw engine rows or a test fake), fall back to that proxy.
     weight = query_freshness_weight(query, now_ms)
+    has_scores = any(r.relevance > 0.0 for r in results)
     scored = [
-        (1.0 / (_RRF_K + index) * _recency(r.published, now_ms, weight), index, r)
+        (
+            (r.relevance if has_scores else 1.0 / (_RRF_K + index))
+            * _recency(r.published, now_ms, weight),
+            index,
+            r,
+        )
         for index, r in enumerate(results)
     ]
     # Sort by blended score desc; ties fall back to relevance rank for determinism.

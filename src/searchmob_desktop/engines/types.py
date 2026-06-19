@@ -29,6 +29,12 @@ class SearchResult:
     `published` is the result's best-known publication time in epoch milliseconds, or `None` when
     no date could be determined (the common case for general web results). It drives freshness
     sorting; `None` means "unknown", treated as neither old nor new.
+
+    `relevance` is the aggregator's final ranking score for this row (RRF fused, lexical-blended,
+    and navigationally boosted). The freshness sort multiplies it by a recency factor, so a strong
+    match (e.g. the official site a navigational query named) keeps its lead instead of being
+    flattened to its list position. `0.0` means "unscored" (a test fake or a raw engine row); the
+    freshness sort then falls back to a positional proxy. Internal signal, never shown or persisted.
     """
 
     title: str
@@ -36,6 +42,7 @@ class SearchResult:
     snippet: str
     engine: str
     published: int | None = None
+    relevance: float = 0.0
 
 
 @dataclass(frozen=True, slots=True)

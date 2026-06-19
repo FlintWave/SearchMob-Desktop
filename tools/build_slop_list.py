@@ -66,6 +66,18 @@ def _parse_ublacklist(text: str) -> set[str]:
     return out
 
 
+def _load_allowlist() -> set[str]:
+    """Read the curated allowlist (bare domains; `#` comments) the blocklist must never contain."""
+    path = _OUT_DIR / "allowlist.txt"
+    if not path.exists():
+        return set()
+    return {
+        line.strip().lower()
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.startswith("#")
+    }
+
+
 def main() -> None:
     domains: set[str] = set()
     for name, url, fmt in _SOURCES:
@@ -77,6 +89,13 @@ def main() -> None:
         parsed = {d for d in parsed if _DOMAIN_RE.match(d)}
         print(f"  {len(parsed)} domains")
         domains |= parsed
+
+    # Subtract the curated allowlist (and any subdomains of it): the community lists include the
+    # official sites of AI companies and major dev hubs, which a search ranker must never bury. The
+    # runtime loader applies the same subtraction; this just keeps the committed asset consistent.
+    allow = _load_allowlist()
+    domains = {d for d in domains if not any(d == a or d.endswith("." + a) for a in allow)}
+    print(f"  {len(allow)} allowlisted domains subtracted")
 
     ordered = sorted(domains)
     _OUT_DIR.mkdir(parents=True, exist_ok=True)

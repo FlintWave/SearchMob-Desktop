@@ -11,9 +11,14 @@ _NOW = int(datetime(2026, 5, 29, tzinfo=UTC).timestamp() * 1000)
 _DAY = 86_400_000
 
 
-def _r(title: str, published: int | None = None) -> SearchResult:
+def _r(title: str, published: int | None = None, relevance: float = 0.0) -> SearchResult:
     return SearchResult(
-        title=title, url=f"https://e/{title}", snippet="", engine="x", published=published
+        title=title,
+        url=f"https://e/{title}",
+        snippet="",
+        engine="x",
+        published=published,
+        relevance=relevance,
     )
 
 
@@ -49,6 +54,31 @@ def test_fresh_blend_promotes_a_recent_dated_result() -> None:
         _r("undated_top"),
         _r("old", _NOW - 300 * _DAY),
         _r("fresh", _NOW - 1 * _DAY),
+    ]
+    out = sort_results(items, SortMode.FRESH_RELEVANT, "the matrix 5 release date", _NOW)
+    assert out[0].title == "fresh"
+
+
+def test_fresh_blend_does_not_let_a_dated_result_displace_a_strong_undated_match() -> None:
+    # Regression: a navigational query ("huggingface") nav-boosts the official site to a high
+    # aggregator score, but its homepage is undated. A dated Wikipedia/news page must NOT leapfrog
+    # it under the default freshness sort. Earlier the blend scaled a positional 1/(60+index) proxy,
+    # which flattened the nav boost and let any dated result overtake the queried site itself.
+    items = [
+        _r("huggingface.co", None, relevance=0.199),  # nav-boosted official site, undated
+        _r("wikipedia", _NOW - 3 * _DAY, relevance=0.049),  # dated, far lower relevance
+        _r("techcrunch", _NOW - 1 * _DAY, relevance=0.016),  # fresh, weak relevance
+    ]
+    out = sort_results(items, SortMode.FRESH_RELEVANT, "huggingface", _NOW)
+    assert out[0].title == "huggingface.co"
+
+
+def test_fresh_blend_still_reorders_results_of_comparable_relevance() -> None:
+    # Freshness must still do its job among peers: when relevance is close, a fresh dated result
+    # rises above a stale one just above it. This is the QDF behavior the blend is meant to provide.
+    items = [
+        _r("stale", _NOW - 300 * _DAY, relevance=0.050),
+        _r("fresh", _NOW - 1 * _DAY, relevance=0.048),
     ]
     out = sort_results(items, SortMode.FRESH_RELEVANT, "the matrix 5 release date", _NOW)
     assert out[0].title == "fresh"
