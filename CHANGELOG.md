@@ -7,6 +7,12 @@ All notable changes to SearchMob Desktop are documented here. The version scheme
 
 ## 26.07.01 — 2026-07-02
 
+### Fixed
+- **The About popup now opens wide enough to show all of its content.** Its opening width was
+  fixed, so a larger text size (or a language with longer button labels) could make the widest
+  row overflow and force a horizontal scrollbar. The width is now derived from the content and
+  clamped to the screen.
+
 ### Added
 - **Google-style search operators.** `"exact phrase"`, `-term`, `site:` / `-site:`, `intitle:`,
   `inurl:`, `filetype:` (or `ext:`), `before:` / `after:` dates, and `OR`. Operators the upstream

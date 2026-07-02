@@ -8,7 +8,7 @@ buttons to the public repo and the bug tracker.
 from __future__ import annotations
 
 from PySide6.QtCore import QUrl
-from PySide6.QtGui import QDesktopServices
+from PySide6.QtGui import QDesktopServices, QGuiApplication
 from PySide6.QtWidgets import (
     QDialog,
     QFrame,
@@ -36,7 +36,6 @@ class AboutDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle(tr("About SearchMob Desktop"))
         self.setModal(True)
-        self.resize(640, 720)
 
         outer = QVBoxLayout(self)
         scroll = QScrollArea(self)
@@ -176,6 +175,27 @@ class AboutDialog(QDialog):
 
         scroll.setWidget(host)
         outer.addWidget(scroll)
+
+        # Open wide enough that the content never needs a horizontal scrollbar. The widest rows
+        # (the buttons row, the unwrapped footer lines) track the app font size and the current
+        # language, so any fixed width falls short for some combination and forces one. Derive
+        # the width from the content's minimum plus the scroll-area chrome, and clamp both sides
+        # to the available screen so an extreme font size still yields a usable dialog.
+        margins = outer.contentsMargins()
+        content_width = (
+            host.minimumSizeHint().width()
+            + scroll.verticalScrollBar().sizeHint().width()
+            + 2 * scroll.frameWidth()
+            + margins.left()
+            + margins.right()
+        )
+        width, height = max(640, content_width), 720
+        screen = self.screen() or QGuiApplication.primaryScreen()
+        if screen is not None:
+            available = screen.availableGeometry()
+            width = min(width, available.width() - 80)
+            height = min(height, available.height() - 80)
+        self.resize(width, height)
 
     @staticmethod
     def _add_section(
