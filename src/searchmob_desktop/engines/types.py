@@ -53,9 +53,16 @@ class EngineContext:
     distinct rows after dedup. `timeout_seconds` is the httpx client timeout, applied uniformly.
     `language_region`, when set, carries per-engine language/region parameters that tailor results
     to the UI language (DuckDuckGo `kl`, Brave `country`/`search_lang`/`ui_lang`); None is neutral.
+
+    `ranking_terms` is the operator-free text the aggregator's lexical scorer should reason about
+    when `query` carries scoping clauses (`site:` groups from the verticals, user operators): a
+    scoping clause is fetch plumbing, not subject matter, and must never pollute the match score.
+    None (the default) scores against `query` itself, which keeps operator-free callers unchanged.
+    Mirrors `SearchQuery.rankingTerms` in the Android engine.
     """
 
     query: str
     max_results: int = 10
     timeout_seconds: float = 5.0
     language_region: LanguageRegion | None = None
+    ranking_terms: str | None = None
