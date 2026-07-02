@@ -65,6 +65,7 @@ from searchmob_desktop.engines.media_intent import (
     detect_category,
     promote_media,
 )
+from searchmob_desktop.engines.query_operators import ParsedQuery, parse_query_operators
 from searchmob_desktop.engines.rank import (
     Lens,
     PersonalizationModel,
@@ -491,7 +492,7 @@ def build_app(
         return locale
 
     async def _run_metasearch(
-        query: str,
+        parsed: ParsedQuery,
         sort_mode: SortMode = SortMode.FRESH_RELEVANT,
         vertical: Vertical = Vertical.WEB,
         *,
@@ -503,11 +504,13 @@ def build_app(
         # (pin/raise/block still win). None disables promotion (e.g. the JSON endpoint).
         summary_task: Awaitable[SummaryBox | None] | None = None,
     ) -> tuple[list[SearchResult], tuple[EngineOutcome, ...]]:
-        if not query.strip() or not engines:
+        if not parsed.raw.strip() or not engines:
             return [], ()
-        # Scope the query for the chosen vertical (a `site:` OR group the engines understand); the
-        # original query still drives sort/summary/correction so freshness keywords are detected.
-        scoped = transform_query(query, vertical)
+        # Scope the engine query for the chosen vertical (a `site:` OR group the engines
+        # understand), on top of the already-parsed operators (forwarded as-is; intitle:/inurl:
+        # turned into a bare recall hint). The operator-free text still drives scoring, sort,
+        # summary, and correction so a scoping clause never throws those off.
+        scoped = transform_query(parsed.engine_query, vertical)
         # Tailor results to the UI language: a non-English locale carries per-engine region/language
         # params (DuckDuckGo `kl`, Brave country/search_lang/ui_lang); None leaves results neutral.
         ctx = EngineContext(
@@ -515,6 +518,7 @@ def build_app(
             max_results=max_results,
             timeout_seconds=timeout_seconds,
             language_region=language_region_for(locale),
+            ranking_terms=parsed.clean_text,
         )
         # The runner returns either a bare result list (a test fake) or an `AggregateOutcome` with
         # the per-engine status (the real `aggregate_with_status`); accept both.
@@ -523,6 +527,11 @@ def build_app(
             results, engine_outcomes = raw.results, raw.engines
         else:
             results, engine_outcomes = raw, ()
+        # Operators the engines cannot be trusted to honor (intitle:/inurl:/filetype:/before:/
+        # after:/-exclusions/site: scoping) are enforced locally here, before sort/personalization/
+        # rules see the list. Like `apply_ranking`, this only drops rows; scores are untouched.
+        if parsed.has_filters:
+            results = [r for r in results if parsed.matches(r.title, r.url, r.snippet, r.published)]
         # The AI-slop filter mode is taken live from prefs when wired, so the Settings toggle takes
         # effect on the next search; otherwise the static build-time value is used.
         prefs = _load_prefs()
@@ -531,10 +540,10 @@ def build_app(
         # when a model is passed, which the caller does for the loopback owner), then apply the
         # user's rules so the served results match the in-app results and PIN/RAISE preserve order.
         now_ms = int(time.time() * 1000)
-        ordered = sort_results(results, sort_mode, query, now_ms)
+        ordered = sort_results(results, sort_mode, parsed.clean_text, now_ms)
         if model is not None:
             ordered = personalize_reorder(
-                ordered, lambda r: host_of_url(r.url), query, model, now_ms
+                ordered, lambda r: host_of_url(r.url), parsed.clean_text, model, now_ms
             )
         # Media promotion: for a resolved media entity, nudge its canonical platforms up (bounded),
         # after relevance/personalization and before the user's rules, so pin/raise/block still win.
@@ -583,13 +592,15 @@ def build_app(
             _render_cache.popitem(last=False)  # evict the oldest render
         return rid
 
-    def _correction(query: str) -> str | None:
+    def _correction(parsed: ParsedQuery) -> str | None:
         # On-device "did you mean". `suggest` is fail-soft and already returns None when the
-        # corrected query equals the input, so any non-None result is a genuine suggestion.
-        if corrector is None or not query.strip():
+        # corrected query equals the input, so any non-None result is a genuine suggestion. The
+        # corrector reasons about word spelling, not query syntax: an operator-laden query would
+        # just get its operators mangled, so it is skipped entirely (Android does the same).
+        if corrector is None or not parsed.raw.strip() or parsed.has_operators:
             return None
         try:
-            suggestion = corrector.suggest(query)
+            suggestion = corrector.suggest(parsed.raw)
         except Exception:
             return None
         return suggestion.corrected if suggestion is not None else None
@@ -663,6 +674,10 @@ def build_app(
         # persisting it. The engines, summary, and correction run on the cleaned query; the original
         # text is echoed in the box so the token round-trips and re-running re-applies the scope.
         query, scope = parse_scope_token(raw_query, rules_provider())
+        # Google-style operators (site:/intitle:/before:/etc., see query_operators) are parsed once
+        # here so the operator-free text can drive anything that reasons about "what is the user
+        # asking about" rather than "how do I fetch it" (summary, correction, relevance, sort).
+        parsed = parse_query_operators(query)
         vertical = Vertical.from_value(request.query_params.get("vertical"))
         # An explicit `?sort=` wins. Absent it, a non-default vertical keeps its sensible default
         # (e.g. News favors Date); the plain Web view honors the user's configured default sort from
@@ -676,11 +691,12 @@ def build_app(
         else:
             sort_mode = default_sort(vertical)
         # Fetch the contextual summary concurrently with the metasearch so the box never adds
-        # latency to the results path.
-        summary_task = asyncio.ensure_future(_maybe_summary(query))
+        # latency to the results path. Uses the operator-free text: an operator-laden query would
+        # never resolve a Wikipedia entity.
+        summary_task = asyncio.ensure_future(_maybe_summary(parsed.clean_text))
         model = _owner_model(request)
         results, engine_outcomes = await _run_metasearch(
-            query,
+            parsed,
             sort_mode,
             vertical,
             model=model,
@@ -700,13 +716,15 @@ def build_app(
         # can train the model; everyone else (and a disabled owner) gets the plain destination link.
         link_builder: Callable[[int, str], str] | None = None
         if model is not None and results:
-            rid = _register_render(query, results)
+            # Click training reasons about subject terms, so the render remembers the
+            # operator-free text (a site: clause is not something the model should learn).
+            rid = _register_render(parsed.clean_text, results)
             link_builder = lambda pos, _url, _rid=rid: f"/click?rid={_rid}&pos={pos}"  # noqa: E731
         body = render_results_page(
             raw_query,
             results,
             is_safe_http_url,
-            correction=_correction(query),
+            correction=_correction(parsed),
             rules=rules_provider(),
             editable=_is_owner(request),
             summary=summary,
@@ -934,11 +952,13 @@ def build_app(
         # Same inline `+name` scope token as the HTML route: applied to this request only, with the
         # engines/correction run on the cleaned query and the original echoed back as `query`.
         query, scope = parse_scope_token(raw_query, rules_provider())
+        # Same one-shot operator parse as the HTML route (see `search_html`).
+        parsed = parse_query_operators(query)
         vertical = Vertical.from_value(request.query_params.get("vertical"))
         sort_param = request.query_params.get("sort")
         sort_mode = SortMode.from_value(sort_param) if sort_param else default_sort(vertical)
         results, _ = await _run_metasearch(
-            query,
+            parsed,
             sort_mode,
             vertical,
             model=_owner_model(request),
@@ -952,7 +972,7 @@ def build_app(
             "results": [
                 {k: v for k, v in asdict(result).items() if k != "relevance"} for result in results
             ],
-            "correction": _correction(query),
+            "correction": _correction(parsed),
         }
         return JSONResponse(payload)
 

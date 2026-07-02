@@ -62,6 +62,7 @@ from searchmob_desktop.engines.media_intent import (
     detect_category,
     promote_media,
 )
+from searchmob_desktop.engines.query_operators import parse_query_operators
 from searchmob_desktop.engines.rank import (
     PersonalizationModel,
     RankRule,
@@ -186,6 +187,11 @@ class MainWindow(QMainWindow):
             history_terms=lambda: [e.query for e in self._history_store.recent(500)]
         )
         self._last_query = ""
+        # The operator-free text of the last query (see `query_operators`) and whether it carried
+        # any operator syntax. The clean text drives sort/personalization/click training; the flag
+        # skips the corrector, whose word-spelling logic would just mangle operators.
+        self._last_clean_query = ""
+        self._last_has_operators = False
         # Bind per the saved network-mode preference so a profile with network mode on listens on
         # the LAN from launch (the Settings toggle still rebinds on the next server restart).
         self._server = LocalServerController(
@@ -874,23 +880,39 @@ class MainWindow(QMainWindow):
 
         prefs = self._prefs_store.load()
         engines = build_engines_from_prefs(prefs)
-        # Scope the engine query for the active vertical; the summary, correction, and sort all keep
-        # the original query so freshness keywords and entity lookups are unaffected by operators.
+        # Google-style operators (site:/intitle:/before:/etc., see query_operators) are parsed once
+        # here: the engine query (scoped for the active vertical) goes upstream, while the
+        # operator-free clean text drives scoring, sort, the summary lookup, and the corrector so
+        # a scoping clause never throws those off.
+        parsed = parse_query_operators(query)
+        self._last_clean_query = parsed.clean_text
+        self._last_has_operators = parsed.has_operators
         ctx = EngineContext(
-            query=transform_query(query, self._vertical),
+            query=transform_query(parsed.engine_query, self._vertical),
             max_results=DEFAULT_POOL_SIZE,
             timeout_seconds=5.0,
+            ranking_terms=parsed.clean_text,
         )
         summary_enabled = prefs.summary_enabled
 
         async def _run() -> tuple[list[SearchResult], SummaryBox | None, AggregateOutcome]:
             # Fetch the contextual summary concurrently with the metasearch so it adds no latency.
+            # The lookup uses the operator-free text: an operator-laden query never names an entity.
             summary_task = (
-                asyncio.ensure_future(summary_for_query(query)) if summary_enabled else None
+                asyncio.ensure_future(summary_for_query(parsed.clean_text))
+                if summary_enabled
+                else None
             )
             outcome = await aggregate_with_status(ctx, engines)
+            # Operators the engines cannot be trusted to honor are enforced locally over the merged
+            # results (drops only; scores untouched), before sort/personalization/rules see them.
+            results = outcome.results
+            if parsed.has_filters:
+                results = [
+                    r for r in results if parsed.matches(r.title, r.url, r.snippet, r.published)
+                ]
             summary = await summary_task if summary_task is not None else None
-            return outcome.results, summary, outcome
+            return results, summary, outcome
 
         worker: AsyncWorker[tuple[list[SearchResult], SummaryBox | None, AggregateOutcome]] = (
             AsyncWorker(_run)
@@ -951,14 +973,16 @@ class MainWindow(QMainWindow):
         """Sort, then re-rank the last raw results with the current rules; update view + status."""
         # Sort first (relevance/date/freshness blend), then bucket by the user's rules so PIN/RAISE
         # are honored while preserving the chosen order within each bucket.
+        # The freshness heuristic and the click model reason about subject terms, so both get the
+        # operator-free clean text (a site:/filetype: clause is not a freshness keyword).
         now_ms = int(time.time() * 1000)
-        ordered = sort_results(self._raw_results, self._sort_mode, self._last_query, now_ms)
+        ordered = sort_results(self._raw_results, self._sort_mode, self._last_clean_query, now_ms)
         # Then nudge by the learned click model (between sort and rules, so PIN/RAISE/BLOCK win).
         if self._personalization_enabled:
             ordered = personalize_reorder(
                 ordered,
                 lambda r: host_of_url(r.url),
-                self._last_query,
+                self._last_clean_query,
                 self._personalization,
                 now_ms,
             )
@@ -1080,13 +1104,20 @@ class MainWindow(QMainWindow):
             self._personalization,
             hosts,
             row,
-            query_terms(self._last_query),
+            query_terms(self._last_clean_query),
             int(time.time() * 1000),
         )
         save_personalization(self._personalization)
 
     def _maybe_show_correction(self) -> None:
-        """Offer a 'Did you mean: X' link when the on-device corrector suggests one."""
+        """Offer a 'Did you mean: X' link when the on-device corrector suggests one.
+
+        Skipped for an operator-laden query: the corrector reasons about English word spelling,
+        not query syntax, and would just mangle the operators.
+        """
+        if self._last_has_operators:
+            self._didyoumean.hide()
+            return
         suggestion = None
         try:
             suggestion = self._corrector.suggest(self._last_query)
