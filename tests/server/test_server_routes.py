@@ -88,6 +88,19 @@ def test_home_advertises_opensearch_descriptor_link() -> None:
     assert 'title="SearchMob"' in body
 
 
+def test_home_page_advertises_the_search_operators_help() -> None:
+    with _build_client() as client:
+        body = client.get("/").text
+    # The collapsible cheat sheet: a native <details> card listing the supported operators.
+    assert '<details class="ophelp">' in body
+    assert "Search operators" in body
+    assert "filetype:pdf" in body
+    assert "site:example.com" in body
+    assert "after:2022" in body
+    # Operator examples are escaped like everything else; the quoted-phrase row survives escaping.
+    assert "&quot;exact phrase&quot;" in body
+
+
 def test_opensearch_descriptor_advertises_both_search_and_suggestions() -> None:
     with _build_client(port=9999, host="127.0.0.1") as client:
         response = client.get("/opensearch.xml")
@@ -477,9 +490,56 @@ def test_descriptor_omits_token_when_none() -> None:
 def test_security_headers_present_on_responses() -> None:
     with _build_client() as client:
         r = client.get("/healthz")
-    assert r.headers.get("Referrer-Policy") == "no-referrer"
+    # same-origin, not no-referrer: our own form posts must carry a real Origin so the CSRF check
+    # can tell them apart from a cross-site POST forcing the opaque `Origin: null`.
+    assert r.headers.get("Referrer-Policy") == "same-origin"
     assert r.headers.get("X-Content-Type-Options") == "nosniff"
     assert r.headers.get("X-Frame-Options") == "DENY"
+    assert r.headers.get("Cache-Control") == "no-store"
+    assert r.headers.get("Permissions-Policy") == "camera=(), geolocation=(), microphone=()"
+    csp = r.headers.get("Content-Security-Policy", "")
+    assert "default-src 'none'" in csp
+    assert "form-action 'self'" in csp
+    assert "frame-ancestors 'none'" in csp
+
+
+def test_token_gate_accepts_bearer_and_custom_headers() -> None:
+    # A non-loopback client may present the token via `Authorization: Bearer` or the bare
+    # `X-SearchMob-Token` header instead of `?token=`, which leaks into history and bookmarks.
+    app = build_app(
+        [],
+        bound_port_getter=lambda: 8787,
+        bound_host_getter=lambda: "0.0.0.0",
+        access_token="right-token",
+        host_allowlist_enabled=False,
+    )
+    with TestClient(app, client=("192.168.1.77", 6000)) as client:
+        ok = client.get(
+            "/api/search", params={"q": "x"}, headers={"Authorization": "Bearer right-token"}
+        )
+        assert ok.status_code == 200
+        # The Bearer scheme is case-insensitive and whitespace-tolerant.
+        ok = client.get(
+            "/api/search", params={"q": "x"}, headers={"Authorization": "  bearer   right-token "}
+        )
+        assert ok.status_code == 200
+        ok = client.get(
+            "/api/search", params={"q": "x"}, headers={"X-SearchMob-Token": "right-token"}
+        )
+        assert ok.status_code == 200
+        # A wrong header token is still rejected, as is a non-Bearer Authorization scheme alone.
+        assert (
+            client.get(
+                "/api/search", params={"q": "x"}, headers={"Authorization": "Bearer wrong"}
+            ).status_code
+            == 403
+        )
+        assert (
+            client.get(
+                "/api/search", params={"q": "x"}, headers={"Authorization": "Basic abc"}
+            ).status_code
+            == 403
+        )
 
 
 def test_result_anchors_carry_noreferrer() -> None:

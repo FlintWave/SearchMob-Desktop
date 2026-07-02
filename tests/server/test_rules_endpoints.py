@@ -98,11 +98,13 @@ def test_foreign_origin_is_rejected_as_csrf() -> None:
     assert holder.rules.domain_rules == {"news.example": RankRule.BLOCK}
 
 
-def test_opaque_origin_is_treated_as_same_origin() -> None:
-    # Regression: a browser serializes the page's own origin as the literal `Origin: null` for our
-    # form posts because every response carries `Referrer-Policy: no-referrer`. That opaque origin
-    # has no host and must be accepted (same-origin), not rejected as CSRF. This is the case that
-    # broke the Android sibling's served scope/rule edits; desktop must keep allowing it.
+def test_opaque_origin_is_rejected_as_cross_site() -> None:
+    # Regression for the CSRF-hardening fix: a literal `Origin: null` used to be treated as
+    # same-origin (our own form posts carried it under the old `Referrer-Policy: no-referrer`),
+    # but an attacker page can force the exact same opaque value onto a genuinely cross-site POST
+    # (a page served with `Referrer-Policy: no-referrer`, or a sandboxed iframe). It must now be
+    # rejected; our own forms carry a real origin because the server serves
+    # `Referrer-Policy: same-origin`.
     holder = _Holder()
     with _loopback(_app(holder)) as client:
         resp = client.post(
@@ -111,6 +113,16 @@ def test_opaque_origin_is_treated_as_same_origin() -> None:
             headers={"Origin": "null"},
             follow_redirects=False,
         )
+        assert resp.status_code == 403
+    assert holder.rules.active_lens is None
+
+
+def test_post_with_no_origin_header_is_still_same_origin() -> None:
+    # A POST with no Origin at all (a non-browser client, or a browser that omits it) is treated
+    # as same-origin and allowed through; there is nothing an attacker can forge in its place.
+    holder = _Holder()
+    with _loopback(_app(holder)) as client:
+        resp = client.post("/scope", data={"lens": "Docs"}, follow_redirects=False)
         assert resp.status_code == 303
     assert holder.rules.active_lens == "Docs"
 

@@ -119,6 +119,53 @@ async def test_respects_max_results() -> None:
     assert len(results) == 2
 
 
+async def _fake_scoring_bait(_client: httpx.AsyncClient, _ctx: EngineContext) -> list[SearchResult]:
+    # The first result matches the scoping clause's own words ("site", "reddit"), not the subject;
+    # the second matches the actual subject. Rank order gives the bait the higher RRF score.
+    return [
+        SearchResult(
+            title="Reddit site index",
+            url="https://reddit.example/r/all",
+            snippet="site list",
+            engine="x",
+        ),
+        SearchResult(
+            title="Rust tutorial for beginners",
+            url="https://docs.example/rust",
+            snippet="a rust tutorial",
+            engine="x",
+        ),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_ranking_terms_keep_scoping_clauses_out_of_the_lexical_score() -> None:
+    # A vertical (or a user operator) appends `site:` clauses to the fetched query. The lexical
+    # scorer must reason about the operator-free text, so the scored order and relevance values are
+    # identical to a plain search for the same subject; the clause words never count as a match.
+    scoped = "rust tutorial (site:reddit.example OR site:forum.example)"
+    plain_results = await aggregate(
+        EngineContext(query="rust tutorial", max_results=10), [_fake_scoring_bait]
+    )
+    scoped_results = await aggregate(
+        EngineContext(query=scoped, max_results=10, ranking_terms="rust tutorial"),
+        [_fake_scoring_bait],
+    )
+    assert [r.url for r in scoped_results] == [r.url for r in plain_results]
+    assert [r.relevance for r in scoped_results] == [r.relevance for r in plain_results]
+    # The genuinely matching result leads despite the bait's better engine rank.
+    assert scoped_results[0].url == "https://docs.example/rust"
+
+
+@pytest.mark.asyncio
+async def test_without_ranking_terms_the_query_itself_is_scored() -> None:
+    # Back-compat: callers that set no ranking_terms keep the old behavior (the full query drives
+    # the lexical score), so raw `aggregate` uses stay byte-identical.
+    ctx = EngineContext(query="reddit site", max_results=10)
+    results = await aggregate(ctx, [_fake_scoring_bait])
+    assert results[0].url == "https://reddit.example/r/all"
+
+
 @pytest.mark.asyncio
 async def test_surfaced_url_is_tracker_stripped() -> None:
     """The clicked link must not carry trackers, even when the result is unique (no dedup)."""

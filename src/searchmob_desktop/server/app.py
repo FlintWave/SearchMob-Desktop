@@ -65,6 +65,7 @@ from searchmob_desktop.engines.media_intent import (
     detect_category,
     promote_media,
 )
+from searchmob_desktop.engines.query_operators import ParsedQuery, parse_query_operators
 from searchmob_desktop.engines.rank import (
     Lens,
     PersonalizationModel,
@@ -142,20 +143,45 @@ def _no_suggestions(_query: str, _limit: int) -> list[str]:
     return []
 
 
+# Content-Security-Policy sent on every response, mirroring the Android server's. Every piece of
+# dynamic content the templates render (query text, titles, snippets, settings values, ...) is
+# HTML-escaped, so the inline theme/reveal `<script>` and `<style>` blocks the pages emit are
+# always our own source constants, never attacker- or user-controlled text; that is what makes
+# `'unsafe-inline'` (required because those blocks and a few inline `onclick`/`onchange` handlers
+# have no external file to point a nonce/hash-based policy at) safe to allow here. The policy's
+# real job is defense-in-depth against everything else: `default-src 'none'` plus the narrow
+# allowances block any EXTERNAL script, style, object, or frame a future bug might try to load
+# (`img-src https:` keeps the Wikipedia summary thumbnail working), `form-action 'self'` stops a
+# form from ever submitting to a foreign origin, and `frame-ancestors 'none'` blocks a foreign
+# page from framing us (belt-and-suspenders with `X-Frame-Options: DENY` for older browsers).
+_CSP = (
+    "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src https:; "
+    "form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
+)
+
+
 class _SecurityHeadersMiddleware(BaseHTTPMiddleware):
     """Add conservative security headers, enforce the Host allowlist, and gate the query routes.
 
     Three concerns, kept in one middleware so they run on every request in a single pass:
 
-    * `Referrer-Policy: no-referrer` is the important header: without it, clicking a result would
-      send the loopback URL (which contains the query) as the Referer to the destination site,
-      leaking the query. The other headers are defense-in-depth, especially in network mode.
+    * Response headers. `Referrer-Policy: same-origin`, not `no-referrer`: a same-origin request
+      (including our OWN served forms) still carries its Referer/Origin to us, which the CSRF
+      check below needs to tell a genuine same-origin POST apart from a cross-site one that
+      forces an opaque `Origin: null`. A cross-origin navigation away from us still sends nothing,
+      and every result link additionally carries `rel="noreferrer"` as a second, redundant layer.
+      `Content-Security-Policy` (see `_CSP`), `Cache-Control: no-store` (queries, titles, and
+      Settings values must never persist in a browser or intermediary cache), and
+      `Permissions-Policy` (we never touch camera/location/microphone) round out the set.
     * Host-header allowlist (DNS-rebind defense): a request whose `Host` is neither loopback, the
       bound host, nor an IP literal (when bound to a wildcard) is rejected with 400 before it
       reaches any route, so a `evil.com` rebinding `Host` cannot drive the loopback origin.
     * Network-mode token gate: when an access token is configured, a non-loopback client hitting a
-      query route (`/search`, `/api/search`, `/suggest`) without the correct `?token=` is rejected
-      with 403. Loopback clients and the open routes (`/`, `/opensearch.xml`, `/healthz`) bypass.
+      query route (`/search`, `/api/search`, `/suggest`) without the correct token is rejected
+      with 403. The token may arrive as `?token=` (kept because an OpenSearch URL template can
+      only carry query parameters), an `Authorization: Bearer` header, or an `X-SearchMob-Token`
+      header, and is compared in constant time (see `token_matches`). Loopback clients and the
+      open routes (`/`, `/opensearch.xml`, `/healthz`) bypass.
     """
 
     _GATED_PATHS = frozenset({"/search", "/api/search", "/suggest"})
@@ -198,20 +224,32 @@ class _SecurityHeadersMiddleware(BaseHTTPMiddleware):
             return PlainTextResponse("Bad Request: host not allowed", status_code=400)
 
         client_host = request.client.host if request.client is not None else ""
-        if (
-            request.url.path in self._GATED_PATHS
-            and requires_token(client_host, self._access_token)
-            and request.query_params.get("token") != self._access_token
+        if request.url.path in self._GATED_PATHS and requires_token(
+            client_host, self._access_token
         ):
-            return PlainTextResponse("Forbidden", status_code=403)
+            presented = presented_token(
+                request.query_params.get("token"),
+                request.headers.get("authorization"),
+                request.headers.get("x-searchmob-token"),
+            )
+            if not token_matches(presented, self._access_token):
+                return PlainTextResponse("Forbidden", status_code=403)
 
         if request.method == "POST" and request.url.path in self._MUTATION_PATHS:
             # Owner-only: only a loopback client may change personalization rules.
             if not is_loopback_host(client_host):
                 return PlainTextResponse("Forbidden", status_code=403)
             # CSRF: a browser sends Origin on POST; reject if it is present and not our own origin.
+            # A literal `Origin: null` is NOT trusted: an attacker page can produce that exact
+            # opaque value on a genuinely cross-site POST (a page served with `Referrer-Policy:
+            # no-referrer`, or a `<iframe sandbox="allow-forms">`). Our own forms carry a real
+            # origin because we serve `Referrer-Policy: same-origin`, so only an attacker still
+            # manufactures the opaque value. (It used to slip through: urlsplit("null") has an
+            # empty netloc, and an empty host is allowed for HTTP/1.0 clients.)
             origin = request.headers.get("origin")
             if origin:
+                if origin.strip().lower() == "null":
+                    return PlainTextResponse("Forbidden", status_code=403)
                 origin_host = _hostname_only(urlsplit(origin).netloc)
                 if not host_header_allowed(
                     origin_host, self._bound_host_getter(), self._allowed_hosts
@@ -219,9 +257,14 @@ class _SecurityHeadersMiddleware(BaseHTTPMiddleware):
                     return PlainTextResponse("Forbidden", status_code=403)
 
         response = await call_next(request)
-        response.headers.setdefault("Referrer-Policy", "no-referrer")
+        response.headers.setdefault("Referrer-Policy", "same-origin")
+        response.headers.setdefault("Content-Security-Policy", _CSP)
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
         response.headers.setdefault("X-Frame-Options", "DENY")
+        response.headers.setdefault("Cache-Control", "no-store")
+        response.headers.setdefault(
+            "Permissions-Policy", "camera=(), geolocation=(), microphone=()"
+        )
         return response
 
 
@@ -328,6 +371,43 @@ def requires_token(client_host: str, access_token: str | None) -> bool:
     if not access_token:
         return False
     return not is_loopback_host(client_host)
+
+
+def presented_token(
+    query_param: str | None, authorization_header: str | None, token_header: str | None
+) -> str | None:
+    """The access token a caller presented for the network-mode gate, in priority order.
+
+    The `?token=` query parameter wins (kept because an OpenSearch URL template can only carry
+    query parameters, so a browser search-engine integration has no other way to send it), then an
+    `Authorization: Bearer <token>` header (case-insensitive scheme, tolerant of surrounding
+    whitespace), then a bare `X-SearchMob-Token` header. A header-carried token is preferable when
+    the caller can manage one: unlike a query parameter it never lands in browser history, a
+    bookmarked URL, or a `Referer` sent to some other site. Pure so the precedence is
+    unit-testable without a running server. Mirrors `presentedToken` in the Android server.
+    """
+    if query_param is not None:
+        return query_param
+    header = authorization_header.strip() if authorization_header is not None else ""
+    if len(header) >= 6 and header[:6].lower() == "bearer":
+        bearer_token = header[6:].strip()
+        if bearer_token:
+            return bearer_token
+    return token_header
+
+
+def token_matches(presented: str | None, expected: str | None) -> bool:
+    """Constant-time comparison of the `presented` token against the configured `expected` one.
+
+    `secrets.compare_digest` so a network-mode attacker probing the token cannot use
+    response-timing differences to recover it byte-by-byte the way a naive `!=` (which returns as
+    soon as it finds a differing byte) would leak. False whenever `expected` is None/empty (no
+    token configured; the gate never opens on a fluke empty-string match) or `presented` is None
+    (nothing was offered).
+    """
+    if not expected or presented is None:
+        return False
+    return secrets.compare_digest(presented.encode("utf-8"), expected.encode("utf-8"))
 
 
 def is_safe_http_url(url: str) -> bool:
@@ -491,7 +571,7 @@ def build_app(
         return locale
 
     async def _run_metasearch(
-        query: str,
+        parsed: ParsedQuery,
         sort_mode: SortMode = SortMode.FRESH_RELEVANT,
         vertical: Vertical = Vertical.WEB,
         *,
@@ -503,11 +583,13 @@ def build_app(
         # (pin/raise/block still win). None disables promotion (e.g. the JSON endpoint).
         summary_task: Awaitable[SummaryBox | None] | None = None,
     ) -> tuple[list[SearchResult], tuple[EngineOutcome, ...]]:
-        if not query.strip() or not engines:
+        if not parsed.raw.strip() or not engines:
             return [], ()
-        # Scope the query for the chosen vertical (a `site:` OR group the engines understand); the
-        # original query still drives sort/summary/correction so freshness keywords are detected.
-        scoped = transform_query(query, vertical)
+        # Scope the engine query for the chosen vertical (a `site:` OR group the engines
+        # understand), on top of the already-parsed operators (forwarded as-is; intitle:/inurl:
+        # turned into a bare recall hint). The operator-free text still drives scoring, sort,
+        # summary, and correction so a scoping clause never throws those off.
+        scoped = transform_query(parsed.engine_query, vertical)
         # Tailor results to the UI language: a non-English locale carries per-engine region/language
         # params (DuckDuckGo `kl`, Brave country/search_lang/ui_lang); None leaves results neutral.
         ctx = EngineContext(
@@ -515,6 +597,7 @@ def build_app(
             max_results=max_results,
             timeout_seconds=timeout_seconds,
             language_region=language_region_for(locale),
+            ranking_terms=parsed.clean_text,
         )
         # The runner returns either a bare result list (a test fake) or an `AggregateOutcome` with
         # the per-engine status (the real `aggregate_with_status`); accept both.
@@ -523,6 +606,11 @@ def build_app(
             results, engine_outcomes = raw.results, raw.engines
         else:
             results, engine_outcomes = raw, ()
+        # Operators the engines cannot be trusted to honor (intitle:/inurl:/filetype:/before:/
+        # after:/-exclusions/site: scoping) are enforced locally here, before sort/personalization/
+        # rules see the list. Like `apply_ranking`, this only drops rows; scores are untouched.
+        if parsed.has_filters:
+            results = [r for r in results if parsed.matches(r.title, r.url, r.snippet, r.published)]
         # The AI-slop filter mode is taken live from prefs when wired, so the Settings toggle takes
         # effect on the next search; otherwise the static build-time value is used.
         prefs = _load_prefs()
@@ -531,10 +619,10 @@ def build_app(
         # when a model is passed, which the caller does for the loopback owner), then apply the
         # user's rules so the served results match the in-app results and PIN/RAISE preserve order.
         now_ms = int(time.time() * 1000)
-        ordered = sort_results(results, sort_mode, query, now_ms)
+        ordered = sort_results(results, sort_mode, parsed.clean_text, now_ms)
         if model is not None:
             ordered = personalize_reorder(
-                ordered, lambda r: host_of_url(r.url), query, model, now_ms
+                ordered, lambda r: host_of_url(r.url), parsed.clean_text, model, now_ms
             )
         # Media promotion: for a resolved media entity, nudge its canonical platforms up (bounded),
         # after relevance/personalization and before the user's rules, so pin/raise/block still win.
@@ -583,13 +671,15 @@ def build_app(
             _render_cache.popitem(last=False)  # evict the oldest render
         return rid
 
-    def _correction(query: str) -> str | None:
+    def _correction(parsed: ParsedQuery) -> str | None:
         # On-device "did you mean". `suggest` is fail-soft and already returns None when the
-        # corrected query equals the input, so any non-None result is a genuine suggestion.
-        if corrector is None or not query.strip():
+        # corrected query equals the input, so any non-None result is a genuine suggestion. The
+        # corrector reasons about word spelling, not query syntax: an operator-laden query would
+        # just get its operators mangled, so it is skipped entirely (Android does the same).
+        if corrector is None or not parsed.raw.strip() or parsed.has_operators:
             return None
         try:
-            suggestion = corrector.suggest(query)
+            suggestion = corrector.suggest(parsed.raw)
         except Exception:
             return None
         return suggestion.corrected if suggestion is not None else None
@@ -663,6 +753,10 @@ def build_app(
         # persisting it. The engines, summary, and correction run on the cleaned query; the original
         # text is echoed in the box so the token round-trips and re-running re-applies the scope.
         query, scope = parse_scope_token(raw_query, rules_provider())
+        # Google-style operators (site:/intitle:/before:/etc., see query_operators) are parsed once
+        # here so the operator-free text can drive anything that reasons about "what is the user
+        # asking about" rather than "how do I fetch it" (summary, correction, relevance, sort).
+        parsed = parse_query_operators(query)
         vertical = Vertical.from_value(request.query_params.get("vertical"))
         # An explicit `?sort=` wins. Absent it, a non-default vertical keeps its sensible default
         # (e.g. News favors Date); the plain Web view honors the user's configured default sort from
@@ -676,11 +770,12 @@ def build_app(
         else:
             sort_mode = default_sort(vertical)
         # Fetch the contextual summary concurrently with the metasearch so the box never adds
-        # latency to the results path.
-        summary_task = asyncio.ensure_future(_maybe_summary(query))
+        # latency to the results path. Uses the operator-free text: an operator-laden query would
+        # never resolve a Wikipedia entity.
+        summary_task = asyncio.ensure_future(_maybe_summary(parsed.clean_text))
         model = _owner_model(request)
         results, engine_outcomes = await _run_metasearch(
-            query,
+            parsed,
             sort_mode,
             vertical,
             model=model,
@@ -700,13 +795,15 @@ def build_app(
         # can train the model; everyone else (and a disabled owner) gets the plain destination link.
         link_builder: Callable[[int, str], str] | None = None
         if model is not None and results:
-            rid = _register_render(query, results)
+            # Click training reasons about subject terms, so the render remembers the
+            # operator-free text (a site: clause is not something the model should learn).
+            rid = _register_render(parsed.clean_text, results)
             link_builder = lambda pos, _url, _rid=rid: f"/click?rid={_rid}&pos={pos}"  # noqa: E731
         body = render_results_page(
             raw_query,
             results,
             is_safe_http_url,
-            correction=_correction(query),
+            correction=_correction(parsed),
             rules=rules_provider(),
             editable=_is_owner(request),
             summary=summary,
@@ -773,8 +870,9 @@ def build_app(
     def _redirect_to_results(form: dict[str, str]) -> Response:
         # Return to the results page a scope/rule POST came from, rebuilt from the hidden q/sort/
         # vertical fields the served forms carry, so the new ranking is applied to the same search
-        # instead of dumping the owner on the home page. (Our no-referrer policy strips the Referer,
-        # so the Referer-based _redirect_back always fell through to "/".) No query - the home-page
+        # instead of dumping the owner on the home page. (Under the old no-referrer policy the
+        # Referer-based _redirect_back always fell through to "/"; the hidden fields stay the
+        # mechanism because they work regardless of the referrer policy.) No query - the home-page
         # or settings scope selector - falls back to home. 303 -> re-fetch with GET.
         query = form.get("q", "").strip()
         if not query:
@@ -934,11 +1032,13 @@ def build_app(
         # Same inline `+name` scope token as the HTML route: applied to this request only, with the
         # engines/correction run on the cleaned query and the original echoed back as `query`.
         query, scope = parse_scope_token(raw_query, rules_provider())
+        # Same one-shot operator parse as the HTML route (see `search_html`).
+        parsed = parse_query_operators(query)
         vertical = Vertical.from_value(request.query_params.get("vertical"))
         sort_param = request.query_params.get("sort")
         sort_mode = SortMode.from_value(sort_param) if sort_param else default_sort(vertical)
         results, _ = await _run_metasearch(
-            query,
+            parsed,
             sort_mode,
             vertical,
             model=_owner_model(request),
@@ -952,7 +1052,7 @@ def build_app(
             "results": [
                 {k: v for k, v in asdict(result).items() if k != "relevance"} for result in results
             ],
-            "correction": _correction(query),
+            "correction": _correction(parsed),
         }
         return JSONResponse(payload)
 
