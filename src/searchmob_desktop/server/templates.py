@@ -623,8 +623,9 @@ def _home_scope(rules: RankingRules) -> tuple[str, str]:
 def _search_context_fields(query: str, sort_mode: str, vertical: str) -> str:
     """Hidden q/sort/vertical fields so a mutation POST can return to the same results page.
 
-    The served forms carry the current search this way because our ``Referrer-Policy: no-referrer``
-    strips the Referer, so the handler cannot recover the originating page from it.
+    The served forms carry the current search this way rather than relying on the Referer: the
+    hidden fields work regardless of the referrer policy (and did so under the old ``no-referrer``
+    one), so the handler never has to reconstruct the originating page from a header.
     """
     return (
         f'<input type="hidden" name="q" value="{escape(query, quote=True)}">'

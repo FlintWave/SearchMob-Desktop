@@ -9,7 +9,13 @@ from __future__ import annotations
 
 import xml.etree.ElementTree as ET
 
-from searchmob_desktop.server import host_header_allowed, local_hostnames, requires_token
+from searchmob_desktop.server import (
+    host_header_allowed,
+    local_hostnames,
+    presented_token,
+    requires_token,
+    token_matches,
+)
 from searchmob_desktop.server.opensearch import build_descriptor
 
 _OPENSEARCH_NS = "http://a9.com/-/spec/opensearch/1.1/"
@@ -74,6 +80,31 @@ def test_requires_token_only_for_nonloopback_with_token() -> None:
     assert not requires_token("::1", "tok")
     assert requires_token("192.168.1.10", "tok")
     assert requires_token("203.0.113.5", "tok")
+
+
+def test_presented_token_prefers_query_param_then_bearer_then_custom_header() -> None:
+    # The `?token=` query parameter always wins when present, even alongside other sources.
+    assert presented_token("q-token", "Bearer h-token", "x-token") == "q-token"
+    # Falls back to a Bearer-scheme Authorization header, case-insensitive and trimmed.
+    assert presented_token(None, "Bearer abc123", None) == "abc123"
+    assert presented_token(None, "bearer   abc123", None) == "abc123"
+    assert presented_token(None, "BEARER abc123", None) == "abc123"
+    assert presented_token(None, "  Bearer abc123  ", None) == "abc123"
+    # A non-Bearer Authorization header is ignored in favor of the custom header.
+    assert presented_token(None, "Basic dXNlcjpwYXNz", "x-token") == "x-token"
+    # Falls back to the bare custom header when nothing else is present.
+    assert presented_token(None, None, "x-token") == "x-token"
+    # Nothing presented at all.
+    assert presented_token(None, None, None) is None
+
+
+def test_token_matches_requires_a_nonempty_expected_token_and_an_equal_presented_one() -> None:
+    assert not token_matches("secret", None)  # no token configured
+    assert not token_matches("secret", "")  # no token configured
+    assert not token_matches(None, "secret")  # nothing presented
+    assert token_matches("secret", "secret")
+    assert not token_matches("secret", "different")
+    assert not token_matches("secre", "secret")  # differing length
 
 
 def _templates(body: bytes) -> dict[str, str]:

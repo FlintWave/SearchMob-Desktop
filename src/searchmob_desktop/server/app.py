@@ -143,20 +143,45 @@ def _no_suggestions(_query: str, _limit: int) -> list[str]:
     return []
 
 
+# Content-Security-Policy sent on every response, mirroring the Android server's. Every piece of
+# dynamic content the templates render (query text, titles, snippets, settings values, ...) is
+# HTML-escaped, so the inline theme/reveal `<script>` and `<style>` blocks the pages emit are
+# always our own source constants, never attacker- or user-controlled text; that is what makes
+# `'unsafe-inline'` (required because those blocks and a few inline `onclick`/`onchange` handlers
+# have no external file to point a nonce/hash-based policy at) safe to allow here. The policy's
+# real job is defense-in-depth against everything else: `default-src 'none'` plus the narrow
+# allowances block any EXTERNAL script, style, object, or frame a future bug might try to load
+# (`img-src https:` keeps the Wikipedia summary thumbnail working), `form-action 'self'` stops a
+# form from ever submitting to a foreign origin, and `frame-ancestors 'none'` blocks a foreign
+# page from framing us (belt-and-suspenders with `X-Frame-Options: DENY` for older browsers).
+_CSP = (
+    "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src https:; "
+    "form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
+)
+
+
 class _SecurityHeadersMiddleware(BaseHTTPMiddleware):
     """Add conservative security headers, enforce the Host allowlist, and gate the query routes.
 
     Three concerns, kept in one middleware so they run on every request in a single pass:
 
-    * `Referrer-Policy: no-referrer` is the important header: without it, clicking a result would
-      send the loopback URL (which contains the query) as the Referer to the destination site,
-      leaking the query. The other headers are defense-in-depth, especially in network mode.
+    * Response headers. `Referrer-Policy: same-origin`, not `no-referrer`: a same-origin request
+      (including our OWN served forms) still carries its Referer/Origin to us, which the CSRF
+      check below needs to tell a genuine same-origin POST apart from a cross-site one that
+      forces an opaque `Origin: null`. A cross-origin navigation away from us still sends nothing,
+      and every result link additionally carries `rel="noreferrer"` as a second, redundant layer.
+      `Content-Security-Policy` (see `_CSP`), `Cache-Control: no-store` (queries, titles, and
+      Settings values must never persist in a browser or intermediary cache), and
+      `Permissions-Policy` (we never touch camera/location/microphone) round out the set.
     * Host-header allowlist (DNS-rebind defense): a request whose `Host` is neither loopback, the
       bound host, nor an IP literal (when bound to a wildcard) is rejected with 400 before it
       reaches any route, so a `evil.com` rebinding `Host` cannot drive the loopback origin.
     * Network-mode token gate: when an access token is configured, a non-loopback client hitting a
-      query route (`/search`, `/api/search`, `/suggest`) without the correct `?token=` is rejected
-      with 403. Loopback clients and the open routes (`/`, `/opensearch.xml`, `/healthz`) bypass.
+      query route (`/search`, `/api/search`, `/suggest`) without the correct token is rejected
+      with 403. The token may arrive as `?token=` (kept because an OpenSearch URL template can
+      only carry query parameters), an `Authorization: Bearer` header, or an `X-SearchMob-Token`
+      header, and is compared in constant time (see `token_matches`). Loopback clients and the
+      open routes (`/`, `/opensearch.xml`, `/healthz`) bypass.
     """
 
     _GATED_PATHS = frozenset({"/search", "/api/search", "/suggest"})
@@ -199,20 +224,32 @@ class _SecurityHeadersMiddleware(BaseHTTPMiddleware):
             return PlainTextResponse("Bad Request: host not allowed", status_code=400)
 
         client_host = request.client.host if request.client is not None else ""
-        if (
-            request.url.path in self._GATED_PATHS
-            and requires_token(client_host, self._access_token)
-            and request.query_params.get("token") != self._access_token
+        if request.url.path in self._GATED_PATHS and requires_token(
+            client_host, self._access_token
         ):
-            return PlainTextResponse("Forbidden", status_code=403)
+            presented = presented_token(
+                request.query_params.get("token"),
+                request.headers.get("authorization"),
+                request.headers.get("x-searchmob-token"),
+            )
+            if not token_matches(presented, self._access_token):
+                return PlainTextResponse("Forbidden", status_code=403)
 
         if request.method == "POST" and request.url.path in self._MUTATION_PATHS:
             # Owner-only: only a loopback client may change personalization rules.
             if not is_loopback_host(client_host):
                 return PlainTextResponse("Forbidden", status_code=403)
             # CSRF: a browser sends Origin on POST; reject if it is present and not our own origin.
+            # A literal `Origin: null` is NOT trusted: an attacker page can produce that exact
+            # opaque value on a genuinely cross-site POST (a page served with `Referrer-Policy:
+            # no-referrer`, or a `<iframe sandbox="allow-forms">`). Our own forms carry a real
+            # origin because we serve `Referrer-Policy: same-origin`, so only an attacker still
+            # manufactures the opaque value. (It used to slip through: urlsplit("null") has an
+            # empty netloc, and an empty host is allowed for HTTP/1.0 clients.)
             origin = request.headers.get("origin")
             if origin:
+                if origin.strip().lower() == "null":
+                    return PlainTextResponse("Forbidden", status_code=403)
                 origin_host = _hostname_only(urlsplit(origin).netloc)
                 if not host_header_allowed(
                     origin_host, self._bound_host_getter(), self._allowed_hosts
@@ -220,9 +257,14 @@ class _SecurityHeadersMiddleware(BaseHTTPMiddleware):
                     return PlainTextResponse("Forbidden", status_code=403)
 
         response = await call_next(request)
-        response.headers.setdefault("Referrer-Policy", "no-referrer")
+        response.headers.setdefault("Referrer-Policy", "same-origin")
+        response.headers.setdefault("Content-Security-Policy", _CSP)
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
         response.headers.setdefault("X-Frame-Options", "DENY")
+        response.headers.setdefault("Cache-Control", "no-store")
+        response.headers.setdefault(
+            "Permissions-Policy", "camera=(), geolocation=(), microphone=()"
+        )
         return response
 
 
@@ -329,6 +371,43 @@ def requires_token(client_host: str, access_token: str | None) -> bool:
     if not access_token:
         return False
     return not is_loopback_host(client_host)
+
+
+def presented_token(
+    query_param: str | None, authorization_header: str | None, token_header: str | None
+) -> str | None:
+    """The access token a caller presented for the network-mode gate, in priority order.
+
+    The `?token=` query parameter wins (kept because an OpenSearch URL template can only carry
+    query parameters, so a browser search-engine integration has no other way to send it), then an
+    `Authorization: Bearer <token>` header (case-insensitive scheme, tolerant of surrounding
+    whitespace), then a bare `X-SearchMob-Token` header. A header-carried token is preferable when
+    the caller can manage one: unlike a query parameter it never lands in browser history, a
+    bookmarked URL, or a `Referer` sent to some other site. Pure so the precedence is
+    unit-testable without a running server. Mirrors `presentedToken` in the Android server.
+    """
+    if query_param is not None:
+        return query_param
+    header = authorization_header.strip() if authorization_header is not None else ""
+    if len(header) >= 6 and header[:6].lower() == "bearer":
+        bearer_token = header[6:].strip()
+        if bearer_token:
+            return bearer_token
+    return token_header
+
+
+def token_matches(presented: str | None, expected: str | None) -> bool:
+    """Constant-time comparison of the `presented` token against the configured `expected` one.
+
+    `secrets.compare_digest` so a network-mode attacker probing the token cannot use
+    response-timing differences to recover it byte-by-byte the way a naive `!=` (which returns as
+    soon as it finds a differing byte) would leak. False whenever `expected` is None/empty (no
+    token configured; the gate never opens on a fluke empty-string match) or `presented` is None
+    (nothing was offered).
+    """
+    if not expected or presented is None:
+        return False
+    return secrets.compare_digest(presented.encode("utf-8"), expected.encode("utf-8"))
 
 
 def is_safe_http_url(url: str) -> bool:
@@ -791,8 +870,9 @@ def build_app(
     def _redirect_to_results(form: dict[str, str]) -> Response:
         # Return to the results page a scope/rule POST came from, rebuilt from the hidden q/sort/
         # vertical fields the served forms carry, so the new ranking is applied to the same search
-        # instead of dumping the owner on the home page. (Our no-referrer policy strips the Referer,
-        # so the Referer-based _redirect_back always fell through to "/".) No query - the home-page
+        # instead of dumping the owner on the home page. (Under the old no-referrer policy the
+        # Referer-based _redirect_back always fell through to "/"; the hidden fields stay the
+        # mechanism because they work regardless of the referrer policy.) No query - the home-page
         # or settings scope selector - falls back to home. 303 -> re-fetch with GET.
         query = form.get("q", "").strip()
         if not query:
