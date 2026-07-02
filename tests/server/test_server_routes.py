@@ -88,6 +88,19 @@ def test_home_advertises_opensearch_descriptor_link() -> None:
     assert 'title="SearchMob"' in body
 
 
+def test_home_page_advertises_the_search_operators_help() -> None:
+    with _build_client() as client:
+        body = client.get("/").text
+    # The collapsible cheat sheet: a native <details> card listing the supported operators.
+    assert '<details class="ophelp">' in body
+    assert "Search operators" in body
+    assert "filetype:pdf" in body
+    assert "site:example.com" in body
+    assert "after:2022" in body
+    # Operator examples are escaped like everything else; the quoted-phrase row survives escaping.
+    assert "&quot;exact phrase&quot;" in body
+
+
 def test_opensearch_descriptor_advertises_both_search_and_suggestions() -> None:
     with _build_client(port=9999, host="127.0.0.1") as client:
         response = client.get("/opensearch.xml")
