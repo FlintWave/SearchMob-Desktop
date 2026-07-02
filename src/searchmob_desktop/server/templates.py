@@ -84,11 +84,17 @@ def _theme_css() -> str:
 # blocks (`:root`, the `prefers-color-scheme: dark` media query, and a `[data-theme]` override per
 # theme so the JS picker is authoritative) are prepended at render time from `_theme_css`. This is
 # the static remainder; kept tight on whitespace to keep the served bytes small.
+#
+# The look is Material 3, mirroring the Android served pages: an elevated search bar with hover and
+# focus-within states, rounded 16px cards, pill buttons, and chip state layers. State layers are a
+# `color-mix` of the theme accent over transparent, emitted after a plain rgba fallback for older
+# browsers, so every one of the theme palettes keeps driving the colors. Interactive surfaces get
+# short transitions; the reduced-motion media query flattens them all.
 _PAGE_CSS = (
     "*{box-sizing:border-box}"
     "html,body{margin:0;padding:0}"
     "html{font-size:12pt}"
-    "body{background:var(--bg);color:var(--fg);line-height:1.5;font-size:1rem;"
+    "body{background:var(--bg);color:var(--fg);line-height:1.55;font-size:1rem;"
     'font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;}'
     "a{color:var(--link);text-decoration:none}"
     "a:hover{text-decoration:underline}"
@@ -99,10 +105,13 @@ _PAGE_CSS = (
     "white-space:nowrap}"
     ".theme-toggle{margin-inline-start:auto;background:transparent;border:1px solid var(--border);"
     "color:var(--fg);border-radius:20px;padding:6px 14px;cursor:pointer;font-size:13px;"
-    "white-space:nowrap}"
-    ".theme-toggle:hover{border-color:var(--accent);color:var(--accent)}"
+    "white-space:nowrap;transition:background-color 150ms,border-color 150ms,color 150ms}"
+    ".theme-toggle:hover{border-color:var(--accent);color:var(--accent);"
+    "background-color:rgba(127,127,127,.08)}"
+    ".theme-toggle:hover{background-color:color-mix(in srgb,var(--accent) 8%,transparent)}"
     ".settings-link{margin-inline-start:auto;border:1px solid var(--border);color:var(--fg);"
-    "border-radius:20px;padding:6px 14px;font-size:13px;text-decoration:none;white-space:nowrap}"
+    "border-radius:20px;padding:6px 14px;font-size:13px;text-decoration:none;white-space:nowrap;"
+    "transition:border-color 150ms,color 150ms}"
     ".settings-link:hover{border-color:var(--accent);color:var(--accent)}"
     ".settings-link+.theme-toggle{margin-inline-start:0}"
     ".topbar .spacer{margin-inline-start:auto}"
@@ -121,32 +130,41 @@ _PAGE_CSS = (
     "color:#fff;font-size:13px}"
     ".updatebar .msg{font-weight:600}"
     ".updatebar .btn{margin-inline-start:auto;background:#fff;color:var(--accent);"
-    "border-radius:16px;"
-    "padding:5px 14px;font-weight:700;text-decoration:none;white-space:nowrap}"
-    ".updatebar .btn:hover{text-decoration:none;opacity:.92}"
+    "border-radius:20px;padding:6px 16px;font-weight:700;text-decoration:none;white-space:nowrap;"
+    "transition:box-shadow 150ms,filter 150ms}"
+    ".updatebar .btn:hover{text-decoration:none;filter:brightness(.96);"
+    "box-shadow:0 1px 3px rgba(0,0,0,.25)}"
     ".settings{max-width:680px;margin:0 auto;padding:24px 18px 60px}"
     ".settings h1{font-size:1.5rem;margin:8px 0 18px}"
-    ".settings .saved{color:#fff;background:var(--accent);display:inline-block;border-radius:6px;"
-    "padding:4px 12px;font-size:13px;margin:0 0 16px}"
-    ".settings .card{background:var(--card);border:1px solid var(--border);border-radius:12px;"
-    "padding:16px 18px;margin:0 0 16px}"
+    ".settings .saved{color:#fff;background:var(--accent);display:inline-block;border-radius:8px;"
+    "padding:5px 14px;font-size:13px;margin:0 0 16px}"
+    ".settings .card{background:var(--card);border:1px solid var(--border);border-radius:16px;"
+    "padding:18px 20px;margin:0 0 16px;box-shadow:var(--shadow)}"
     ".settings .card h2{font-size:.9375rem;margin:0 0 14px;color:var(--accent)}"
     ".settings .field{margin:0 0 14px}"
     ".settings .field>label{display:block;font-size:.8125rem;margin:0 0 6px;font-weight:600}"
-    ".settings select{width:100%;padding:9px 12px;border:1px solid var(--border);border-radius:8px;"
-    "background:var(--bg);color:var(--fg);font-size:.875rem}"
+    ".settings select{width:100%;padding:10px 12px;border:1px solid var(--border);"
+    "border-radius:12px;background:var(--bg);color:var(--fg);font-size:.875rem;"
+    "transition:border-color 150ms}"
+    ".settings select:hover{border-color:var(--accent)}"
     ".settings .checkrow{display:flex;align-items:center;gap:9px;font-size:.875rem;margin:0 0 10px;"
     "cursor:pointer}"
     ".settings .hint{font-size:.75rem;color:var(--muted);margin:6px 0 0}"
     ".settings .actions{margin-top:6px}"
-    ".settings .actions button{background:var(--accent);color:#fff;border:0;border-radius:22px;"
-    "padding:10px 26px;font-size:.9375rem;font-weight:600;cursor:pointer}"
+    ".settings .actions button{background:var(--accent);color:#fff;border:0;border-radius:24px;"
+    "padding:11px 28px;font-size:.9375rem;font-weight:600;cursor:pointer;"
+    "transition:box-shadow 150ms,filter 150ms}"
+    ".settings .actions button:hover{"
+    "box-shadow:0 1px 3px rgba(0,0,0,.2),0 4px 10px rgba(0,0,0,.12)}"
     ".settings .card h3.sub{font-size:13px;margin:16px 0 8px;color:var(--muted)}"
     # Appearance: the text-size A-/A+ stepper. Square buttons flanking the current point size.
     ".settings .sizerow{display:flex;align-items:center;gap:10px}"
     ".settings .sizerow button{width:40px;height:40px;border:1px solid var(--border);"
-    "border-radius:8px;background:var(--bg);color:var(--fg);font-size:1rem;cursor:pointer}"
+    "border-radius:12px;background:var(--bg);color:var(--fg);font-size:1rem;cursor:pointer;"
+    "transition:border-color 150ms,color 150ms,box-shadow 150ms}"
     ".settings .sizerow button:hover{border-color:var(--accent);color:var(--accent)}"
+    ".settings .sizerow button:hover{"
+    "box-shadow:0 0 0 4px color-mix(in srgb,var(--accent) 10%,transparent)}"
     ".settings .sizerow .sizeval{font-size:.875rem;color:var(--muted);min-width:54px}"
     ".settings .rulelist{list-style:none;margin:0 0 14px;padding:0}"
     ".settings .rulelist li{display:flex;align-items:center;gap:8px;flex-wrap:wrap;"
@@ -154,28 +172,30 @@ _PAGE_CSS = (
     ".settings .rulelist .dom{font-weight:600;font-size:13px;word-break:break-all}"
     ".settings .rulelist .rank{margin-inline-start:auto}"
     ".settings .addrule{display:flex;gap:8px;flex-wrap:wrap;align-items:center}"
-    ".settings .addrule input[type=text]{flex:1;min-width:140px;padding:8px 11px;"
-    "border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--fg);"
-    "font-size:14px}"
+    ".settings .addrule input[type=text]{flex:1;min-width:140px;padding:9px 12px;"
+    "border:1px solid var(--border);border-radius:12px;background:var(--bg);color:var(--fg);"
+    "font-size:14px;transition:border-color 150ms}"
+    ".settings .addrule input[type=text]:hover{border-color:var(--accent)}"
     ".settings .addrule select{width:auto;min-width:110px}"
     ".settings .addrule button,.settings .lensform button,.settings .lensdel button{"
-    "background:var(--accent);color:#fff;border:0;border-radius:18px;padding:8px 18px;"
-    "font-size:13px;font-weight:600;cursor:pointer}"
+    "background:var(--accent);color:#fff;border:0;border-radius:20px;padding:9px 20px;"
+    "font-size:13px;font-weight:600;cursor:pointer;transition:filter 150ms}"
+    ".settings .addrule button:hover,.settings .lensform button:hover{filter:brightness(1.06)}"
     ".settings .lensitem{display:flex;gap:10px;align-items:flex-start;padding:10px 0;"
     "border-bottom:1px solid var(--border)}"
     ".settings .lensform{flex:1;display:flex;flex-direction:column;gap:8px}"
     ".settings .lensform .lname{font-weight:600}"
-    ".settings .lensform input[type=text]{width:100%;padding:8px 11px;"
+    ".settings .lensform input[type=text]{width:100%;padding:9px 12px;"
     "border:1px solid var(--border);"
-    "border-radius:8px;background:var(--bg);color:var(--fg);font-size:14px}"
+    "border-radius:12px;background:var(--bg);color:var(--fg);font-size:14px}"
     ".settings .lensform .lf{display:flex;flex-direction:column;gap:3px;font-size:12px;"
     "color:var(--muted)}"
     ".settings .lensform button{align-self:flex-start}"
     ".settings .lensdel button{background:transparent;color:var(--muted);"
     "border:1px solid var(--border)}"
     ".settings .lensdel button:hover{border-color:#d33;color:#d33}"
-    ".settings .hint code{background:var(--chip-bg);color:var(--chip-fg);padding:1px 5px;"
-    "border-radius:5px;font-size:12px}"
+    ".settings .hint code{background:var(--chip-bg);color:var(--chip-fg);padding:2px 6px;"
+    "border-radius:6px;font-size:12px}"
     ".settings .gogglelist,.settings .histlist{list-style:none;margin:0 0 12px;padding:0;"
     "font-size:13px}"
     ".settings .gogglelist li{display:flex;gap:8px;align-items:center;padding:5px 0;"
@@ -186,30 +206,40 @@ _PAGE_CSS = (
     "word-break:break-word}"
     ".settings .goggleimport{display:flex;flex-direction:column;gap:8px}"
     ".settings textarea{width:100%;padding:9px 11px;border:1px solid var(--border);"
-    "border-radius:8px;"
+    "border-radius:12px;"
     "background:var(--bg);color:var(--fg);font-size:13px;font-family:ui-monospace,monospace;"
     "resize:vertical}"
     ".settings .goggleimport .grow{display:flex;gap:10px;align-items:center;flex-wrap:wrap}"
     ".settings .goggleimport button,.settings .goggleclear button,.settings .histclear button{"
-    "background:var(--accent);color:#fff;border:0;border-radius:18px;padding:8px 18px;"
+    "background:var(--accent);color:#fff;border:0;border-radius:20px;padding:9px 20px;"
     "font-size:13px;"
-    "font-weight:600;cursor:pointer}"
+    "font-weight:600;cursor:pointer;transition:filter 150ms}"
+    ".settings .goggleimport button:hover{filter:brightness(1.06)}"
     ".settings .goggleclear button,.settings .histclear button{background:transparent;"
     "color:var(--muted);border:1px solid var(--border)}"
     ".settings .goggleclear button:hover,.settings .histclear button:hover{"
     "border-color:#d33;color:#d33}"
     ".settings .goggleclear,.settings .histclear{margin:0 0 8px}"
+    # Elevated M3 search bar: resting shadow from the theme, a raised shadow on hover, and an
+    # accent border with deeper elevation while the query field holds focus.
     ".searchbox{display:flex;align-items:stretch;background:var(--card);"
-    "border:1px solid var(--border);border-radius:26px;box-shadow:var(--shadow);overflow:hidden}"
+    "border:1px solid var(--border);border-radius:28px;box-shadow:var(--shadow);overflow:hidden;"
+    "transition:box-shadow 150ms,border-color 150ms}"
+    ".searchbox:hover{box-shadow:0 1px 3px rgba(0,0,0,.15),0 4px 8px rgba(0,0,0,.1)}"
+    ".searchbox:focus-within{border-color:var(--accent);"
+    "box-shadow:0 2px 6px rgba(0,0,0,.18),0 6px 14px rgba(0,0,0,.12)}"
     ".searchbox input[type=text]{flex:1;min-width:0;border:0;outline:0;background:transparent;"
     "color:var(--fg);font-size:1rem;padding:13px 18px}"
     ".searchbox input[type=submit]{border:0;background:var(--accent);color:#fff;padding:0 22px;"
-    "cursor:pointer;font-size:.9375rem;font-weight:600}"
+    "cursor:pointer;font-size:.9375rem;font-weight:600;transition:filter 150ms}"
     ".searchbox input[type=submit]:hover{filter:brightness(1.07)}"
     # Scope (lens) selector nested inside the search box, just left of the Search button. A subtle
     # divider separates it from the query field; it belongs to a separate /scope form via `form=`.
     ".searchbox select{border:0;border-inline-start:1px solid var(--border);background:transparent;"
-    "color:var(--fg);font-size:.875rem;padding:0 12px;outline:0;max-width:190px;cursor:pointer}"
+    "color:var(--fg);font-size:.875rem;padding:0 12px;outline:0;max-width:190px;cursor:pointer;"
+    "transition:background-color 150ms}"
+    ".searchbox select:hover{background-color:rgba(127,127,127,.06)}"
+    ".searchbox select:hover{background-color:color-mix(in srgb,var(--fg) 6%,transparent)}"
     ".home{max-width:600px;margin:0 auto;padding:13vh 20px 0;text-align:center}"
     ".home .brand{font-size:3rem;font-weight:800;color:var(--accent);letter-spacing:-1.5px}"
     ".home .tagline{color:var(--muted);margin:8px 0 28px;font-size:.9375rem}"
@@ -217,6 +247,23 @@ _PAGE_CSS = (
     ".topbar .searchbox{flex:1;max-width:620px}"
     ".topbar .searchbox input[type=text]{padding:9px 16px}"
     ".topbar .searchbox input[type=submit]{padding:0 16px}"
+    # The collapsible "Search operators" cheat sheet under the home search box: a rounded card
+    # whose native <details> marker is replaced by a rotating chevron; each row pairs a monospace
+    # operator chip with its plain-words description.
+    ".ophelp{max-width:560px;margin:14px auto 0;text-align:start;border:1px solid var(--border);"
+    "border-radius:16px;background:var(--card);padding:0 16px}"
+    ".ophelp summary{cursor:pointer;padding:10px 0;font-size:.8125rem;font-weight:600;"
+    "color:var(--muted);list-style:none}"
+    ".ophelp summary::-webkit-details-marker{display:none}"
+    # U+25B8 BLACK RIGHT-POINTING SMALL TRIANGLE, then an escaped space (a literal space would
+    # just terminate the CSS hex escape). Written as CSS escapes so the source stays ASCII.
+    ".ophelp summary::before{content:'\\25b8\\20';display:inline-block;transition:transform 150ms}"
+    ".ophelp[open] summary::before{transform:rotate(90deg)}"
+    ".ophelp .oprow{display:flex;flex-wrap:wrap;align-items:baseline;gap:8px;padding:6px 0;"
+    "border-top:1px solid var(--border);font-size:.8125rem;color:var(--muted)}"
+    ".ophelp .oprow:first-of-type{border-top:0}"
+    ".ophelp .code{font-family:ui-monospace,monospace;background:var(--chip-bg);"
+    "color:var(--chip-fg);padding:2px 7px;border-radius:8px;font-size:.75rem;white-space:nowrap}"
     ".results{max-width:660px;margin:0 auto;padding:18px 20px 64px}"
     ".results .meta{color:var(--muted);font-size:.8125rem;margin:2px 0 20px}"
     ".engine-status{margin:-12px 0 16px}"
@@ -225,55 +272,76 @@ _PAGE_CSS = (
     ".engine-status .engine-failed{font-weight:600}"
     ".actions-row{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:0 0 18px}"
     ".actions-row .alabel{color:var(--muted);font-size:.8125rem;font-weight:600}"
-    ".actions-row a{font-size:.8125rem;padding:3px 10px;border:1px solid var(--border);"
-    "border-radius:999px;text-decoration:none;color:var(--link)}"
+    ".actions-row a{font-size:.8125rem;padding:5px 12px;border:1px solid var(--border);"
+    "border-radius:8px;text-decoration:none;color:var(--link);"
+    "transition:background-color 150ms,border-color 150ms}"
+    ".actions-row a:hover{text-decoration:none;border-color:var(--accent);"
+    "background-color:rgba(127,127,127,.06)}"
+    ".actions-row a:hover{background-color:color-mix(in srgb,var(--accent) 8%,transparent)}"
     ".didyoumean{font-size:.9375rem;margin:2px 0 18px}"
     ".didyoumean a{font-weight:600;font-style:italic}"
-    ".result{margin:0 0 26px}"
+    # Each result is a quiet rounded surface that tints with the accent state layer on hover; the
+    # negative inline margins keep the text column aligned with the page while the hover pad grows.
+    ".result{margin:0 -14px 4px;padding:12px 14px;border-radius:16px;"
+    "transition:background-color 150ms}"
+    ".result:hover{background-color:rgba(127,127,127,.05)}"
+    ".result:hover{background-color:color-mix(in srgb,var(--accent) 4%,transparent)}"
     # Infinite scroll hides results past the first reveal window; the reveal script unhides them in
     # batches as the sentinel scrolls into view. With JS off, the rule is harmless and all show.
     ".result.is-collapsed{display:none}"
     ".reveal-sentinel{height:1px}"
     ".result .url{color:var(--url);font-size:.8125rem;white-space:nowrap;overflow:hidden;"
     "text-overflow:ellipsis}"
-    ".result .title{display:block;font-size:1.25rem;line-height:1.3;margin:1px 0 3px}"
-    ".result .snippet{margin:2px 0 7px;color:var(--snippet);font-size:.875rem}"
+    ".result .title{display:block;font-size:1.25rem;line-height:1.35;margin:2px 0 4px;"
+    "font-weight:500}"
+    ".result .snippet{margin:2px 0 8px;color:var(--snippet);font-size:.875rem;line-height:1.5}"
     ".engines{display:flex;flex-wrap:wrap;gap:6px}"
-    ".chip{background:var(--chip-bg);color:var(--chip-fg);font-size:11px;padding:2px 9px;"
-    "border-radius:10px}"
+    ".chip{background:var(--chip-bg);color:var(--chip-fg);font-size:.6875rem;padding:3px 10px;"
+    "border-radius:8px;font-weight:500;letter-spacing:.01em}"
     ".empty{color:var(--muted);text-align:center;padding:48px 0}"
-    ".summary{display:flex;gap:14px;border:1px solid var(--border);border-radius:12px;"
-    "background:var(--card);padding:14px 16px;margin:0 0 22px;box-shadow:var(--shadow)}"
+    ".summary{display:flex;gap:14px;border:1px solid var(--border);border-radius:16px;"
+    "background:var(--card);padding:16px 18px;margin:0 0 22px;box-shadow:var(--shadow);"
+    "transition:box-shadow 150ms}"
+    ".summary:hover{box-shadow:0 2px 6px rgba(0,0,0,.14)}"
     ".summary .body{flex:1;min-width:0}"
-    ".summary .stitle{font-size:17px;font-weight:600;margin:0}"
+    ".summary .stitle{font-size:1.0625rem;font-weight:600;margin:0;line-height:1.35}"
     ".summary .stitle a{color:var(--fg)}"
-    ".summary .sdesc{color:var(--muted);font-size:12px;margin:1px 0 6px}"
-    ".summary .sextract{font-size:14px;margin:0 0 6px;line-height:1.45}"
-    ".summary .ssource{font-size:12px}"
-    ".summary img{width:84px;height:84px;object-fit:cover;border-radius:8px;flex:none}"
+    ".summary .sdesc{color:var(--muted);font-size:.75rem;margin:2px 0 6px}"
+    ".summary .sextract{font-size:.875rem;margin:0 0 6px;line-height:1.5}"
+    ".summary .ssource{font-size:.75rem}"
+    ".summary img{width:84px;height:84px;object-fit:cover;border-radius:12px;flex:none}"
     "@media (max-width:560px){.summary img{display:none}}"
     ".verticalbar{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 16px}"
-    ".verticalbar .chip{font-size:13px;padding:5px 14px;border:1px solid var(--border);"
-    "border-radius:16px;background:var(--card);color:var(--muted);text-decoration:none}"
-    # Active chip: a fixed dark-on-light-indigo pairing (>7:1 in both themes), since white-on-accent
-    # failed contrast in dark mode. aria-current also marks it, so the state is never color-only.
-    ".verticalbar .chip.active{background:#c7d0ff;border-color:#c7d0ff;color:#0a1a5c;"
-    "font-weight:600}"
+    ".verticalbar .chip{font-size:.8125rem;padding:6px 16px;border:1px solid var(--border);"
+    "border-radius:16px;background:var(--card);color:var(--fg);text-decoration:none;"
+    "transition:background-color 150ms,border-color 150ms}"
+    ".verticalbar .chip:hover{text-decoration:none;border-color:var(--accent)}"
+    ".verticalbar .chip:hover{background-color:color-mix(in srgb,var(--accent) 8%,transparent)}"
+    # Active chip: an accent-tinted state layer over the card keeps the theme's own foreground
+    # readable in every palette, light and dark. aria-current also marks it, never color alone.
+    ".verticalbar .chip.active{background:var(--chip-bg);color:var(--fg);"
+    "border-color:var(--accent);font-weight:600}"
+    ".verticalbar .chip.active{background:color-mix(in srgb,var(--accent) 22%,var(--card));"
+    "color:var(--fg);border-color:var(--accent);font-weight:600}"
     # Visible keyboard focus (the search input clears the default ring) + reduced-motion support.
-    "a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{"
+    "a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible,"
+    "textarea:focus-visible,summary:focus-visible{"
     "outline:2px solid var(--accent);outline-offset:2px}"
     "@media(prefers-reduced-motion:reduce){.topbar{backdrop-filter:none}"
     "*{animation-duration:.01ms!important;transition-duration:.01ms!important}}"
     ".scopebar{display:flex;align-items:center;gap:8px;margin:0 0 18px;font-size:13px;"
     "color:var(--muted)}"
-    ".scopebar select{font-size:13px;padding:3px 6px;border:1px solid var(--border);"
-    "border-radius:6px;background:var(--card);color:var(--fg)}"
+    ".scopebar select{font-size:13px;padding:5px 10px;border:1px solid var(--border);"
+    "border-radius:10px;background:var(--card);color:var(--fg);transition:border-color 150ms}"
+    ".scopebar select:hover{border-color:var(--accent)}"
     ".rank{display:flex;flex-wrap:wrap;gap:6px;margin-top:5px;align-items:center}"
     ".rank form{display:inline;margin:0}"
     ".rank .state{font-size:11px;color:var(--muted);margin-inline-end:2px}"
-    ".rank button{font-size:11px;padding:2px 9px;border:1px solid var(--border);border-radius:10px;"
-    "background:var(--card);color:var(--muted);cursor:pointer}"
+    ".rank button{font-size:11px;padding:3px 11px;border:1px solid var(--border);"
+    "border-radius:10px;background:var(--card);color:var(--muted);cursor:pointer;"
+    "transition:background-color 150ms,border-color 150ms,color 150ms}"
     ".rank button:hover{border-color:var(--accent);color:var(--fg)}"
+    ".rank button:hover{background-color:color-mix(in srgb,var(--accent) 8%,transparent)}"
     ".rank button.on{background:var(--accent);color:#fff;border-color:var(--accent)}"
     "@media (max-width:560px){.topbar .logo{display:none}}"
 )
@@ -446,6 +514,40 @@ def _display_url(raw_url: str) -> str:
     return host + separator + separator.join(segments)
 
 
+# One (operator example, short description) row for the "Search operators" cheat sheet, in the
+# order shown. Mirrors the Google-style query operators the search engine layer understands (see
+# `engines.query_operators`) and the Android home page's table. The examples are syntax, not
+# prose, so only the descriptions are translated.
+_OPERATOR_HELP: tuple[tuple[str, str], ...] = (
+    ('"exact phrase"', N_("match this exact phrase")),
+    ("-term", N_("exclude results containing term")),
+    ("site:example.com", N_("only results from this site")),
+    ("-site:example.com", N_("exclude results from this site")),
+    ("intitle:word", N_("word must appear in the title")),
+    ("inurl:word", N_("word must appear in the URL")),
+    ("filetype:pdf", N_("only this file type (also ext:)")),
+    ("before:2023-01-31", N_("published before this date")),
+    ("after:2022", N_("published on or after this date (year, year-month, or full date)")),
+    ("a OR b", N_("match either term (also a | b)")),
+)
+
+
+def _search_operators_help() -> str:
+    """Collapsed "Search operators" help card under the home search box.
+
+    A native `<details>` needs no JavaScript to expand/collapse and stays reachable and operable
+    from the keyboard. Starts collapsed so it never competes with the search box for attention.
+    """
+    rows = "".join(
+        f'<div class="oprow"><span class="code">{escape(op)}</span> {escape(tr(description))}</div>'
+        for op, description in _OPERATOR_HELP
+    )
+    return (
+        '<details class="ophelp">'
+        f"<summary>{escape(tr('Search operators'))}</summary>{rows}</details>"
+    )
+
+
 def render_home_page(
     settings_link: bool = False,
     rules: RankingRules | None = None,
@@ -484,6 +586,7 @@ def render_home_page(
         f'<input type="submit" value="{escape(tr("Search"), quote=True)}">'
         "</form>"
         f"{scope_form}"
+        f"{_search_operators_help()}"
         "</div>"
         f"<script>{_THEME_TOGGLE_JS}</script>"
         "</body>"
@@ -623,8 +726,9 @@ def _home_scope(rules: RankingRules) -> tuple[str, str]:
 def _search_context_fields(query: str, sort_mode: str, vertical: str) -> str:
     """Hidden q/sort/vertical fields so a mutation POST can return to the same results page.
 
-    The served forms carry the current search this way because our ``Referrer-Policy: no-referrer``
-    strips the Referer, so the handler cannot recover the originating page from it.
+    The served forms carry the current search this way rather than relying on the Referer: the
+    hidden fields work regardless of the referrer policy (and did so under the old ``no-referrer``
+    one), so the handler never has to reconstruct the originating page from a header.
     """
     return (
         f'<input type="hidden" name="q" value="{escape(query, quote=True)}">'

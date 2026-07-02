@@ -22,7 +22,9 @@ from searchmob_desktop.server.app import (
     is_loopback_host,
     is_safe_http_url,
     local_hostnames,
+    presented_token,
     requires_token,
+    token_matches,
 )
 from searchmob_desktop.server.runner import serve
 
@@ -37,6 +39,8 @@ __all__ = [
     "is_loopback_host",
     "is_safe_http_url",
     "local_hostnames",
+    "presented_token",
     "requires_token",
     "serve",
+    "token_matches",
 ]

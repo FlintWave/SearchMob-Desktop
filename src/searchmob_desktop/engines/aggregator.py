@@ -166,8 +166,11 @@ async def aggregate_with_status(
     # Fold a lexical query-match score into the RRF score so the final order leads with relevance
     # (does the result actually contain the query's content words, especially the title) and keeps
     # engine consensus as a strong secondary signal. Without this, near-tied RRF scores let an
-    # irrelevant result one engine ranked highly sit among the top hits.
-    terms = content_terms(ctx.query)
+    # irrelevant result one engine ranked highly sit among the top hits. Scoring reasons about the
+    # operator-free `ranking_terms` when set, so a scoping clause (a vertical's `site:` OR group,
+    # a user operator) never pollutes the lexical match; `ctx.query` is the fallback.
+    ranking_text = ctx.ranking_terms if ctx.ranking_terms is not None else ctx.query
+    terms = content_terms(ranking_text)
 
     def _final_score(b: _Bucket) -> float:
         # Navigational promotion: when the squished query names this result's domain (query
@@ -178,7 +181,7 @@ async def aggregate_with_status(
             blended_score(
                 b.score,
                 lexical_score(b.title, b.snippet, terms),
-                language_affinity(ctx.query, b.title, b.snippet),
+                language_affinity(ranking_text, b.title, b.snippet),
             )
             * nav
         )
