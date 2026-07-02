@@ -5,6 +5,8 @@ All notable changes to SearchMob Desktop are documented here. The version scheme
 
 ## [Unreleased]
 
+## 26.07.01 — 2026-07-02
+
 ### Added
 - **Google-style search operators.** `"exact phrase"`, `-term`, `site:` / `-site:`, `intitle:`,
   `inurl:`, `filetype:` (or `ext:`), `before:` / `after:` dates, and `OR`. Operators the upstream
