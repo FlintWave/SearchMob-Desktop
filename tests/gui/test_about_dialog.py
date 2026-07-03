@@ -33,3 +33,37 @@ def test_about_has_a_link_to_the_android_app(qapp: object) -> None:
     labels = [b.text() for b in dialog.findChildren(QPushButton)]
     assert any("Android" in t for t in labels)
     assert ANDROID_URL.endswith("/SearchMob")  # the sibling repo, not the desktop one
+
+
+def test_about_opens_wide_enough_for_its_content(qapp: object) -> None:
+    """The dialog derives its opening width from the content, so no horizontal scrollbar.
+
+    A fixed opening width regressed whenever the app font size or the active language made the
+    widest row (the buttons row, the unwrapped footer lines) wider than it: the scroll area then
+    showed a horizontal scrollbar over what is a short static page. Guard the derivation at a
+    larger-than-default font, mocking a roomy screen so the small offscreen test display's clamp
+    does not mask the width calculation.
+    """
+    from unittest.mock import patch
+
+    from PySide6.QtCore import QRect
+    from PySide6.QtWidgets import QApplication, QScrollArea
+
+    font = QApplication.font()
+    original_size = font.pointSize()
+    font.setPointSize(20)
+    QApplication.setFont(font)
+    try:
+        screen_type = type(QApplication.primaryScreen())
+        with patch.object(screen_type, "availableGeometry", lambda self: QRect(0, 0, 1920, 1052)):
+            dialog = AboutDialog()
+            dialog.show()
+            QApplication.processEvents()
+            scroll = dialog.findChild(QScrollArea)
+            assert scroll is not None
+            assert scroll.viewport().width() >= scroll.widget().minimumSizeHint().width()
+            assert not scroll.horizontalScrollBar().isVisible()
+            dialog.close()
+    finally:
+        font.setPointSize(original_size)
+        QApplication.setFont(font)
