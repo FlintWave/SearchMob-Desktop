@@ -156,6 +156,11 @@ async def aggregate_with_status(
                 existing.score += contribution
                 if not existing.snippet and item.snippet:
                     existing.snippet = item.snippet
+                # Backfill a blank title the same way: an empty first-seen title would otherwise
+                # stick, render blank, and zero out the title-coverage relevance signal for a
+                # result several engines actually agree on.
+                if not existing.title and item.title:
+                    existing.title = item.title
                 # Keep the newest known date when several engines surface the same URL.
                 candidate = _published_of(item)
                 if candidate is not None and (

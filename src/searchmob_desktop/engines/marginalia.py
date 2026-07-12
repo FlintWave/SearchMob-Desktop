@@ -25,7 +25,10 @@ _ENDPOINT = "https://api.marginalia-search.com/public/search"
 async def fetch_marginalia(client: httpx.AsyncClient, ctx: EngineContext) -> list[SearchResult]:
     """Fetch Marginalia JSON results. Returns `[]` on any failure."""
     try:
-        body = await fetch_bounded(client, "GET", f"{_ENDPOINT}/{quote(ctx.query, safe='')}")
+        # Marginalia's keyword index does not parse `site:`/`OR` syntax; query with the
+        # operator-free form (the scoping constraint stays locally enforced).
+        query = ctx.unscoped_query or ctx.query
+        body = await fetch_bounded(client, "GET", f"{_ENDPOINT}/{quote(query, safe='')}")
         if body is None:
             return []
         payload: Any = json.loads(body)

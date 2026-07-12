@@ -25,7 +25,10 @@ _ENDPOINT = "https://api.mwmbl.org/search/"
 async def fetch_mwmbl(client: httpx.AsyncClient, ctx: EngineContext) -> list[SearchResult]:
     """Fetch Mwmbl JSON results. Returns `[]` on any failure."""
     try:
-        body = await fetch_bounded(client, "GET", f"{_ENDPOINT}?{urlencode({'s': ctx.query})}")
+        # Mwmbl's index does not parse `site:`/`OR` syntax; query with the operator-free form
+        # (the scoping constraint stays locally enforced).
+        query = ctx.unscoped_query or ctx.query
+        body = await fetch_bounded(client, "GET", f"{_ENDPOINT}?{urlencode({'s': query})}")
         if body is None:
             return []
         payload: Any = json.loads(body)

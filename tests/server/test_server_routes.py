@@ -32,6 +32,7 @@ def _build_client(
     ranking_rules: object = None,
     access_token: str | None = None,
     host_allowlist_enabled: bool = False,
+    client_addr: tuple[str, int] | None = None,
 ) -> TestClient:
     """Wire a TestClient over the Starlette app with a fake metasearch.
 
@@ -65,6 +66,8 @@ def _build_client(
         access_token=access_token,
         host_allowlist_enabled=host_allowlist_enabled,
     )
+    if client_addr is not None:
+        return TestClient(app, client=client_addr)
     return TestClient(app)
 
 
@@ -102,7 +105,8 @@ def test_home_page_advertises_the_search_operators_help() -> None:
 
 
 def test_opensearch_descriptor_advertises_both_search_and_suggestions() -> None:
-    with _build_client(port=9999, host="127.0.0.1") as client:
+    # A loopback client gets the loopback origin with the live bound port.
+    with _build_client(port=9999, host="127.0.0.1", client_addr=("127.0.0.1", 5000)) as client:
         response = client.get("/opensearch.xml")
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("application/opensearchdescription+xml")
@@ -467,18 +471,22 @@ def test_token_gate_no_token_configured_means_no_enforcement() -> None:
         assert client.get("/api/search", params={"q": "x"}).status_code == 200
 
 
-def test_descriptor_includes_token_when_configured() -> None:
-    # The descriptor route is open, so it returns even off-loopback; build_app bakes the token.
-    with _build_client(host="192.168.1.50", port=8787, access_token="tok-123") as client:
+def test_descriptor_uses_request_host_for_network_visitors_and_never_embeds_token() -> None:
+    # A network-mode visitor's browser must template ITS route to us (the host it fetched the
+    # descriptor from), and the unauthenticated descriptor must never leak the access token.
+    with _build_client(
+        host="192.168.1.50",
+        port=8787,
+        access_token="tok-123",
+        client_addr=("192.168.1.77", 6000),
+    ) as client:
         body = client.get("/opensearch.xml").text
     root = ET.fromstring(body)
     urls = root.findall(f"{{{_OPENSEARCH_NS}}}Url")
     templates = {url.attrib["type"]: url.attrib["template"] for url in urls}
-    # ElementTree un-escapes &amp; back to & when reading the attribute value.
-    assert templates["text/html"].endswith("/search?q={searchTerms}&token=tok-123")
-    assert templates["application/x-suggestions+json"].endswith(
-        "/suggest?q={searchTerms}&token=tok-123"
-    )
+    # TestClient sends `Host: testserver`; the templates point back at that request host.
+    assert templates["text/html"] == "http://testserver/search?q={searchTerms}"
+    assert "token=" not in body
 
 
 def test_descriptor_omits_token_when_none() -> None:

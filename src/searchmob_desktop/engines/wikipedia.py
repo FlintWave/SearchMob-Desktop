@@ -27,7 +27,10 @@ async def fetch_wikipedia(client: httpx.AsyncClient, ctx: EngineContext) -> list
     params = {
         "action": "opensearch",
         "format": "json",
-        "search": ctx.query,
+        # Wikipedia's title index does not parse `site:`/`OR` syntax; a vertical's scoping clause
+        # as literal text matches nothing, so query with the operator-free form. The constraint is
+        # still enforced locally over the merged results.
+        "search": ctx.unscoped_query or ctx.query,
         "limit": str(ctx.max_results),
     }
     try:

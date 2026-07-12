@@ -59,7 +59,9 @@ from searchmob_desktop.engines import (
     SearchResult,
     aggregate_with_status,
 )
+from searchmob_desktop.engines.bangs import resolve_bang
 from searchmob_desktop.engines.correct import SpellCorrector
+from searchmob_desktop.engines.instant_answers import instant_answer
 from searchmob_desktop.engines.media_intent import (
     build_actions_row,
     detect_category,
@@ -92,6 +94,7 @@ from searchmob_desktop.i18n import (
 from searchmob_desktop.prefs import UserPreferences
 from searchmob_desktop.server.opensearch import build_descriptor
 from searchmob_desktop.server.templates import (
+    FAVICON_SVG,
     render_home_page,
     render_results_page,
     render_settings_page,
@@ -151,11 +154,15 @@ def _no_suggestions(_query: str, _limit: int) -> list[str]:
 # have no external file to point a nonce/hash-based policy at) safe to allow here. The policy's
 # real job is defense-in-depth against everything else: `default-src 'none'` plus the narrow
 # allowances block any EXTERNAL script, style, object, or frame a future bug might try to load
-# (`img-src https:` keeps the Wikipedia summary thumbnail working), `form-action 'self'` stops a
-# form from ever submitting to a foreign origin, and `frame-ancestors 'none'` blocks a foreign
-# page from framing us (belt-and-suspenders with `X-Frame-Options: DENY` for older browsers).
+# (`img-src 'self' data:` keeps the favicon data URI and the `/img`-proxied Wikipedia summary
+# thumbnail working while forbidding every third-party image — the browser must never fetch from
+# Wikimedia directly, that is the whole point of the proxy; `connect-src 'self'` lets the
+# search-as-you-type dropdown fetch our own `/suggest` and nothing else), `form-action 'self'`
+# stops a form from ever submitting to a foreign origin, and `frame-ancestors 'none'` blocks a
+# foreign page from framing us (belt-and-suspenders with `X-Frame-Options: DENY`).
 _CSP = (
-    "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src https:; "
+    "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; "
+    "img-src 'self' data:; connect-src 'self'; "
     "form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
 )
 
@@ -184,7 +191,7 @@ class _SecurityHeadersMiddleware(BaseHTTPMiddleware):
       open routes (`/`, `/opensearch.xml`, `/healthz`) bypass.
     """
 
-    _GATED_PATHS = frozenset({"/search", "/api/search", "/suggest"})
+    _GATED_PATHS = frozenset({"/search", "/api/search", "/suggest", "/img"})
     # State-changing routes (personalization edits from the served UI). They are owner-only: even in
     # network mode only a loopback client may POST them, so a device on the network can search but
     # cannot alter the owner's rules. A same-origin check on the Origin header blocks CSRF.
@@ -475,6 +482,7 @@ def build_app(
     history_provider: Callable[[], list[HistoryEntry]] | None = None,
     history_clearer: Callable[[], bool] | None = None,
     summary_provider: Callable[[str], Awaitable[SummaryBox | None]] | None = None,
+    image_fetcher: Callable[[str], Awaitable[tuple[bytes, str] | None]] | None = None,
     ai_slop_mode: str = "off",
     max_query_length: int = MAX_QUERY_LENGTH,
     max_suggestions: int = MAX_SUGGESTIONS,
@@ -517,6 +525,11 @@ def build_app(
     restart. `prefs_saver`, when provided, enables the loopback-only `GET /settings` page and its
     `POST /settings/prefs` route; without it, no settings page is served. Like the ranking routes
     these are owner-only (loopback) and same-origin guarded.
+
+    `image_fetcher`, when provided, backs the `/img` thumbnail proxy: it takes the upstream image
+    URL and returns `(bytes, content_type)` or None on any failure (including a URL outside the
+    proxy's allowlist — see `server/img_proxy.py`). Without it, `/img` answers 404 and the served
+    summary card renders without a thumbnail, so the browser never fetches from Wikimedia.
     """
     provider: SuggestionsProvider = (
         suggestions_provider if suggestions_provider is not None else _no_suggestions
@@ -598,6 +611,10 @@ def build_app(
             timeout_seconds=timeout_seconds,
             language_region=language_region_for(locale),
             ranking_terms=parsed.clean_text,
+            # Engines whose index does not understand site:/OR syntax (Wikipedia, Marginalia,
+            # Mwmbl) query with the operator-free text; the vertical or user site: constraint is
+            # still enforced locally by the filter below.
+            unscoped_query=parsed.clean_text,
         )
         # The runner returns either a bare result list (a test fake) or an `AggregateOutcome` with
         # the per-engine status (the real `aggregate_with_status`); accept both.
@@ -749,6 +766,13 @@ def build_app(
     async def search_html(request: Request) -> Response:
         locale = _resolve_locale(request)
         raw_query = _clamp(request.query_params.get("q"))
+        # A `!bang` query jumps straight to that site's own search: the terms never enter the
+        # metasearch fan-out, no engine sees them, and an unknown tag falls through to a normal
+        # search (see `engines/bangs.py`).
+        bang = resolve_bang(raw_query)
+        if bang is not None:
+            return RedirectResponse(bang.url, status_code=302)
+        started_at = time.monotonic()
         # An inline `+name` token applies a saved scope to this one search, additively and without
         # persisting it. The engines, summary, and correction run on the cleaned query; the original
         # text is echoed in the box so the token round-trips and re-running re-applies the scope.
@@ -799,6 +823,11 @@ def build_app(
             # operator-free text (a site: clause is not something the model should learn).
             rid = _register_render(parsed.clean_text, results)
             link_builder = lambda pos, _url, _rid=rid: f"/click?rid={_rid}&pos={pos}"  # noqa: E731
+        # Elapsed wall time for the meta line ("N results · 0.8 s"), computed locally and never
+        # recorded anywhere. Instant answers (calculator/conversions) are pure on-device string
+        # work over the query text.
+        took_ms = int((time.monotonic() - started_at) * 1000)
+        answer = instant_answer(query) if query.strip() else None
         body = render_results_page(
             raw_query,
             results,
@@ -817,6 +846,13 @@ def build_app(
             # the same loopback gate the editing controls use.
             engine_status=engine_outcomes if _is_owner(request) else (),
             actions_row=actions_row,
+            instant_answer=answer,
+            took_ms=took_ms if query.strip() else None,
+            # The summary thumbnail renders only when the loopback `/img` proxy is wired: the
+            # browser must never fetch it from Wikimedia directly (that leaks the user's IP plus
+            # the searched entity via the image filename), so without the proxy the card simply
+            # has no picture.
+            img_proxy_wired=image_fetcher is not None,
         )
         return Response(body, media_type="text/html; charset=utf-8")
 
@@ -1056,9 +1092,34 @@ def build_app(
         }
         return JSONResponse(payload)
 
-    async def opensearch_xml(_request: Request) -> Response:
-        body = build_descriptor(bound_host_getter(), bound_port_getter(), token=access_token)
-        return Response(body, media_type=_OPENSEARCH_CONTENT_TYPE)
+    async def opensearch_xml(request: Request) -> Response:
+        # A network-mode visitor's browser must template ITS route to us (the LAN/Tailscale host
+        # it fetched this from), not our loopback address, or "add search engine" silently breaks
+        # off-device. The Host header has already passed the DNS-rebind allowlist. The access
+        # token is deliberately NOT embedded: the descriptor is unauthenticated, so a token in it
+        # would hand access to anyone on the network who can fetch this file.
+        request_host = request.headers.get("host", "").strip()
+        client_host = request.client.host if request.client is not None else ""
+        if not is_loopback_host(client_host) and request_host:
+            origin = f"http://{request_host}"
+        else:
+            origin = f"http://{LOOPBACK_HOST}:{bound_port_getter()}"
+        return Response(build_descriptor(origin), media_type=_OPENSEARCH_CONTENT_TYPE)
+
+    async def img(request: Request) -> Response:
+        # Loopback re-serve of the Wikipedia summary thumbnail (see `server/img_proxy.py`): the
+        # page embeds `/img?u=<wikimedia-url>` so the visitor's browser never contacts Wikimedia.
+        # 404 for everything outside the strict allowlist, and when no fetcher is wired.
+        if image_fetcher is None:
+            return PlainTextResponse("not found", status_code=404)
+        fetched = await image_fetcher(request.query_params.get("u", ""))
+        if fetched is None:
+            return PlainTextResponse("not found", status_code=404)
+        data, content_type = fetched
+        return Response(data, media_type=content_type)
+
+    async def favicon(_request: Request) -> Response:
+        return Response(FAVICON_SVG.encode("utf-8"), media_type="image/svg+xml")
 
     async def suggest(request: Request) -> Response:
         query = _clamp(request.query_params.get("q"))
@@ -1083,6 +1144,9 @@ def build_app(
         Route("/api/search", search_json, methods=["GET"]),
         Route("/opensearch.xml", opensearch_xml, methods=["GET"]),
         Route("/suggest", suggest, methods=["GET"]),
+        # Loopback thumbnail proxy (404 unless a fetcher is wired) and the tab icon.
+        Route("/img", img, methods=["GET"]),
+        Route("/favicon.ico", favicon, methods=["GET"]),
         # Owner-only click redirector that trains the personalization model (loopback-only; a
         # non-owner gets 404, and it only redirects to a server-recorded result URL).
         Route("/click", click, methods=["GET"]),

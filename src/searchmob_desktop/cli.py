@@ -53,6 +53,7 @@ from searchmob_desktop.engines.wiki_summary import summary_for_query
 from searchmob_desktop.prefs import JsonPreferencesStore, UserPreferences
 from searchmob_desktop.server import is_loopback_host
 from searchmob_desktop.server import serve as _serve_local_server
+from searchmob_desktop.server.img_proxy import fetch_thumbnail
 from searchmob_desktop.suggest import (
     CompositeSuggestionsProvider,
     HistorySuggestionsProvider,
@@ -275,6 +276,9 @@ def serve(
         history_provider=lambda: list(history_store.recent(50)),
         history_clearer=_clear_history,
         summary_provider=summary_for_query,
+        # Loopback re-serve of the Wikipedia summary thumbnail so the visitor's browser never
+        # fetches from Wikimedia directly (Wikimedia-allowlisted, image-only, size-capped).
+        image_fetcher=fetch_thumbnail,
         ai_slop_mode=prefs.ai_slop_mode,
         max_results=max_results,
         timeout_seconds=timeout,

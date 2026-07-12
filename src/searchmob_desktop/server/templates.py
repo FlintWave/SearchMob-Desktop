@@ -19,6 +19,7 @@ from urllib.parse import quote_plus, urlsplit
 
 from searchmob_desktop.data.history import HistoryEntry
 from searchmob_desktop.engines import EngineOutcome, SearchResult
+from searchmob_desktop.engines.instant_answers import InstantAnswer
 from searchmob_desktop.engines.media_intent import ActionsRow, MediaCategory
 from searchmob_desktop.engines.rank import Lens, RankingRules, RankRule, host_of_url
 from searchmob_desktop.engines.wiki_summary import SummaryBox
@@ -222,9 +223,25 @@ _PAGE_CSS = (
     ".settings .goggleclear,.settings .histclear{margin:0 0 8px}"
     # Elevated M3 search bar: resting shadow from the theme, a raised shadow on hover, and an
     # accent border with deeper elevation while the query field holds focus.
+    # position:relative anchors the suggestions dropdown; the old overflow:hidden would clip it,
+    # so the pill's rounding moves onto the first/last child instead.
     ".searchbox{display:flex;align-items:stretch;background:var(--card);"
-    "border:1px solid var(--border);border-radius:28px;box-shadow:var(--shadow);overflow:hidden;"
-    "transition:box-shadow 150ms,border-color 150ms}"
+    "border:1px solid var(--border);border-radius:28px;box-shadow:var(--shadow);"
+    "position:relative;transition:box-shadow 150ms,border-color 150ms}"
+    ".searchbox>input[type=text]{border-radius:28px 0 0 28px}"
+    ".searchbox>input[type=submit]{border-radius:0 28px 28px 0}"
+    # Search-as-you-type dropdown (an ARIA listbox under the box, fed by /suggest).
+    ".suggest{position:absolute;top:calc(100% + 6px);left:0;right:0;margin:0;padding:6px 0;"
+    "list-style:none;background:var(--card);border:1px solid var(--border);border-radius:16px;"
+    "box-shadow:var(--shadow);z-index:20;max-height:60vh;overflow-y:auto;text-align:left}"
+    ".suggest li{padding:8px 18px;cursor:pointer;font-size:.9375rem;color:var(--fg)}"
+    ".suggest li.on,.suggest li:hover{background:rgba(127,127,127,.1)}"
+    ".suggest li.on,.suggest li:hover{background:color-mix(in srgb,var(--accent) 10%,transparent)}"
+    # The on-device instant answer (calculator / conversions): result large, input above it.
+    ".instant{border:1px solid var(--border);border-radius:16px;background:var(--card);"
+    "box-shadow:var(--shadow);padding:16px 20px;margin:0 0 22px}"
+    ".instant .iexpr{margin:0;color:var(--muted);font-size:.8125rem}"
+    ".instant .ival{margin:4px 0 0;font-size:1.75rem;font-weight:600;overflow-wrap:anywhere}"
     ".searchbox:hover{box-shadow:0 1px 3px rgba(0,0,0,.15),0 4px 8px rgba(0,0,0,.1)}"
     ".searchbox:focus-within{border-color:var(--accent);"
     "box-shadow:0 2px 6px rgba(0,0,0,.18),0 6px 14px rgba(0,0,0,.12)}"
@@ -413,19 +430,108 @@ _REVEAL_JS = (
 )
 
 
+# The tab icon: a simple magnifier on the accent blue, self-contained (no asset pipeline, no
+# extra request beyond the cached data URI / the tiny /favicon.ico route). Kept minimal so the
+# data URI stays short. Mirrors the Android server's icon.
+FAVICON_SVG = (
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">'
+    '<rect width="32" height="32" rx="7" fill="#1a73e8"/>'
+    '<circle cx="14" cy="14" r="6.5" fill="none" stroke="#fff" stroke-width="3"/>'
+    '<line x1="19" y1="19" x2="25" y2="25" stroke="#fff" stroke-width="3" stroke-linecap="round"/>'
+    "</svg>"
+)
+
+# The same SVG as a data URI for <link rel=icon> (CSP allows img-src data:). '#' must be escaped.
+_FAVICON_DATA_URI = "data:image/svg+xml," + FAVICON_SVG.replace("#", "%23").replace('"', "'")
+
+
 def _page_head(title_text: str) -> str:
-    """Shared `<head>`: meta, title, OpenSearch advertisement, styles, pre-paint theme restore."""
+    """Shared `<head>`: meta, title, icon, OpenSearch advertisement, styles, theme restore."""
     return (
         "<head>"
         '<meta charset="utf-8">'
         '<meta name="viewport" content="width=device-width, initial-scale=1">'
         f"<title>{escape(title_text)}</title>"
+        f'<link rel="icon" href="{_FAVICON_DATA_URI}">'
         '<link rel="search" type="application/opensearchdescription+xml" '
         'title="SearchMob" href="/opensearch.xml">'
         f"<style>{_theme_css()}{_PAGE_CSS}</style>"
         f"<script>{_THEME_INIT_JS}</script>"
         "</head>"
     )
+
+
+# Search-as-you-type: a dropdown under the page's own search box, fed by the local /suggest
+# endpoint (history + the opt-in upstream source, both already gated server-side). Debounced,
+# aborts stale fetches, full keyboard support (arrows/Enter/Escape) with ARIA listbox semantics.
+# Same-origin only (CSP `connect-src 'self'` enforces that too). Ported from the Android server.
+_SUGGEST_JS = (
+    "(function(){"
+    "var input=document.querySelector('.searchbox input[name=q]');"
+    "if(!input||!window.fetch)return;"
+    "var box=input.closest('.searchbox');if(!box)return;"
+    "var list=document.createElement('ul');"
+    "list.className='suggest';list.id='sm-suggest';list.setAttribute('role','listbox');"
+    "list.hidden=true;box.appendChild(list);"
+    "input.setAttribute('role','combobox');input.setAttribute('aria-expanded','false');"
+    "input.setAttribute('aria-autocomplete','list');input.setAttribute('aria-controls','sm-suggest');"
+    "var items=[],active=-1,timer=null,ctrl=null,lastShown='';"
+    "function close(){list.hidden=true;input.setAttribute('aria-expanded','false');"
+    "items=[];active=-1;list.innerHTML='';}"
+    "function pick(i){if(i<0||i>=items.length)return;input.value=items[i];close();"
+    "input.form.submit();}"
+    "function render(sugs){"
+    "list.innerHTML='';items=sugs;active=-1;"
+    "if(!sugs.length){close();return;}"
+    "sugs.forEach(function(s,i){"
+    "var li=document.createElement('li');"
+    "li.textContent=s;li.setAttribute('role','option');li.id='sm-sg-'+i;"
+    "li.addEventListener('mousedown',function(e){e.preventDefault();pick(i);});"
+    "list.appendChild(li);});"
+    "list.hidden=false;input.setAttribute('aria-expanded','true');}"
+    "function mark(){"
+    "for(var i=0;i<list.children.length;i++){list.children[i].classList.toggle('on',i===active);}"
+    "input.setAttribute('aria-activedescendant',active>=0?'sm-sg-'+active:'');}"
+    "function ask(){"
+    "var q=input.value.trim();"
+    "if(!q){close();return;}"
+    "if(ctrl)ctrl.abort();"
+    "ctrl=new AbortController();"
+    "fetch('/suggest?q='+encodeURIComponent(q),{signal:ctrl.signal})"
+    ".then(function(r){return r.json();})"
+    ".then(function(d){"
+    "if(input.value.trim()!==q)return;"
+    "lastShown=q;render((d&&d[1])||[]);"
+    "}).catch(function(){});}"
+    "input.addEventListener('input',function(){"
+    "if(timer)clearTimeout(timer);"
+    "timer=setTimeout(ask,150);});"
+    "input.addEventListener('keydown',function(e){"
+    "if(list.hidden){"
+    "if(e.key==='ArrowDown'&&input.value.trim()&&lastShown===input.value.trim()){ask();}"
+    "return;}"
+    "if(e.key==='ArrowDown'){e.preventDefault();active=(active+1)%items.length;mark();}"
+    "else if(e.key==='ArrowUp')"
+    "{e.preventDefault();active=(active-1+items.length)%items.length;mark();}"
+    "else if(e.key==='Enter'){if(active>=0){e.preventDefault();pick(active);}else{close();}}"
+    "else if(e.key==='Escape'){close();}});"
+    "input.addEventListener('blur',function(){setTimeout(close,120);});"
+    "})();"
+)
+
+# "/" focuses the search box from anywhere on the page (unless already typing somewhere), the
+# muscle-memory shortcut every major engine supports.
+_SHORTCUT_JS = (
+    "(function(){"
+    "document.addEventListener('keydown',function(e){"
+    "if(e.key!=='/'||e.ctrlKey||e.metaKey||e.altKey)return;"
+    "var t=e.target;var tag=t&&t.tagName;"
+    "if(tag==='INPUT'||tag==='TEXTAREA'||tag==='SELECT'||(t&&t.isContentEditable))return;"
+    "var input=document.querySelector('.searchbox input[name=q]');"
+    "if(input){e.preventDefault();input.focus();input.select();}"
+    "});"
+    "})();"
+)
 
 
 def _theme_toggle_button() -> str:
@@ -589,18 +695,22 @@ def render_home_page(
         f"{_search_operators_help()}"
         "</div>"
         f"<script>{_THEME_TOGGLE_JS}</script>"
+        f"<script>{_SUGGEST_JS}</script>"
+        f"<script>{_SHORTCUT_JS}</script>"
         "</body>"
     )
     return f"{_html_open(locale)}{head}{body}</html>"
 
 
-def _vertical_bar(query: str, vertical: str) -> str:
+def _vertical_bar(query: str, vertical: str, sort_mode: str = "") -> str:
     """Category tabs (Web / News / Forums / Academic) as GET links carrying the current query.
 
-    Each link re-runs the search scoped to that vertical. The active one is marked so CSS can style
+    Each link re-runs the search scoped to that vertical, keeping the active sort so switching
+    category does not silently reset the user's view. The active one is marked so CSS can style
     it. Links (not a select) so the categories are visible at a glance and bookmarkable.
     """
     safe_q = quote_plus(query)
+    sort_suffix = f"&sort={quote_plus(sort_mode)}" if sort_mode else ""
     # Literal `trc` calls (not a loop variable) so the extractor sees each label and the "search
     # category" context disambiguates these short words for translators.
     labels = {
@@ -615,7 +725,7 @@ def _vertical_bar(query: str, vertical: str) -> str:
         active = " active" if is_active else ""
         # aria-current marks the active category for assistive tech (not by color alone).
         current = ' aria-current="page"' if is_active else ""
-        href = f"/search?q={safe_q}&vertical={value}"
+        href = f"/search?q={safe_q}&vertical={value}{sort_suffix}"
         chips.append(
             f'<a class="chip{active}"{current} href="{escape(href, quote=True)}">'
             f"{escape(labels[value])}</a>"
@@ -655,8 +765,9 @@ def _engine_status_line(engine_status: Sequence[EngineOutcome]) -> str:
     )
 
 
-def _sort_bar(query: str, sort_mode: str) -> str:
-    """A sort selector. GET so the choice is bookmarkable; carries the query in a hidden field."""
+def _sort_bar(query: str, sort_mode: str, vertical: str = "web") -> str:
+    """A sort selector. GET so the choice is bookmarkable; hidden fields carry the query and the
+    active vertical (without the latter, changing sort silently fell back to the Web scoping)."""
     # Literal `trc` calls so the extractor sees each label; "sort order" disambiguates the short
     # words (especially "Date") for translators.
     labels = {
@@ -672,6 +783,7 @@ def _sort_bar(query: str, sort_mode: str) -> str:
     return (
         '<form class="scopebar" action="/search" method="get">'
         f'<input type="hidden" name="q" value="{escape(query, quote=True)}">'
+        f'<input type="hidden" name="vertical" value="{escape(vertical, quote=True)}">'
         f'<label for="sm-sort">{escape(tr("Sort"))}:</label>'
         '<select id="sm-sort" name="sort" onchange="this.form.submit()">'
         + "".join(options)
@@ -832,7 +944,11 @@ def _actions_row_card(row: ActionsRow) -> str:
     )
 
 
-def _summary_box(summary: SummaryBox, is_safe_http_url: Callable[[str], bool]) -> str:
+def _summary_box(
+    summary: SummaryBox,
+    is_safe_http_url: Callable[[str], bool],
+    img_proxy_wired: bool = False,
+) -> str:
     """A knowledge-panel-style Wikipedia summary card shown above the results."""
     title_html = escape(summary.title)
     if summary.url and is_safe_http_url(summary.url):
@@ -841,11 +957,13 @@ def _summary_box(summary: SummaryBox, is_safe_http_url: Callable[[str], bool]) -
             f"{escape(summary.title)}</a>"
         )
     parts = ['<div class="summary">']
-    # The thumbnail loads from Wikimedia; it is decorative, so only render http(s) sources.
-    if summary.thumbnail_url and is_safe_http_url(summary.thumbnail_url):
-        parts.append(
-            f'<img src="{escape(summary.thumbnail_url, quote=True)}" alt="" loading="lazy">'
-        )
+    # The thumbnail is re-served through the loopback `/img` proxy so the visitor's browser never
+    # fetches from Wikimedia directly (that leaked the visitor's IP plus the searched entity via
+    # the image filename; CSP `img-src 'self'` also forbids the direct fetch now). Without the
+    # proxy wired, the card simply renders without a picture.
+    if img_proxy_wired and summary.thumbnail_url and is_safe_http_url(summary.thumbnail_url):
+        proxied = "/img?u=" + quote_plus(summary.thumbnail_url)
+        parts.append(f'<img src="{escape(proxied, quote=True)}" alt="" loading="lazy">')
     parts.append('<div class="body">')
     parts.append(f'<p class="stitle">{title_html}</p>')
     if summary.description:
@@ -875,6 +993,13 @@ def render_results_page(
     engine_status: Sequence[EngineOutcome] = (),
     # The "Listen/Watch/Read/Play on" actions row for a resolved media entity, or None.
     actions_row: ActionsRow | None = None,
+    # On-device instant answer (calculator / unit / base conversion / percentage), or None for
+    # most queries. Wall time the search took, for the meta line; None hides the timing.
+    instant_answer: InstantAnswer | None = None,
+    took_ms: int | None = None,
+    # Whether the `/img` proxy is wired; when False the summary card renders without a thumbnail
+    # so the browser never fetches from Wikimedia directly.
+    img_proxy_wired: bool = False,
 ) -> str:
     """The results page. Empty/blank query -> a placeholder; otherwise -> the merged results.
 
@@ -918,19 +1043,33 @@ def render_results_page(
     parts.append('<div class="results">')
 
     # Category tabs render whenever there is a query, so the user can switch verticals even from a
-    # vertical that returned nothing.
+    # vertical that returned nothing. They keep the active sort for the same reason.
     if not blank:
-        parts.append(_vertical_bar(query, vertical))
+        parts.append(_vertical_bar(query, vertical, sort_mode))
+
+    if not blank and instant_answer is not None:
+        parts.append(
+            '<div class="instant">'
+            f'<p class="iexpr">{escape(instant_answer.expression)}</p>'
+            f'<p class="ival">{escape(instant_answer.result)}</p>'
+            "</div>"
+        )
 
     if not blank and correction:
-        href = "/search?q=" + quote_plus(correction)
+        # The link keeps the current sort and vertical so accepting a correction does not
+        # silently reset the user's view.
+        href = (
+            "/search?q="
+            + quote_plus(correction)
+            + f"&vertical={quote_plus(vertical)}&sort={quote_plus(sort_mode)}"
+        )
         parts.append(
             f'<p class="didyoumean">{escape(tr("Did you mean:"))} '
             f'<a href="{escape(href, quote=True)}">{escape(correction)}</a></p>'
         )
 
     if not blank and summary is not None:
-        parts.append(_summary_box(summary, is_safe_http_url))
+        parts.append(_summary_box(summary, is_safe_http_url, img_proxy_wired))
 
     if not blank and actions_row is not None:
         parts.append(_actions_row_card(actions_row))
@@ -938,6 +1077,9 @@ def render_results_page(
     if blank:
         parts.append(f'<p class="empty">{escape(tr("Enter a query to search."))}</p>')
     elif not results_list:
+        # The owner-only per-engine diagnostic renders on the EMPTY page too - "0 of 5 engines
+        # responded" is exactly the fact the owner needs when a search comes back with nothing.
+        parts.append(_engine_status_line(engine_status))
         active_lens = active_rules.active_lens
         if editable and active_lens:
             # An active scope filtered every result out. Without this the page looked empty with no
@@ -962,9 +1104,15 @@ def render_results_page(
                 f'<p class="empty">{escape(tr("No results for “{query}”.", query=query))}</p>'
             )
     else:
-        parts.append(f'<p class="meta">{escape(tr("Results for “{query}”", query=query))}</p>')
+        # The meta line adds the merged result count and elapsed seconds - the at-a-glance
+        # breadth/speed feedback every major engine gives. Computed locally, never recorded.
+        meta_line = tr("Results for “{query}”", query=query)
+        meta_line += " · " + trn(len(results_list), "{n} result", "{n} results")
+        if took_ms is not None:
+            meta_line += f" · {took_ms / 1000.0:.1f} s"
+        parts.append(f'<p class="meta">{escape(meta_line)}</p>')
         parts.append(_engine_status_line(engine_status))
-        parts.append(_sort_bar(query, sort_mode))
+        parts.append(_sort_bar(query, sort_mode, vertical))
         if editable:
             parts.append(_scope_bar(active_rules, query, sort_mode, vertical))
         for index, result in enumerate(results_list):
@@ -1006,6 +1154,8 @@ def render_results_page(
     if len(results_list) > _REVEAL_SIZE:
         parts.append(f"<script>{_REVEAL_JS}</script>")
     parts.append(f"<script>{_THEME_TOGGLE_JS}</script>")
+    parts.append(f"<script>{_SUGGEST_JS}</script>")
+    parts.append(f"<script>{_SHORTCUT_JS}</script>")
     parts.append("</body>")
     return _html_open(locale) + head + "".join(parts) + "</html>"
 

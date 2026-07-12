@@ -115,25 +115,27 @@ def _templates(body: bytes) -> dict[str, str]:
     }
 
 
-def test_build_descriptor_appends_token() -> None:
-    templates = _templates(build_descriptor("192.168.1.50", 8787, token="abc123"))
-    assert templates["text/html"] == (
-        "http://192.168.1.50:8787/search?q={searchTerms}&token=abc123"
-    )
+def test_build_descriptor_templates_point_at_the_given_origin() -> None:
+    templates = _templates(build_descriptor("http://192.168.1.50:8787"))
+    assert templates["text/html"] == "http://192.168.1.50:8787/search?q={searchTerms}"
     assert templates["application/x-suggestions+json"] == (
-        "http://192.168.1.50:8787/suggest?q={searchTerms}&token=abc123"
+        "http://192.168.1.50:8787/suggest?q={searchTerms}"
     )
 
 
-def test_build_descriptor_omits_token_when_absent() -> None:
-    for token in (None, ""):
-        body = build_descriptor("127.0.0.1", 8787, token=token)
-        assert b"token=" not in body
+def test_build_descriptor_never_embeds_a_token() -> None:
+    # The descriptor is unauthenticated: a token baked into it would hand access to anyone on the
+    # network who can fetch this file. A network-mode browser presents the token via headers (or
+    # a manually configured ?token=) instead.
+    body = build_descriptor("http://192.168.1.50:8787")
+    assert b"token=" not in body
 
 
-def test_build_descriptor_escapes_ampersand_in_xml() -> None:
-    # The raw XML must escape the separator as &amp; so the descriptor is well-formed; ElementTree
-    # round-trips it back to a single & in the attribute value (asserted above).
-    raw = build_descriptor("127.0.0.1", 8787, token="t").decode("utf-8")
-    assert "&amp;token=t" in raw
-    assert "&token=" not in raw  # never a bare, unescaped ampersand
+def test_build_descriptor_escapes_xml_specials_in_the_origin() -> None:
+    # A hostile origin string cannot break out of the template attribute: quotes and ampersands
+    # are XML-escaped, and the descriptor stays well-formed.
+    raw = build_descriptor('http://a"b&c:1').decode("utf-8")
+    assert "&quot;" in raw
+    assert "&amp;" in raw
+    templates = _templates(raw.encode("utf-8"))
+    assert templates["text/html"].startswith('http://a"b&c:1/search')

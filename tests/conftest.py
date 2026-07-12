@@ -12,9 +12,22 @@ from __future__ import annotations
 
 import pytest
 
+from searchmob_desktop.engines import proxy
 from searchmob_desktop.i18n import set_request_locale
 
 
 @pytest.fixture(autouse=True)
 def _reset_request_locale() -> None:
     set_request_locale(None)
+
+
+@pytest.fixture(autouse=True)
+def _no_politeness_wait(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Zero the per-host politeness interval and reset its slot table between tests.
+
+    The process-wide spacing exists for real upstream hosts; the test suite hammers a handful of
+    mocked hosts hundreds of times and would otherwise serialize a real 1-second sleep per
+    request. The politeness test that exercises the spacing sets its own interval locally.
+    """
+    monkeypatch.setattr(proxy, "_POLITENESS_INTERVAL_SECONDS", 0.0)
+    proxy._next_slot_by_host.clear()
