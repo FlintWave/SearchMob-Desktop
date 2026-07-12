@@ -15,13 +15,12 @@ pytest.importorskip("PySide6")
 import searchmob_desktop.gui.main_window as main_window
 from searchmob_desktop.data.history import InMemoryHistoryStore
 from searchmob_desktop.engines import AggregateOutcome, SearchResult
-from searchmob_desktop.gui.main_window import MainWindow
 from searchmob_desktop.prefs import JsonPreferencesStore
 
 
-def _window(tmp_path: Path) -> MainWindow:
+def _window(tmp_path: Path) -> main_window.MainWindow:
     store = JsonPreferencesStore(path=tmp_path / "prefs.json")
-    return MainWindow(prefs_store=store, history_store=InMemoryHistoryStore())
+    return main_window.MainWindow(prefs_store=store, history_store=InMemoryHistoryStore())
 
 
 @pytest.fixture(autouse=True)
