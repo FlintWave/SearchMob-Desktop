@@ -31,9 +31,11 @@ __all__ = ["ParsedQuery", "parse_query_operators"]
 _RECOGNIZED_OPS = frozenset({"site", "intitle", "inurl", "filetype", "ext", "before", "after"})
 
 _YEAR = re.compile(r"^(\d{4})$")
-_YEAR_MONTH = re.compile(r"^(\d{4})-(\d{2})$")
-_FULL_DASH = re.compile(r"^(\d{4})-(\d{2})-(\d{2})$")
-_FULL_SLASH = re.compile(r"^(\d{4})/(\d{2})/(\d{2})$")
+# Month/day accept one or two digits: rejecting `after:2024-3-1` outright would keep the whole
+# token as literal upstream query text (see `_apply_operator`), actively harming results.
+_YEAR_MONTH = re.compile(r"^(\d{4})-(\d{1,2})$")
+_FULL_DASH = re.compile(r"^(\d{4})-(\d{1,2})-(\d{1,2})$")
+_FULL_SLASH = re.compile(r"^(\d{4})/(\d{1,2})/(\d{1,2})$")
 
 # Maximal letter/digit runs (unicode-aware, underscore excluded), for whole-word exclusion
 # matching. Same token shape as the relevance module's tokenizer.

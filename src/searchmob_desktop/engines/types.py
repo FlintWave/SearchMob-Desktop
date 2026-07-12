@@ -59,6 +59,13 @@ class EngineContext:
     scoping clause is fetch plumbing, not subject matter, and must never pollute the match score.
     None (the default) scores against `query` itself, which keeps operator-free callers unchanged.
     Mirrors `SearchQuery.rankingTerms` in the Android engine.
+
+    `unscoped_query` is the query for engines that do NOT understand `site:`/`OR` operator syntax.
+    Title/keyword indexes like Wikipedia, Marginalia, and Mwmbl would otherwise receive a
+    vertical's `(site:a OR site:b ...)` clause as literal query text and match nothing; they use
+    this plain text instead, and any `site:` constraint is still enforced locally over the merged
+    results. None (the default) means `query` is already operator-free. Mirrors
+    `SearchQuery.unscopedTerms` in the Android engine.
     """
 
     query: str
@@ -66,3 +73,4 @@ class EngineContext:
     timeout_seconds: float = 5.0
     language_region: LanguageRegion | None = None
     ranking_terms: str | None = None
+    unscoped_query: str | None = None

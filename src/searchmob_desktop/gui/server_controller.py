@@ -50,6 +50,7 @@ from searchmob_desktop.server import (
     is_loopback_host,
     local_hostnames,
 )
+from searchmob_desktop.server.img_proxy import fetch_thumbnail
 from searchmob_desktop.suggest import (
     CompositeSuggestionsProvider,
     HistorySuggestionsProvider,
@@ -236,6 +237,9 @@ class _UvicornWorker(QThread):
             history_provider=lambda: list(self._history_store.recent(50)),
             history_clearer=_clear_history,
             summary_provider=summary_for_query,
+            # Loopback re-serve of the Wikipedia summary thumbnail so the visitor's browser never
+            # fetches from Wikimedia directly (Wikimedia-allowlisted, image-only, size-capped).
+            image_fetcher=fetch_thumbnail,
             ai_slop_mode=self._prefs_store.load().ai_slop_mode,
             access_token=self._access_token,
             allowed_hosts=self._allowed_hosts,

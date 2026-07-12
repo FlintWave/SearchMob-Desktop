@@ -127,7 +127,15 @@ def parse_date(text: str, now_ms: int) -> ParsedDate | None:
         elif order == "iso":
             year, month, day = int(m.group(1)), int(m.group(2)), int(m.group(3))
         else:
-            month, day, year = int(m.group(1)), int(m.group(2)), int(m.group(3))
+            # Slash dates are ambiguous (US M/D/Y vs. European D/M/Y). Default to M/D/Y, but when
+            # the first number cannot be a month (>12) it must be the day: "31/12/2024" is
+            # 31 December, not month 31 (which would be silently lost).
+            first, second = int(m.group(1)), int(m.group(2))
+            if first > 12 and second <= 12:
+                day, month = first, second
+            else:
+                month, day = first, second
+            year = int(m.group(3))
         if month == 0:
             continue
         ms = _ymd_to_ms(year, month, day)

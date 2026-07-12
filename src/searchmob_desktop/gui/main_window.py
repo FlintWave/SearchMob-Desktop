@@ -53,7 +53,9 @@ from searchmob_desktop.engines import (
     aggregate_with_status,
     make_privacy_client,
 )
+from searchmob_desktop.engines.bangs import resolve_bang
 from searchmob_desktop.engines.correct import start_background_corrector
+from searchmob_desktop.engines.instant_answers import instant_answer
 from searchmob_desktop.engines.local_llm import LlmConfig, stream_answer
 from searchmob_desktop.engines.media_intent import (
     ActionsRow,
@@ -192,6 +194,9 @@ class MainWindow(QMainWindow):
         # skips the corrector, whose word-spelling logic would just mangle operators.
         self._last_clean_query = ""
         self._last_has_operators = False
+        # Monotonic per-submit id; results/failures from a superseded search are ignored so they
+        # can neither overwrite fresher results nor flash a stale error.
+        self._search_generation = 0
         # Bind per the saved network-mode preference so a profile with network mode on listens on
         # the LAN from launch (the Settings toggle still rebinds on the next server restart).
         self._server = LocalServerController(
@@ -319,6 +324,12 @@ class MainWindow(QMainWindow):
         self._didyoumean.hide()
         outer.addWidget(self._didyoumean)
 
+        # On-device instant answer card (calculator / unit / base conversion / percentage), shown
+        # above everything else for the rare query that computes. Pure local string work.
+        self._instant_card = self._build_instant_card()
+        self._instant_card.hide()
+        outer.addWidget(self._instant_card)
+
         # Optional local-AI answer card, populated after results when the feature is enabled and a
         # local model server is reachable. Hidden otherwise (and on any error).
         self._answer_card = self._build_answer_card()
@@ -396,6 +407,10 @@ class MainWindow(QMainWindow):
         # check is kicked off on first show (see showEvent), so it only runs for a real launch.
         self._update_check_started = False
         self._surface_pending_update_from_prefs(prefs)
+
+        # The window opens ready to type: an explicit focus, not just tab order, so the search
+        # field is guaranteed the caret however the platform assigns initial focus.
+        self._query_input.setFocus()
 
     def _show_onboarding(self) -> None:
         from searchmob_desktop.gui.onboarding_dialog import OnboardingDialog
@@ -525,6 +540,27 @@ class MainWindow(QMainWindow):
         self._summary_desc.setVisible(bool(box.description))
         self._summary_extract.setText(box.extract)
         self._summary_card.show()
+
+    def _build_instant_card(self) -> QFrame:
+        """The instant-answer card: the computed result large, the normalized input above it."""
+        card = QFrame()
+        card.setObjectName("instantCard")
+        card.setProperty("role", "card")
+        card.setFrameShape(QFrame.Shape.StyledPanel)
+        col = QVBoxLayout(card)
+        col.setSpacing(2)
+        self._instant_expr = QLabel()
+        self._instant_expr.setProperty("role", "muted")
+        self._instant_value = QLabel()
+        value_font = self._instant_value.font()
+        value_font.setBold(True)
+        value_font.setPointSize(value_font.pointSize() + 6)
+        self._instant_value.setFont(value_font)
+        self._instant_value.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self._instant_value.setWordWrap(True)
+        for w in (self._instant_expr, self._instant_value):
+            col.addWidget(w)
+        return card
 
     def _build_answer_card(self) -> QFrame:
         """A card showing a locally-generated, results-grounded answer with citations."""
@@ -870,6 +906,16 @@ class MainWindow(QMainWindow):
         query = self._query_input.text().strip()
         if not query:
             return
+        # A `!bang` jumps straight to that site's own search in the browser: the terms never
+        # enter the metasearch fan-out, and an unknown tag falls through to a normal search.
+        bang = resolve_bang(query)
+        if bang is not None:
+            QDesktopServices.openUrl(QUrl(bang.url))
+            return
+        # Each submit gets a new generation; a result/failure arriving from a superseded search
+        # is ignored so it can neither overwrite fresher results nor flash a stale error.
+        self._search_generation += 1
+        generation = self._search_generation
         self._last_query = query
         self._status_label.setText(tr("Searching ..."))
         self._didyoumean.hide()
@@ -877,6 +923,16 @@ class MainWindow(QMainWindow):
         self._answer_card.hide()
         self._results.clear()
         self._search_btn.setEnabled(False)
+
+        # The instant answer is pure local computation over the query text; show or hide it
+        # immediately, independent of the metasearch round-trip.
+        answer = instant_answer(query)
+        if answer is not None:
+            self._instant_expr.setText(answer.expression)
+            self._instant_value.setText(answer.result)
+            self._instant_card.show()
+        else:
+            self._instant_card.hide()
 
         prefs = self._prefs_store.load()
         engines = build_engines_from_prefs(prefs)
@@ -892,6 +948,9 @@ class MainWindow(QMainWindow):
             max_results=DEFAULT_POOL_SIZE,
             timeout_seconds=5.0,
             ranking_terms=parsed.clean_text,
+            # Engines whose index does not understand site:/OR syntax (Wikipedia, Marginalia,
+            # Mwmbl) query with the operator-free text; the constraint stays locally enforced.
+            unscoped_query=parsed.clean_text,
         )
         summary_enabled = prefs.summary_enabled
 
@@ -917,8 +976,12 @@ class MainWindow(QMainWindow):
         worker: AsyncWorker[tuple[list[SearchResult], SummaryBox | None, AggregateOutcome]] = (
             AsyncWorker(_run)
         )
-        worker.signals.finished.connect(self._on_results_ready)
-        worker.signals.failed.connect(self._on_search_failed)
+        worker.signals.finished.connect(
+            lambda payload, gen=generation: self._on_results_ready(payload, gen)
+        )
+        worker.signals.failed.connect(
+            lambda message, gen=generation: self._on_search_failed(message, gen)
+        )
         # Record the search in the (in-memory) history store if enabled. The store handles the
         # disabled-no-op case itself.
         try:
@@ -927,7 +990,11 @@ class MainWindow(QMainWindow):
             pass
         worker.start(self._pool)
 
-    def _on_results_ready(self, payload: object) -> None:
+    def _on_results_ready(self, payload: object, generation: int | None = None) -> None:
+        # A payload from a superseded search must not land: the user has already re-searched, and
+        # stale results (or a stale summary) would silently replace the fresh ones.
+        if generation is not None and generation != self._search_generation:
+            return
         self._search_btn.setEnabled(True)
         # The worker returns (results, summary, outcome). Show the summary card regardless of count.
         results: object = payload
@@ -1141,7 +1208,11 @@ class MainWindow(QMainWindow):
         self._query_input.setText(suggestion.corrected)
         self._on_submit()
 
-    def _on_search_failed(self, message: str) -> None:
+    def _on_search_failed(self, message: str, generation: int | None = None) -> None:
+        # A failure from a superseded search is not this search's failure: swallowing it stops the
+        # raw error from flashing over results the user is already looking at.
+        if generation is not None and generation != self._search_generation:
+            return
         self._search_btn.setEnabled(True)
         self._status_label.setText(tr("Search failed: {message}", message=message))
         self._body.setCurrentWidget(self._empty_state)

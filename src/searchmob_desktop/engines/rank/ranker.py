@@ -61,9 +61,12 @@ def _effective_rule(
 ) -> RankRule:
     if host is None:
         return RankRule.NORMAL
-    for key, rule in rules.domain_rules.items():
-        if domain_match(key, host):
-            return rule
+    # Most-specific rule wins, not dict-insertion order: with {"example.com": LOWER,
+    # "docs.example.com": PIN} a docs.example.com result must honor the subdomain's PIN, so the
+    # longest matching rule key (the deepest domain) is chosen.
+    matched = [(key, rule) for key, rule in rules.domain_rules.items() if domain_match(key, host)]
+    if matched:
+        return max(matched, key=lambda kv: len(kv[0]))[1]
     actions = {g.action for g in rules.goggles if goggles.matches(g.site, host)}
     if RankRule.BLOCK in actions:
         return RankRule.BLOCK

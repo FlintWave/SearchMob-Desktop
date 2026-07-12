@@ -78,8 +78,16 @@ def normalize_url(raw: str) -> str:
     except ValueError:
         return trimmed
 
+    # The dedup key treats http and https as the same page: engines disagree on the scheme for
+    # the same URL often enough that keeping both wastes a slot and splits the RRF score.
     scheme = parts.scheme.lower()
+    if scheme == "http":
+        scheme = "https"
     host = parts.netloc.lower()
+    # Fold the mobile-site subdomain into the canonical host so `en.m.wikipedia.org` and
+    # `en.wikipedia.org` (or `m.example.com` / `example.com`) merge instead of splitting the
+    # engine-consensus signal across two entries. Dedup key only; the displayed URL is kept.
+    host = host.removeprefix("m.").replace(".m.", ".")
     path = parts.path
     if path != "/" and path.endswith("/"):
         path = path[:-1]
