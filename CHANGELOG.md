@@ -5,6 +5,54 @@ All notable changes to SearchMob Desktop are documented here. The version scheme
 
 ## [Unreleased]
 
+## 26.07.02 — 2026-07-11
+
+### Added
+- **Instant answers, computed entirely on-device.** A calculator (`2+2`, `sqrt(9)*3`), unit
+  conversions (`10 km to miles`, `72 f to c`), number-base conversions (`0xff in decimal`), and
+  percentages (`15% of 80`) now show an answer card above the results, both in the app and on the
+  served pages. Date- and phone-number-shaped input (`2020-2021`, `555-1234`) is guarded so the
+  card never mis-fires, and nothing leaves the device.
+- **!bangs.** `!w`, `!gh`, `!yt`, `!osm` and friends jump straight to that site's own search,
+  resolved from a curated on-device table: the served `/search` redirects and the app opens your
+  browser directly. Bang terms never enter the metasearch fan-out, and unknown tags
+  (`!important css`) are left alone rather than hijacked.
+- **Search-as-you-type on the served pages.** A keyboard-navigable suggestions dropdown (ARIA
+  listbox) over the existing `/suggest` endpoint — debounced, same-origin only, and stale fetches
+  are aborted. Pressing `/` focuses the search box.
+- The served results page shows the **result count and elapsed time**, serves a **favicon**, and
+  the category tabs, sort selector, and did-you-mean link now **carry the active vertical and
+  sort** instead of silently resetting them. The engine-status diagnostic also renders on empty
+  result pages, exactly when it is needed most.
+
+### Security
+- **Wikipedia summary thumbnails no longer leak searches to Wikimedia.** The browser used to fetch
+  the thumbnail from Wikimedia directly, revealing your IP plus the searched entity via the image
+  filename. Thumbnails are now re-served through a loopback `/img` proxy scoped to
+  `upload.wikimedia.org` (image-only, size-capped), and the served pages' CSP tightens from
+  `img-src https:` to `img-src 'self' data:` (plus `connect-src 'self'` for the suggestions
+  dropdown).
+- **One User-Agent per logical search.** Each search's HTTP client pins one identity for its whole
+  conversation instead of re-rolling on every request (and every redirect hop); fresh searches
+  still rotate, and the UA pool is refreshed. Per-host politeness spacing is now enforced
+  process-wide (it previously did not exist on desktop), and a whole-call HTTP deadline stops a
+  byte-trickling upstream from holding a search open for minutes.
+- The OpenSearch descriptor now templates the **request's own Host** for network-mode visitors
+  (so "add search engine" works off-device) and **never embeds the access token** — the
+  descriptor is unauthenticated, and a token in it would hand access to anyone on the network who
+  can fetch the file. Network-mode browsers present the token via headers or `?token=` instead.
+
+### Fixed
+- Vertical scoping no longer poisons engines that lack `site:`/`OR` syntax (Wikipedia, Marginalia,
+  and Mwmbl now get the clean query while constraints stay locally enforced).
+- Ranking and parsing fixes: http/https and mobile-host variants dedup into one result, blank
+  titles backfill from other engines, domain rules resolve most-specific-first, day-first slash
+  dates and `after:2024-3-1` parse.
+- **A superseded search can no longer clobber a fresh one.** Results or errors arriving from an
+  earlier, slower search are ignored, so stale results never replace fresh ones and a stale
+  failure never flashes an error over results you are already reading. The search field also takes
+  focus explicitly on launch.
+
 ## 26.07.01 — 2026-07-02
 
 ### Fixed
