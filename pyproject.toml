@@ -38,7 +38,7 @@ dependencies = [
     # Upper-bounded for the macOS universal2 package: cryptography 49.0.0 ships no x86_64 macOS
     # wheel, which breaks Briefcase's Intel slice (the lock pins 48.0.0). Lift the cap once 49+
     # publishes x86_64 macOS wheels (or the macOS build drops the Intel slice).
-    "cryptography>=45,<49",
+    "cryptography>=45,<51",
     "argon2-cffi>=24",
     "platformdirs>=4",
     "keyring>=25",
