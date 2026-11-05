@@ -180,9 +180,7 @@ class WaveOverlay(QWidget):
             path.moveTo(0.0, float(height))
             for px in range(int(fill_x) + 1):
                 x = float(px)
-                phase = (_TWO_PI * frequency * (x / float(width))) + (
-                    wave_time * speed * _TWO_PI
-                )
+                phase = (_TWO_PI * frequency * (x / float(width))) + (wave_time * speed * _TWO_PI)
                 y = (height * 0.5) + (amplitude * height * 0.5 * math.sin(phase))
                 path.lineTo(x, y)
                 if px == 0:
