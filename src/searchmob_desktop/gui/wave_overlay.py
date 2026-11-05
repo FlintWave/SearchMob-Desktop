@@ -47,6 +47,7 @@ class WaveOverlay(QWidget):
         self._paths = [QPainterPath() for _ in self.LAYERS]
         self._top_paths = [QPainterPath() for _ in self.LAYERS]
         self._wipe_rect = QRectF()
+        self._clip_path = QPainterPath()
 
         self._line_edit.installEventFilter(self)
         self._line_edit.destroyed.connect(self.deleteLater)
@@ -140,6 +141,10 @@ class WaveOverlay(QWidget):
         if width <= 0 or height <= 0:
             painter.end()
             return
+
+        self._reset_path(self._clip_path)
+        self._clip_path.addRoundedRect(QRectF(rect), 10.0, 10.0)
+        painter.setClipPath(self._clip_path)
 
         palette = active_palette()
         raw = self._raw_progress()
