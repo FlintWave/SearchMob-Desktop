@@ -101,6 +101,7 @@ from searchmob_desktop.update import (
 )
 from searchmob_desktop.update_download import default_download_dir, download_and_verify
 from searchmob_desktop.version import __version__
+from searchmob_desktop.gui.wave_overlay import WaveOverlay
 
 
 def app_icon() -> QIcon:
@@ -236,6 +237,7 @@ class MainWindow(QMainWindow):
         self._query_input.setPlaceholderText(tr("Search the web privately"))
         self._query_input.setClearButtonEnabled(True)
         self._query_input.returnPressed.connect(self._on_submit)
+        self._wave_overlay = WaveOverlay(self._query_input)
         self._search_btn = QPushButton(tr("Search"))
         self._search_btn.setProperty("role", "primary")
         self._search_btn.setDefault(True)
@@ -923,6 +925,7 @@ class MainWindow(QMainWindow):
         self._answer_card.hide()
         self._results.clear()
         self._search_btn.setEnabled(False)
+        self._wave_overlay.start()
 
         # The instant answer is pure local computation over the query text; show or hide it
         # immediately, independent of the metasearch round-trip.
@@ -996,6 +999,7 @@ class MainWindow(QMainWindow):
         if generation is not None and generation != self._search_generation:
             return
         self._search_btn.setEnabled(True)
+        self._wave_overlay.stop()
         # The worker returns (results, summary, outcome). Show the summary card regardless of count.
         results: object = payload
         summary: object = None
@@ -1214,6 +1218,7 @@ class MainWindow(QMainWindow):
         if generation is not None and generation != self._search_generation:
             return
         self._search_btn.setEnabled(True)
+        self._wave_overlay.stop()
         self._status_label.setText(tr("Search failed: {message}", message=message))
         self._body.setCurrentWidget(self._empty_state)
 
