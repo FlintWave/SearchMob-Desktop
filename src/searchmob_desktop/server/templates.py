@@ -123,7 +123,7 @@ _PAGE_CSS = (
     ".topbar .langform label{color:var(--muted)}"
     ".topbar .langform select{background:transparent;color:var(--fg);"
     "border:1px solid var(--border);"
-    "border-radius:28px;padding:9px 14px;font-size:.875rem;cursor:pointer}"
+    "border-radius:28px;padding:9px 28px 9px 16px;font-size:.875rem;cursor:pointer}"
     ".topbar .langform+.settings-link,.topbar .langform+.theme-toggle{margin-inline-start:0}"
     # Owner-only "update available" banner, pinned above the top bar. Accent fill so it reads as a
     # notice without an icon set; the action is a high-contrast pill linking to the release.
